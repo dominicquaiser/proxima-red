@@ -10,7 +10,9 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = True
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS", default=["localhost", "127.0.0.1", "0.0.0.0", ".localhost"]
+)
 
 # Relaxed cookie security for plain-HTTP local development.
 SECURE_SSL_REDIRECT = False
