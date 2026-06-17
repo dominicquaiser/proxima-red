@@ -1,7 +1,7 @@
 /**
  * @fileoverview Zero-knowledge vault cryptography: PBKDF2 key derivation,
  * account-data encryption/decryption, password validation, and secure session
- * management. Extends crypto.js — load that file first.
+ * management. Extends crypto.js - load that file first.
  *
  * Wrapped in an IIFE; the primitives it builds on are read from
  * window.CryptoCore (published by crypto.js): CryptoError, bufferToBase64,

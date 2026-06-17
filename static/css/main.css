@@ -174,9 +174,7 @@
 
   --color-brick-red-whisper: rgb(204, 36, 29, 0.2);
 
-  /* Background shown while a text input/textarea is focused — a hair warmer
-     and lighter than --color-charcoal. Shared by every focusable field
-     (components.css, passwd.css, vault.css), so it lives here as one token. */
+  /* Background shown while a text input/textarea is focused */
   --color-input-focus-bg: #2d2b28;
 
   --font-primary: "IBM Plex Mono", monospace;

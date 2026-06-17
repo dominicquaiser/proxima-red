@@ -39,7 +39,7 @@ def generate_decoy_salt(user_id: str, *, purpose: str) -> str:
     call would itself be the tell: a real account returns the same salt every
     time, so a missing account that returned a different value on each request
     would stand out. Decoys are therefore derived deterministically from the
-    server secret and the ``user_id`` — stable per id across calls, distinct per
+    server secret and the ``user_id`` - stable per id across calls, distinct per
     id, and indistinguishable from a real random salt (same 32-byte length).
     HMAC keyed on ``SECRET_KEY`` keeps them unforgeable by clients.
 

@@ -88,7 +88,7 @@
 
   /**
    * Exports a CryptoKey to a Base64 string. Used for URL-fragment keys (the
-   * sharing flow) and for persisting the derived vault key in sessionStorage —
+   * sharing flow) and for persisting the derived vault key in sessionStorage -
    * auth-crypto.js re-exposes this as AuthCrypto.exportKeyToBase64.
    * @param {CryptoKey} key
    * @returns {Promise<string>}
@@ -106,7 +106,7 @@
   }
 
   /**
-   * Imports a Base64-encoded AES-256 key. The imported key is not extractable —
+   * Imports a Base64-encoded AES-256 key. The imported key is not extractable -
    * an intentional security constraint. Defaults to decrypt-only, since the
    * sharing flow only ever decrypts with an imported key; auth-crypto.js imports
    * vault keys with ["encrypt", "decrypt"] via AuthCrypto.importKeyFromBase64.

@@ -22,6 +22,33 @@ def _is_pass_subdomain(request: HttpRequest) -> bool:
     return host == (urlparse(settings.PASS_SITE_URL).hostname or "")
 
 
+def _is_main_site(request: HttpRequest) -> bool:
+    """Return True when the request arrives on the main proxima.red host.
+
+    Excludes the pass subdomain so that, in environments where both sites share
+    a host (local dev, the test suite), the request resolves to the share form
+    rather than the landing page.
+    """
+    host = request.get_host().split(":")[0]
+    main_host = urlparse(settings.SITE_URL).hostname or ""
+    return host == main_host and not _is_pass_subdomain(request)
+
+
+def index(request: HttpRequest) -> HttpResponse:
+    """Root URL: the landing page on the main proxima.red host, the share form
+    on the pass subdomain (and any other host).
+
+    Both sites are served from one Django instance over ``/``; this dispatches
+    by host the same way ``robots.txt``/``sitemap.xml`` do.
+    """
+    if _is_main_site(request):
+        return render(request, "core/index.html")
+    # Imported here to avoid a core -> passwd import at module load.
+    from apps.passwd.views import CreateShareView
+
+    return CreateShareView.as_view()(request)
+
+
 def robots_txt(request: HttpRequest) -> HttpResponse:
     if _is_pass_subdomain(request):
         lines = [

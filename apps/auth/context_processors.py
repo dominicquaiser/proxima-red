@@ -21,7 +21,7 @@ def current_user(request: HttpRequest) -> dict:
     Expose the session's ``User`` (or ``None``) to every template.
 
     The lookup is wrapped in ``SimpleLazyObject`` so the database is only hit
-    when a template actually references ``current_user`` — mirroring Django's
+    when a template actually references ``current_user`` - mirroring Django's
     own ``auth`` context processor.
     """
 

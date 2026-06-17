@@ -1,7 +1,7 @@
 /**
  * About-page hero: a sun that eases horizontally across the hero as the user
  * scrolls. Scroll/resize set a target; a rAF loop glides toward it so discrete
- * wheel steps render smoothly. Only `left` is written — `transform` belongs to
+ * wheel steps render smoothly. Only `left` is written - `transform` belongs to
  * the CSS entry animation. No-ops without the markup or with reduced motion.
  */
 (function () {

@@ -205,7 +205,7 @@ class AuthSaltsView(RatelimitGateMixin, View):
     vault salt to unlock encrypted vault data. Both are public KDF inputs, not
     secrets. Unknown users receive deterministic decoy salts (stable per user_id,
     see ``generate_decoy_salt``) so the endpoint cannot be used as an
-    account-existence oracle — neither directly nor by comparing repeated calls.
+    account-existence oracle - neither directly nor by comparing repeated calls.
     """
 
     ratelimit_redirect = "auth:signin"
@@ -310,7 +310,7 @@ class SignoutView(RatelimitGateMixin, View):
     Sign out view to destroy user session.
 
     POST-only: signing out flushes the server session, so it must be a
-    CSRF-protected state change — a GET handler would let any third-party
+    CSRF-protected state change - a GET handler would let any third-party
     page sign the user out (logout CSRF). The header "Sign Out" buttons
     submit a small POST form.
     """

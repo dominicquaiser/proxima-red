@@ -46,6 +46,36 @@ class StaticPageTests(TestCase):
     PASS_SITE_URL="https://pass.proxima.red",
     ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
 )
+class IndexViewTests(TestCase):
+    """The root URL dispatches by host: landing page vs. share form."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_main_site_renders_landing(self):
+        """GET / on the main host renders the landing page."""
+        response = self.client.get("/", HTTP_HOST="proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/index.html")
+
+    def test_pass_subdomain_renders_share_form(self):
+        """GET / on the pass subdomain renders the create-share form."""
+        response = self.client.get("/", HTTP_HOST="pass.proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/create.html")
+
+    def test_unrelated_host_renders_share_form(self):
+        """Any other host (e.g. local dev sharing one host) falls back to create."""
+        response = self.client.get("/", HTTP_HOST="testserver")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/create.html")
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+)
 class RobotsTxtTests(TestCase):
     """robots.txt serves a host-specific policy for the two sites."""
 

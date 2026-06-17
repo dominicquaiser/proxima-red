@@ -255,7 +255,7 @@ class RetrieveShareViewTests(TestCase):
         """Opening an expired share deletes that share and shows the expired page.
 
         Other expired rows are left for the out-of-band ``delete_expired`` cron
-        sweep — they are not pruned on this request path.
+        sweep - they are not pruned on this request path.
         """
         share = make_share(expires_at=timezone.now() - timedelta(minutes=1))
         other_expired = make_share(expires_at=timezone.now() - timedelta(minutes=1))

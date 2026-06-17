@@ -8,7 +8,6 @@
   gap: 24px;
 }
 
-/* Narrower than the 720px create-page card — 560px reads better here. */
 .acct-page .card {
   max-width: 560px;
 }

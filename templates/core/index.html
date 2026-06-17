@@ -1,0 +1,28 @@
+{% extends "base.html" %} {% load static %} {% block title %}Private by Design{% endblock %} {% block meta_description %}<meta
+  name="description"
+  content="proxima·red — open source, end-to-end encrypted tools for private sharing. Hosted in the EU, zero-knowledge by design, no telemetry."
+/>{% endblock %} {% block og_title %}<meta
+  property="og:title"
+  content="proxima·red — Private by Design"
+/>{% endblock %} {% block og_description %}<meta
+  property="og:description"
+  content="Open source, end-to-end encrypted tools for private sharing. Zero-knowledge by design, no telemetry."
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+<link rel="stylesheet" href="{% static 'css/index.css' %}" />
+{% endblock %} {% block content %}
+
+<div class="index-hero" id="main-content">
+  <div class="index-hero__sun-glow" aria-hidden="true"></div>
+  <div class="index-hero__sun" aria-hidden="true"></div>
+  <div class="index-hero__inner">
+    <div class="index-hero__content">
+      <h1 class="index-hero__wordmark">proxima<span class="index-hero__dot">·</span>red</h1>
+      <p class="index-hero__tagline">Private by design. Open by nature.</p>
+      <a href="{{ pass_site_url }}/" class="index-hero__tool-bar">
+        <strong>[pass·]</strong>: End-to-End-Encrypted Password Sharing Tool
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

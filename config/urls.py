@@ -12,7 +12,10 @@ handler404 = "apps.core.views.error_404"
 handler500 = "apps.core.views.error_500"
 
 urlpatterns = [
-    path("", include("apps.passwd.urls")),
+    # core comes first so its root (the landing page / host-aware dispatcher)
+    # claims "/" ahead of passwd's create view; passwd keeps "/" reversible as
+    # ``passwd:create`` and owns all other share routes.
     path("", include("apps.core.urls")),
+    path("", include("apps.passwd.urls")),
     path("auth/", include("apps.auth.urls")),
 ]

@@ -13,7 +13,7 @@ from apps.auth.services import create_user_with_auth_secret
 
 
 def generate_salt() -> str:
-    """Generate a Base64-encoded random KDF salt — a test stand-in for the client.
+    """Generate a Base64-encoded random KDF salt - a test stand-in for the client.
 
     In production these public salts are generated in the browser and POSTed to
     the server; the backend never creates them. Tests still need valid salts to

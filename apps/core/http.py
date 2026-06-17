@@ -106,7 +106,7 @@ def flash_and_redirect(
     request: HttpRequest, message: str, to: str, *, level=messages.success
 ) -> HttpResponse:
     """
-    Flash a message and redirect — the non-AJAX branch shared by many views.
+    Flash a message and redirect - the non-AJAX branch shared by many views.
 
     ``level`` is a ``django.contrib.messages`` adder (``messages.success`` by
     default, ``messages.error`` for failures). ``to`` is a URL name or path

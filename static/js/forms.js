@@ -84,7 +84,7 @@
         input._maskedValue = input.value;
         return;
       }
-      // Programmatic write (autofill, password manager) — value is the real text.
+      // Programmatic write (autofill, password manager).
       input._maskedValue = input.value;
       const pos = input.selectionStart;
       input.value = "*".repeat(input._maskedValue.length);
@@ -286,7 +286,7 @@
    * `handler` does the page-specific work (derive secrets, POST, handle the
    * response). On an unexpected throw, `onError` is invoked. The `finally` block
    * always runs `cleanup` (e.g. wiping derived secrets from hidden fields) and
-   * then restores the button — unless `keepBusy()` returns true, for a success
+   * then restores the button - unless `keepBusy()` returns true, for a success
    * path that is mid-redirect or has already hidden the form.
    *
    * @param {HTMLButtonElement|null} button
@@ -405,7 +405,7 @@
    * never see a native password field to auto-prompt on, so signin/signup call
    * this explicitly on success instead. Only Chromium implements
    * PasswordCredential; elsewhere this is a silent no-op (masking still works,
-   * just without native save-password). Never throws — credential storage is
+   * just without native save-password). Never throws - credential storage is
    * best-effort and must not break the success path.
    * @param {string} id The account identifier (the 8-digit user_id).
    * @param {string} password The account password.
