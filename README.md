@@ -2,7 +2,7 @@
   <img src="./static/icons/proxima-red-wordmark.svg" alt="proxima·red" width="320" />
 </p>
 <p align="center">
-  <a href="./LICENSE-AGPL.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-red.svg" alt="License: AGPL-3.0" /></a>
+  <a href="./LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-red.svg" alt="License: AGPL-3.0" /></a>
   <img src="https://img.shields.io/github/v/release/dominicquaiser/proxima-red?sort=semver" alt="GitHub release (latest SemVer)" />
   <img src="https://img.shields.io/badge/python-3.13-blue.svg" alt="Python 3.13" />
   <img src="https://img.shields.io/badge/django-5.2-green.svg" alt="Django 5.2" />
@@ -116,9 +116,9 @@ For security issues, do not open a public issue. See [SECURITY.md](./SECURITY.md
 
 ## License
 
-Source code is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE-AGPL.md).
+Source code is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE.md).
 
-The AGPL was chosen deliberately: anyone who modifies and deploys proxima·red over a network must publish their source changes under the same terms. The proxima·red name and visual identity are not covered by this license. Forks must use a different name. See [LICENSE.md](./LICENSE.md) for details.
+The AGPL was chosen deliberately: anyone who modifies and deploys proxima·red over a network must publish their source changes under the same terms. The proxima·red name and visual identity are not covered by this license. Forks must use a different name. See [NOTICE.md](./NOTICE.md) for details.
 
 ---
 
