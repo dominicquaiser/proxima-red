@@ -1,0 +1,6 @@
+{% load static %} {% comment %} Zero-knowledge crypto/identity layer for authenticated pages (the
+vault, account management, sign in/up) across all tools under the shared account. crypto.js must
+load before auth-crypto.js, which overrides parts of it. Pages that only do anonymous sharing need
+crypto.js alone and include it directly instead of pulling in this bundle. {% endcomment %}
+<script src="{% static 'js/crypto.js' %}" defer></script>
+<script src="{% static 'js/auth-crypto.js' %}" defer></script>

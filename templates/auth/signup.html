@@ -1,0 +1,109 @@
+{% extends "base.html" %} {% load static %} {% block title %}Sign Up{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'css/auth.css' %}" />
+<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+{% endblock %} {% block content %}
+<main id="main-content">
+  <div class="card" id="signup-card">
+    <div class="card__header">
+      <div class="card__eyebrow">Account Access</div>
+      <div class="card__title">Auth<span> /signup</span></div>
+      <div class="card__subtitle">
+        No email needed — you'll get a unique 8-digit User ID. Your password encrypts everything
+        locally, so the server never sees your secrets.
+      </div>
+    </div>
+
+    <div class="card__body">
+      <form id="signup-form" method="post" action="{% url 'auth:signup' %}">
+        {% csrf_token %} {% if form.non_field_errors %}
+        <div class="form-errors">
+          {% for error in form.non_field_errors %}
+          <p class="form-error">{{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <input type="hidden" id="id_auth_secret" name="auth_secret" />
+        <input type="hidden" id="id_auth_salt" name="auth_salt" />
+        <input type="hidden" id="id_vault_salt" name="vault_salt" />
+
+        <div class="field">
+          <label class="field__label" for="id_password">Password</label>
+          <input
+            class="field__input field__input--password"
+            type="password"
+            id="id_password"
+            placeholder="Choose a strong password"
+            autocomplete="new-password"
+            required
+          />
+          <div class="password-toggle">
+            <input type="checkbox" aria-label="Toggle password visibility" />
+            <span class="password-toggle__icon password-toggle__icon--visible"></span>
+            <span class="password-toggle__icon password-toggle__icon--hidden"></span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="id_password_confirm">Confirm Password</label>
+          <input
+            class="field__input field__input--password"
+            type="password"
+            id="id_password_confirm"
+            placeholder="Re-enter your password"
+            autocomplete="new-password"
+            required
+          />
+          <div class="password-toggle">
+            <input type="checkbox" aria-label="Toggle password confirmation visibility" />
+            <span class="password-toggle__icon password-toggle__icon--visible"></span>
+            <span class="password-toggle__icon password-toggle__icon--hidden"></span>
+          </div>
+        </div>
+
+        <p class="form-legal">
+          By creating an account you acknowledge the
+          <a href="{% url 'core:privacy' %}">Privacy Policy</a>.
+        </p>
+
+        <button type="submit" class="btn-create" id="signup-btn">Create Account</button>
+      </form>
+    </div>
+
+    <div class="auth-footer">
+      Already have an account?
+      <a href="{% url 'auth:signin' %}" class="auth-link">Sign In</a>
+    </div>
+  </div>
+
+  <div class="card" id="success-container" style="display: none">
+    <div class="card__header">
+      <div class="card__eyebrow">Account Access</div>
+      <div class="card__title">Auth<span> /created</span></div>
+      <div class="card__subtitle">Your account is ready.</div>
+    </div>
+
+    <div class="card__body">
+      <div class="res">
+        <p class="res__message">
+          <strong>Save this User ID.</strong> You'll need it to sign in, and we can't recover it for
+          you.
+        </p>
+
+        <div class="res__field">
+          <input id="user-id-display" class="res__input" readonly aria-label="Your User ID" />
+          <label id="copy-id-btn" class="res__copy" title="Copy User ID">
+            <span class="clipboard"></span>
+          </label>
+        </div>
+
+        <a href="{% url 'auth:signin' %}" class="res__btn">Continue to Sign In</a>
+      </div>
+    </div>
+  </div>
+</main>
+{% endblock %} {% block extra_js %}
+<script src="{% static 'js/auth.js' %}" defer></script>
+{% include "partials/_auth_scripts.html" %}
+<script src="{% static 'js/signup.js' %}" defer></script>
+{% endblock %}

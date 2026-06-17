@@ -1,0 +1,39 @@
+{% extends "base.html" %} {% load static %} {% block favicon %}<link
+  rel="icon"
+  type="image/svg+xml"
+  href="{% static 'icons/phosphor/key-favicon.svg' %}"
+/>{% endblock %} {% block title %}Link Expired{%endblock %} {% block meta_robots %}<meta
+  name="robots"
+  content="noindex"
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+{% endblock %} {% block content %}
+<main id="main-content">
+  <div class="card">
+    <div class="card__header">
+      <div class="card__eyebrow">Secure Password Sharing</div>
+      <div class="card__title">pass.<span> /expired</span></div>
+      <div class="card__subtitle">This link is no longer available.</div>
+    </div>
+
+    <div class="card__body">
+      <div class="res">
+        <div class="res__icon res__icon--error"></div>
+        <p class="res__message">
+          This link is no longer valid or has expired. As a security measure, the secret has been
+          <strong>permanently removed</strong>.
+        </p>
+        <a href="{% url 'passwd:create' %}" class="res__btn">Create a New Secure Link</a>
+      </div>
+    </div>
+
+    <div class="card-note">
+      <span class="card-note__tip"
+      >AES-256-GCM · zero-knowledge · open source · AGPL-3.0 licensed<span class="card-note__tooltip">└ 256-bit key + 96-bit random IV, generated with the Web Crypto API.
+  The key lives only in the link fragment (#) and is never sent to
+  the servers — it stores ciphertext and IV, nothing else.</span></span>
+    </div>
+  </div>
+</main>
+{% endblock %}

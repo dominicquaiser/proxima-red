@@ -1,0 +1,67 @@
+{% extends "base.html" %} {% load static %} {% block title %}Imprint{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+{% endblock %} {% block content %}
+<div class="page-hero">
+  <div class="page-hero__inner">
+    <div class="page-hero__eyebrow">
+      <a href="{% url 'passwd:create' %}">proxima·red</a> / Imprint
+    </div>
+    <h1 class="page-hero__title">Imprint</h1>
+    <div class="page-hero__meta">Legal notice pursuant to § 5 TMG</div>
+  </div>
+</div>
+
+<main id="main-content" class="page-main">
+  <nav class="toc" aria-label="Table of contents">
+    <div class="toc__label">// Contents</div>
+    <ul class="toc__list">
+      <li><a href="#s1">Responsible Party</a></li>
+      <li><a href="#s2">Contact</a></li>
+      <li>
+        <a href="{% url 'core:privacy' %}"><strong>Privacy Policy</strong></a>
+      </li>
+    </ul>
+  </nav>
+
+  <section class="doc-section" id="s1">
+    <div class="doc-section__header">
+      <span class="doc-section__num">01</span>
+      <h2 class="doc-section__title">Responsible Party</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Information pursuant to § 5 of the German Telemedia Act (TMG). The following natural person
+        is responsible for the operation of this website:
+      </p>
+      <div class="address-block">
+        <p>
+          Dominic M. Quaiser<br />
+          Jahnstraße 60<br />
+          09126 Chemnitz<br />
+          Germany
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s2">
+    <div class="doc-section__header">
+      <span class="doc-section__num">02</span>
+      <h2 class="doc-section__title">Contact</h2>
+    </div>
+    <div class="prose">
+      <div class="address-block">
+        <p>
+          E-Mail&nbsp;&nbsp;&nbsp;<a href="mailto:signal@proxima.red">signal@proxima.red</a><br />
+          Signal&nbsp;&nbsp;&nbsp;&nbsp;<a
+            href="https://signal.me/#eu/dominicquaiser"
+            rel="noopener noreferrer"
+            target="_blank"
+            >@dominicquaiser</a
+          >
+        </p>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

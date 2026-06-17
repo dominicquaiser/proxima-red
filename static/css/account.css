@@ -1,0 +1,195 @@
+/* Stack cards vertically in a centred column, clearing the fixed header. */
+.acct-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 80px 24px 60px;
+  gap: 24px;
+}
+
+/* Narrower than the 720px create-page card — 560px reads better here. */
+.acct-page .card {
+  max-width: 560px;
+}
+
+.acct-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.acct-info__row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-oil-slick);
+}
+
+.acct-info__row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.acct-info__key {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-taupe);
+  flex-shrink: 0;
+  width: 110px;
+}
+
+.acct-info__val {
+  font-size: 13px;
+  color: var(--color-parchment);
+  letter-spacing: 0.02em;
+}
+
+.acct-msgs {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.acct-msg {
+  padding: 10px 14px;
+  border-radius: 2px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
+.acct-msg--success {
+  background: rgba(142, 192, 124, 0.12);
+  border: 1px solid rgba(142, 192, 124, 0.3);
+  color: var(--color-sage-mint);
+}
+
+.acct-msg--error {
+  background: rgba(251, 73, 52, 0.08);
+  border: 1px solid rgba(251, 73, 52, 0.25);
+  color: var(--color-coral-red);
+}
+
+.acct-msg--info {
+  background: rgba(131, 165, 152, 0.1);
+  border: 1px solid rgba(131, 165, 152, 0.3);
+  color: var(--color-pastel-teal);
+}
+
+.form-errors {
+  background: rgba(251, 73, 52, 0.08);
+  border: 1px solid rgba(251, 73, 52, 0.25);
+  border-radius: 2px;
+  padding: 8px 12px;
+  margin-top: 8px;
+}
+
+.form-error {
+  color: var(--color-coral-red);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
+.card__header--danger {
+  background: var(--color-oil-slick);
+  border-left: 3px solid var(--color-brick-red);
+}
+
+.card__header--danger .card__eyebrow {
+  color: var(--color-driftwood);
+  font-size: 12px;
+}
+
+.card__header--danger .card__title {
+  color: var(--color-coral-red);
+}
+
+.card__header--danger .card__subtitle {
+  color: var(--color-wheat);
+}
+
+.export-desc {
+  font-size: 12px;
+  color: var(--color-putty);
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.export-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--color-parchment);
+}
+
+.export-action__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.export-action__icon {
+  width: 26px;
+  height: 26px;
+  fill: var(--color-burnt-orange);
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: transform 0.15s ease;
+}
+
+.export-action:hover .export-action__icon {
+  transform: scale(1.18);
+}
+
+.export-action:active .export-action__icon {
+  transform: scale(0.9);
+  transition-duration: 0.08s;
+}
+
+@keyframes download-arrow {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  35% {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  36% {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
+  85% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.export-action__icon.is-downloading .export-action__arrow {
+  animation: download-arrow 1.2s ease forwards;
+}
+
+/* Danger submit button */
+.btn-create--danger {
+  background: transparent;
+  border: 1px solid var(--color-brick-red);
+  color: var(--color-brick-red);
+}
+
+.btn-create--danger:hover {
+  background: var(--color-brick-red);
+  color: var(--color-alabaster);
+  transform: scale(1.01);
+}

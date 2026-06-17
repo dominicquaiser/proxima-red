@@ -1,0 +1,80 @@
+{% extends "base.html" %} {% load static %} {% block title %}Sign In{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'css/auth.css' %}" />
+{% endblock %} {% block content %}
+<main id="main-content">
+  <div class="card">
+    <div class="card__header">
+      <div class="card__eyebrow">Account Access</div>
+      <div class="card__title">Auth<span> /signin</span></div>
+      <div class="card__subtitle">
+        Enter your 8-digit User ID and password.<br />Your key is derived in your browser — the
+        password never leaves this device.
+      </div>
+    </div>
+
+    <div class="card__body">
+      <form
+        id="signin-form"
+        method="post"
+        action="{% url 'auth:signin' %}"
+        data-salts-url="{% url 'auth:salts' %}"
+      >
+        {% csrf_token %} {% if form.non_field_errors %}
+        <div class="form-errors">
+          {% for error in form.non_field_errors %}
+          <p class="form-error">{{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <input type="hidden" id="id_auth_secret" name="auth_secret" />
+
+        <div class="field">
+          <label class="field__label" for="id_user_id">User ID</label>
+          <input
+            class="field__input"
+            type="text"
+            id="id_user_id"
+            name="user_id"
+            placeholder="8-digit User ID"
+            autocomplete="off"
+            inputmode="numeric"
+            pattern="\d{4}-\d{4}"
+            maxlength="9"
+            title="Your 8-digit User ID"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="id_password">Password</label>
+          <input
+            class="field__input field__input--password"
+            type="password"
+            id="id_password"
+            placeholder="Your password"
+            autocomplete="current-password"
+            required
+          />
+          <div class="password-toggle">
+            <input type="checkbox" aria-label="Toggle password visibility" />
+            <span class="password-toggle__icon password-toggle__icon--visible"></span>
+            <span class="password-toggle__icon password-toggle__icon--hidden"></span>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-create" id="signin-btn">Sign In</button>
+      </form>
+    </div>
+
+    <div class="auth-footer">
+      Don't have an account?
+      <a href="{% url 'auth:signup' %}" class="auth-link">Sign Up</a>
+    </div>
+  </div>
+</main>
+{% endblock %} {% block extra_js %}
+<script src="{% static 'js/auth.js' %}" defer></script>
+{% include "partials/_auth_scripts.html" %}
+<script src="{% static 'js/signin.js' %}" defer></script>
+{% endblock %}

@@ -1,0 +1,147 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}{% endblock %} – proxima·red</title>
+    {% block meta_description %}
+    <meta
+      name="description"
+      content="Securely share passwords and sensitive information with end-to-end encrypted, expiring links."
+    />
+    {% endblock %} {% block meta_robots %}{% endblock %}
+    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="proxima·red" />
+    <meta
+      property="og:url"
+      content="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}"
+    />
+    {% block og_title %}
+    <meta property="og:title" content="proxima·red — Secure Password Sharing" />
+    {% endblock %} {% block og_description %}
+    <meta
+      property="og:description"
+      content="Securely share passwords and sensitive information with end-to-end encrypted, expiring links."
+    />
+    {% endblock %} {% block favicon %}
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="{% static 'icons/proxima-red-abstractmark.svg' %}"
+    />
+    {% endblock %}
+    <link rel="stylesheet" href="{% static 'css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'css/notifications.css' %}" />
+
+    <!-- With JavaScript off, drop the header out of fixed positioning so the
+         warning banner and content below are never hidden beneath it. -->
+    <noscript>
+      <style>
+        .header {
+          position: static;
+        }
+        main {
+          padding-top: 40px;
+        }
+      </style>
+    </noscript>
+
+    {% block extra_css %}{% endblock %}
+  </head>
+  <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Shown only when JavaScript is unavailable, it is required to encrypt
+         and decrypt secrets entirely in the browser. -->
+    <noscript>
+      <div class="noscript-warning" role="alert">
+        <strong>JavaScript is required.</strong> Secrets are encrypted and decrypted entirely in
+        your browser. Enable JavaScript to use the service.
+      </div>
+    </noscript>
+
+    <div id="notification-container"></div>
+
+    <header class="header">
+      <a href="{{ pass_site_url }}/" class="header__logo">
+        proxima<span class="header__logo-dot">·</span>red
+      </a>
+      <div class="header__auth">
+        <!-- Mobile-only menu mirroring the footer links (hidden at this width).
+             A native <details> disclosure that works without JS; menu.js only
+             adds Escape / outside-click niceties on top. -->
+        <details class="mobile-menu" id="mobile-menu">
+          <summary class="header__menu-toggle" aria-label="Menu">
+            <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
+              <line
+                x1="40"
+                y1="64"
+                x2="216"
+                y2="64"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="16"
+              />
+              <line
+                x1="40"
+                y1="128"
+                x2="216"
+                y2="128"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="16"
+              />
+              <line
+                x1="40"
+                y1="192"
+                x2="216"
+                y2="192"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="16"
+              />
+            </svg>
+          </summary>
+          <nav class="mobile-menu__panel" aria-label="Site menu">
+            <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
+            <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
+            <a href="https://github.com/dominicquaiser" class="mobile-menu__link">Source Code</a>
+            <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
+            <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
+            <a href="{{ site_url }}/auth/signin/" class="mobile-menu__link">Sign In</a>
+            <a href="{{ site_url }}/auth/signup/" class="mobile-menu__link">Sign Up</a>
+          </nav>
+        </details>
+        <a href="{{ site_url }}/auth/signin/" class="header__btn header__btn--outline">Sign In</a>
+        <a href="{{ site_url }}/auth/signup/" class="header__btn header__btn--solid">Sign Up</a>
+      </div>
+    </header>
+
+    {% block content %}{% endblock %}
+
+    <footer class="footer">
+      <div class="footer__links">
+        <a href="{{ pass_site_url }}/" class="footer__nav-link">Share a Password</a>
+        <a href="{{ site_url }}/about/" class="footer__nav-link">About</a>
+        <a href="https://github.com/dominicquaiser" class="footer__nav-link">Source Code</a>
+        <div class="footer__right">
+          <a href="{{ site_url }}/imprint/">Imprint</a>
+          <span class="footer__sep"></span>
+          <a href="{{ site_url }}/privacy/">Privacy Policy</a>
+        </div>
+      </div>
+    </footer>
+
+    {% include "partials/_util_scripts.html" %}
+    <script src="{% static 'js/menu.js' %}" defer></script>
+    {% block extra_js %}{% endblock %}
+  </body>
+</html>

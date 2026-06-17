@@ -1,0 +1,252 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Account · proxima·red</title>
+    <meta name="robots" content="noindex" />
+
+    <link rel="stylesheet" href="{% static 'css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'css/notifications.css' %}" />
+    <link rel="stylesheet" href="{% static 'css/components.css' %}" />
+    <link rel="stylesheet" href="{% static 'css/account.css' %}" />
+  </head>
+  <body>
+    <div id="notification-container"></div>
+
+    <header class="header">
+      <a href="{{ pass_site_url }}/" class="header__logo">
+        proxima<span class="header__logo-dot">·</span>red
+      </a>
+      <div class="header__auth">
+        <a
+          href="{{ pass_site_url }}/vault/"
+          class="header__btn header__btn--outline"
+          >Vault</a
+        >
+        <form method="post" action="{% url 'auth:signout' %}">
+          {% csrf_token %}
+          <button type="submit" class="header__btn header__btn--outline">
+            Sign Out
+          </button>
+        </form>
+      </div>
+    </header>
+
+    <main id="main-content" class="acct-page">
+      {% if messages %}
+      <div class="acct-msgs">
+        {% for message in messages %}
+        <p class="acct-msg acct-msg--{{ message.tags|default:'info' }}">
+          {{ message }}
+        </p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="card">
+        <div class="card__header">
+          <div class="card__title">Account Information</div>
+        </div>
+        <div class="card__body">
+          {# user_obj (not user/current_user): Django's auth context-processor is intentionally off, so {{ user }} would render blank — see apps/auth/context_processors.py #}
+          <div class="acct-info">
+            <div class="acct-info__row">
+              <span class="acct-info__key">User ID</span>
+              <span class="acct-info__val">{{ user_obj.user_id|slice:":4" }}-{{ user_obj.user_id|slice:"4:" }}</span>
+            </div>
+            <div class="acct-info__row">
+              <span class="acct-info__key">Member Since</span>
+              <span class="acct-info__val"
+                >{{ user_obj.created_at|date:"F j, Y" }}</span
+              >
+            </div>
+            <div class="acct-info__row">
+              <span class="acct-info__key">Last Updated</span>
+              <span class="acct-info__val"
+                >{{ user_obj.updated_at|date:"F j, Y" }}</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__header">
+          <div class="card__title">Password Configuration</div>
+        </div>
+        <div class="card__body">
+          <form
+            id="change-password-form"
+            method="post"
+            action="{% url 'auth:change_password' %}"
+            data-vault-data-url="{{ pass_site_url }}/vault-data/"
+            data-update-data-url="{{ pass_site_url }}/update-data/"
+            novalidate
+          >
+            {% csrf_token %}
+            <input type="hidden" id="id_current_auth_secret" name="current_auth_secret" />
+            <input type="hidden" id="id_new_auth_secret" name="new_auth_secret" />
+            <input type="hidden" id="id_auth_salt" name="auth_salt" />
+            <input type="hidden" id="id_vault_salt" name="vault_salt" />
+
+            <div class="field">
+              <label class="field__label" for="id_current_password"
+                >Current Password</label
+              >
+              <input
+                class="field__input field__input--password"
+                type="password"
+                id="id_current_password"
+                placeholder="Your current password"
+                required
+                autocomplete="current-password"
+              />
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="id_new_password"
+                >New Password</label
+              >
+              <input
+                class="field__input field__input--password"
+                type="password"
+                id="id_new_password"
+                placeholder="Choose a new password"
+                required
+                autocomplete="new-password"
+              />
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="id_confirm_new_password"
+                >Confirm New Password</label
+              >
+              <input
+                class="field__input field__input--password"
+                type="password"
+                id="id_confirm_new_password"
+                placeholder="Confirm your new password"
+                required
+                autocomplete="new-password"
+              />
+            </div>
+
+            {% if password_form.non_field_errors %}
+            <div class="form-errors">
+              {% for error in password_form.non_field_errors %}
+              <p class="form-error">{{ error }}</p>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            <button type="submit" class="btn-create">Update Password</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__header">
+          <div class="card__title">Your Data</div>
+        </div>
+        <div class="card__body">
+          <p class="export-desc">
+            Download a copy of all data stored about your account, including
+            your encrypted vault.
+          </p>
+          <a href="{{ pass_site_url }}/export-data/" class="export-action">
+            <span class="export-action__label">Download My Data:</span>
+            <svg
+              class="export-action__icon"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 256 256"
+              aria-hidden="true"
+            >
+              <path
+                d="M216,48V208H40V48A16,16,0,0,1,56,32H200A16,16,0,0,1,216,48Z"
+                opacity="0.2"
+              />
+              <path
+                d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Z"
+              />
+              <path
+                class="export-action__arrow"
+                d="M122.34,149.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"
+              />
+            </svg>
+          </a>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__header card__header--danger">
+          <div class="card__eyebrow">Account Deletion</div>
+          <div class="card__title">Danger Zone</div>
+          <div class="card__subtitle">
+            This action is permanent and cannot be undone. All stored encrypted
+            data will be removed.
+          </div>
+        </div>
+        <div class="card__body">
+          <form
+            id="delete-account-form"
+            method="post"
+            action="{% url 'auth:delete_account' %}"
+            novalidate
+          >
+            {% csrf_token %}
+            <input type="hidden" id="id_delete_auth_secret" name="auth_secret" />
+
+            <div class="field">
+              <label class="field__label" for="id_delete_password"
+                >Account Password</label
+              >
+              <input
+                class="field__input field__input--password"
+                type="password"
+                id="id_delete_password"
+                placeholder="Your account password"
+                required
+                autocomplete="current-password"
+              />
+            </div>
+
+            <div class="field">
+              <label
+                class="field__label"
+                for="{{ deletion_form.confirmation_text.id_for_label }}"
+                >Type "DELETE" to confirm</label
+              >
+              {{ deletion_form.confirmation_text }} {% if deletion_form.confirmation_text.errors %}
+              <div class="form-errors">
+                {% for error in deletion_form.confirmation_text.errors %}
+                <p class="form-error">{{ error }}</p>
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+
+            {% if deletion_form.non_field_errors %}
+            <div class="form-errors">
+              {% for error in deletion_form.non_field_errors %}
+              <p class="form-error">{{ error }}</p>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            <button type="submit" class="btn-create btn-create--danger">
+              Delete My Account
+            </button>
+          </form>
+        </div>
+      </div>
+    </main>
+
+    {{ auth_data_json|json_script:"auth-data" }}
+
+    {% include "partials/_util_scripts.html" %}
+    {% include "partials/_auth_scripts.html" %}
+    <script src="{% static 'js/account.js' %}" defer></script>
+  </body>
+</html>

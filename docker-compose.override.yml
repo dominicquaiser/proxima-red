@@ -1,0 +1,20 @@
+# Development overrides.
+#
+# Merged automatically by `docker compose up`.
+#
+# Runs Django's autoreloading dev server, bind-mounts the source for live edits,
+# and publishes port 8000. The db service (from `docker-compose.yml`) provides
+# Postgres parity with production; DATABASE_URL in .env points web at it.
+
+services:
+  web:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      # Dev server serves static directly from STATICFILES_DIRS; skip collectstatic
+      # so the bind-mounted source tree stays clean.
+      SKIP_COLLECTSTATIC: "1"
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"

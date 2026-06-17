@@ -1,0 +1,307 @@
+{% extends "base.html" %} {% load static %} {% block title %}About{% endblock %} {% block meta_description %}<meta
+  name="description"
+  content="Open source web tools for private, secure sharing. End-to-end encrypted, zero-knowledge architecture, hosted in the EU, no telemetry."
+/>{% endblock %} {% block og_title %}<meta property="og:title" content="About — proxima·red" />{% endblock %} {% block og_description %}<meta
+  property="og:description"
+  content="Open source web tools for private, secure sharing. End-to-end encrypted, zero-knowledge architecture, hosted in the EU, no telemetry."
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+{% endblock %} {% block content %}
+
+<div class="about-hero">
+  <div class="about-hero__sun-glow" aria-hidden="true"></div>
+  <div class="about-hero__sun" aria-hidden="true"></div>
+  <div class="about-hero__inner">
+    <div class="about-hero__content">
+      <div class="about-hero__eyebrow">
+        <a href="{% url 'passwd:create' %}">proxima·red</a> / About
+      </div>
+      <h1 class="about-hero__title">About</h1>
+      <p class="about-hero__tagline">
+        Private by design.<br />
+        Open by nature.
+      </p>
+    </div>
+  </div>
+</div>
+
+<main id="main-content" class="about-main">
+  <nav class="toc" aria-label="Table of contents">
+    <div class="toc__label">// Contents</div>
+    <ul class="toc__list">
+      <li><a href="#s1">What This Is</a></li>
+      <li><a href="#s2">How the Tools Work</a></li>
+      <li><a href="#s3">The Tools</a></li>
+      <li><a href="#s4">The Name</a></li>
+      <li><a href="#s5">Accounts</a></li>
+      <li><a href="#s6">What Will Not Be Built</a></li>
+      <li><a href="#s7">Source &amp; License</a></li>
+      <li><a href="#s8">Contact</a></li>
+    </ul>
+  </nav>
+
+  <section class="doc-section" id="s1">
+    <div class="doc-section__header">
+      <span class="doc-section__num">01</span>
+      <h2 class="doc-section__title">What This Is</h2>
+    </div>
+    <div class="prose">
+      <p>
+        proxima·red is a small set of open source web tools for secure sharing and writing. It is
+        maintained by a single developer and hosted on EU infrastructure. It is not a company and
+        not building toward anything commercial.
+      </p>
+      <p>
+        The source code is public and the architecture is documented so that anyone who wants to
+        verify can. That verification is possible but not automatic: using any web-based tool
+        requires some degree of trust. Publishing the source makes scrutiny possible. It does not
+        remove the need for trust entirely.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s2">
+    <div class="doc-section__header">
+      <span class="doc-section__num">02</span>
+      <h2 class="doc-section__title">How the Tools Work</h2>
+    </div>
+    <div class="prose">
+      <p>
+        The encrypted tools are built around a zero-knowledge model: the server stores only what it
+        cannot avoid storing, and never in a form it can read.
+      </p>
+    </div>
+
+    <div class="zk-flow">
+      <div class="zk-step">
+        <div class="zk-step__num">1</div>
+        <div class="zk-step__body">
+          <div class="zk-step__heading">Key generation</div>
+          <div class="zk-step__desc">
+            Your browser generates a random
+            <strong>AES-256 encryption key</strong>
+            using the Web Crypto API. It never leaves your device.
+          </div>
+        </div>
+      </div>
+      <div class="zk-step">
+        <div class="zk-step__num">2</div>
+        <div class="zk-step__body">
+          <div class="zk-step__heading">Local encryption</div>
+          <div class="zk-step__desc">
+            Your content is encrypted entirely in your browser before anything is sent. The server
+            receives only <strong>ciphertext</strong> — the encrypted result it cannot read.
+          </div>
+        </div>
+      </div>
+      <div class="zk-step">
+        <div class="zk-step__num">3</div>
+        <div class="zk-step__body">
+          <div class="zk-step__heading">Link construction</div>
+          <div class="zk-step__desc">
+            The shareable link contains the record ID in the URL path and the key in the
+            <strong>URL fragment</strong> (the part after #). Fragments are never sent to the server
+            as part of an HTTP request.
+          </div>
+        </div>
+      </div>
+      <div class="zk-step">
+        <div class="zk-step__num">4</div>
+        <div class="zk-step__body">
+          <div class="zk-step__heading">Recipient decrypts locally</div>
+          <div class="zk-step__desc">
+            Opening the link fetches the ciphertext by ID, then decrypts it using the key from the
+            fragment. The decrypted content
+            <strong>never touches the server</strong>.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="prose">
+      <p>
+        The practical consequence: even if the server were compromised and its entire database
+        extracted, your content would remain unreadable. There is no key to steal because the server
+        never had one.
+      </p>
+      <p>
+        Not all tools are end-to-end encrypted. Where a tool operates without E2EE, that will be
+        clearly stated in the interface — not buried in a tooltip or a privacy policy.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s3">
+    <div class="doc-section__header">
+      <span class="doc-section__num">03</span>
+      <h2 class="doc-section__title">The Tools</h2>
+    </div>
+
+    <div class="tool-cards">
+      <div class="tool-card">
+        <span class="tool-card__status tool-card__status--live">Active</span>
+        <div class="tool-card__name">[pass·]</div>
+        <div class="tool-card__domain">pass.proxima.red</div>
+        <p class="tool-card__desc">
+          Zero-knowledge password sharing. Enter a password, receive a link. The password is
+          encrypted in your browser before it leaves. The recipient decrypts it in their browser
+          when they open the link. Shares expire by time, by access count, or both. No account
+          required.
+        </p>
+        <span class="tool-card__icon tool-card__icon--key" aria-hidden="true"></span>
+      </div>
+
+      <div class="tool-card">
+        <span class="tool-card__status tool-card__status--next">Up next</span>
+        <div class="tool-card__name">[note·]</div>
+        <div class="tool-card__domain">note.proxima.red</div>
+        <p class="tool-card__desc">
+          Encrypted note sharing. A browser-based editor for writing and sharing notes and
+          documents. Content is encrypted before it leaves your browser, using the same model as
+          [pass·]. Sharing is optional — the editor works locally without generating a link.
+        </p>
+        <span class="tool-card__icon tool-card__icon--note" aria-hidden="true"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s4">
+    <div class="doc-section__header">
+      <span class="doc-section__num">04</span>
+      <h2 class="doc-section__title">The Name</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Proxima Centauri is the nearest star to our solar system — a red dwarf sitting about 4.2
+        light-years away, part of the Alpha Centauri triple system alongside its two much brighter
+        companions. It is the closest star to Earth after the sun, yet invisible to the naked eye.
+      </p>
+      <p>
+        The name proxima·red takes both halves of that: <em>proxima</em> from Proxima Centauri,
+        <em>red</em> from its classification as a red dwarf. The dot in the middle mirrors the
+        structure of the domain with its top level domain while giving the name a small typographic
+        identity of its own; and styled in red, it doubles as a small representation of the red
+        dwarf.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s5">
+    <div class="doc-section__header">
+      <span class="doc-section__num">05</span>
+      <h2 class="doc-section__title">Accounts</h2>
+    </div>
+    <div class="prose">
+      <p>
+        All tools are usable without an account. An account becomes useful for managing shared
+        content across sessions — keeping track of previously shared passwords, returning to a note
+        before sharing it, or maintaining an overview of what you have shared and when.
+      </p>
+      <p>
+        Sign-up requires no email address. Each account is assigned a randomly generated eight-digit
+        ID; only that ID and the account creation date are stored unencrypted. Everything else is
+        encrypted using a key derived from your password via PBKDF2. The server holds ciphertext and
+        nothing more.
+      </p>
+      <p>
+        A forgotten password means that data is unrecoverable. There is nothing to recover it with.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s6">
+    <div class="doc-section__header">
+      <span class="doc-section__num">06</span>
+      <h2 class="doc-section__title">What Will Not Be Built</h2>
+    </div>
+    <div class="prose">
+      <p>Some decisions are made once and not revisited.</p>
+    </div>
+    <ul class="no-list">
+      <li>
+        <span class="no-list__marker">—</span>
+        <span class="no-list__text">
+          <strong>No telemetry or analytics</strong>
+          Not anonymised, not aggregated, not opt-out. There is no tracking infrastructure and there
+          will not be one.
+        </span>
+      </li>
+      <li>
+        <span class="no-list__marker">—</span>
+        <span class="no-list__text">
+          <strong>No weakening of encryption</strong>
+          No features that weaken or bypass encryption without an explicit, informed choice by the
+          person using the tool. If encryption can be turned off, that state will be visible and
+          unambiguous.
+        </span>
+      </li>
+      <li>
+        <span class="no-list__marker">—</span>
+        <span class="no-list__text">
+          <strong>No third-party data integrations</strong>
+          No integrations with advertising networks, data brokers, or third-party analytics
+          platforms.
+        </span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="doc-section" id="s7">
+    <div class="doc-section__header">
+      <span class="doc-section__num">07</span>
+      <h2 class="doc-section__title">Source &amp; License</h2>
+    </div>
+    <div class="prose">
+      <div class="license-tag">
+        <span class="license-tag__name">AGPL-3.0</span>
+        <span class="license-tag__sep"></span>
+        <span class="license-tag__desc">GNU Affero General Public License v3.0</span>
+      </div>
+      <p>
+        All proxima·red tools are licensed under the AGPL-3.0. The AGPL was chosen for a specific
+        reason: unlike the standard GPL, it requires anyone who modifies and deploys a proxima·red
+        tool over a network to publish their source changes under the same terms.
+      </p>
+      <p>
+        Anyone is free to fork and deploy a proxima·red tool. Forks must use a different name and
+        visual identity. The AGPL licenses the code, not the proxima·red name. This protects users:
+        if you encounter a tool presenting itself as proxima·red, it is the original.
+      </p>
+      <p>
+        The source code is
+        <a href="https://github.com/dominicquaiser" target="_blank" rel="noopener noreferrer"
+          >available on GitHub</a
+        >. Bug reports and contributions are welcome via GitHub Issues.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s8">
+    <div class="doc-section__header">
+      <span class="doc-section__num">08</span>
+      <h2 class="doc-section__title">Contact</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Questions, support, or security reports:
+        <a href="mailto:signal@proxima.red">signal@proxima.red</a>
+      </p>
+      <p>
+        For feature suggestions or to get involved with the project, open an issue or start a
+        discussion on
+        <a href="https://github.com/dominicquaiser" target="_blank" rel="noopener noreferrer"
+          >GitHub</a
+        >.
+      </p>
+      <p>
+        If you find these tools useful and want to support the project:
+        <a href="https://ko-fi.com/dominicquaiser" target="_blank" rel="noopener noreferrer"
+          >Ko-fi</a
+        >.
+      </p>
+    </div>
+  </section>
+</main>
+{% endblock %} {% block extra_js %}
+<script src="{% static 'js/about-hero.js' %}" defer></script>
+{% endblock %}

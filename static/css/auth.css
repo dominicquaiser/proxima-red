@@ -1,0 +1,92 @@
+/* The auth forms are short, so they read better narrower than the 720px
+   create-page card (max-width set in components.css). */
+.card {
+  max-width: 440px;
+}
+
+.btn-create:disabled {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+
+#signin-form .field:last-of-type {
+  margin-bottom: 28px;
+}
+
+/* Non-field errors (e.g. "invalid credentials"), rendered above the fields. */
+.form-errors {
+  background: var(--color-coral-red-trace);
+  border: 1px solid var(--color-coral-red-ghost);
+  border-radius: 2px;
+  padding: 10px 12px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.form-error {
+  color: var(--color-coral-red);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
+/* Inline per-field errors injected by signup-logic.js. */
+.field__input.error {
+  border-color: var(--color-coral-red);
+}
+
+.field-error {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--color-coral-red);
+}
+
+#user-id-display {
+  padding-left: 44px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  color: var(--color-parchment);
+}
+
+.form-legal {
+  margin-top: 16px;
+  margin-bottom: 12px;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--color-putty);
+}
+
+.form-legal a {
+  color: var(--color-clay);
+  text-decoration: underline;
+}
+
+.form-legal a:hover {
+  color: var(--color-tangerine);
+}
+
+.auth-footer {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--color-putty);
+}
+
+.auth-link {
+  color: var(--color-burnt-orange);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s;
+}
+
+.auth-link:hover,
+.auth-link:focus {
+  color: var(--color-tangerine);
+  text-decoration: underline;
+}

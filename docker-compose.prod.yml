@@ -1,0 +1,83 @@
+# Production overrides.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# web runs gunicorn (the image's default CMD) and is reachable only on the
+# internal network; nginx terminates TLS and is the only service publishing ports.
+
+services:
+  web:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # No published ports
+    # nginx proxies to web:8000 over the internal network.
+
+  redis:
+    image: redis:7-alpine
+    # Shared cache for django-ratelimit counters across Gunicorn workers.
+    # Intentionally ephemeral (no persistence/volume): if Redis restarts, the
+    # rate-limit counters simply reset, which is acceptable. Sessions live in
+    # Postgres, so nothing durable depends on Redis.
+    command: redis-server --save "" --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - web
+    environment:
+      DOMAIN: ${DOMAIN}
+      # Only substitute ${DOMAIN} in the template; leave nginx's own $variables intact.
+      NGINX_ENVSUBST_FILTER: DOMAIN
+    volumes:
+      - ./deployment/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - static_volume:/app/staticfiles:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    # Attempt renewal twice a day; certbot only acts when a cert is near expiry.
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done'
+    restart: unless-stopped
+
+  cron:
+    image: proximared:latest
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+    depends_on:
+      db:
+        condition: service_healthy
+    # Bypass the web entrypoint (no migrate/collectstatic); just run cleanup loops.
+    # Expired share ciphertext is pruned every minute; expired DB-backed
+    # sessions are pruned hourly (clearsessions is a single indexed DELETE on
+    # expire_date, so an hourly sweep is cheap and bounds how long expired
+    # session rows — which Django already refuses to authenticate — linger).
+    entrypoint: []
+    command: sh -c 'while :; do python manage.py delete_expired --verbosity 0; sleep 60; done & while :; do python manage.py clearsessions; sleep 3600; done & wait'
+    restart: unless-stopped
+
+volumes:
+  letsencrypt:
+  certbot_webroot:

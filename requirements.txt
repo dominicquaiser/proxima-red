@@ -1,0 +1,6 @@
+# Dependencies are organized under requirements/ (split by environment).
+# This shim installs the development set for convenience: `pip install -r requirements.txt`.
+#   - requirements/base.txt         common to all environments
+#   - requirements/development.txt  local development
+#   - requirements/production.txt   production (gunicorn, psycopg)
+-r requirements/development.txt

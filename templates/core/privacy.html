@@ -1,0 +1,645 @@
+{% extends "base.html" %} {% load static %} {% block title %}Privacy Policy{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+{% endblock %} {% block content %}
+<div class="page-hero">
+  <div class="page-hero__inner">
+    <div class="page-hero__eyebrow">
+      <a href="{% url 'passwd:create' %}">proxima·red</a> / Privacy Policy
+    </div>
+    <h1 class="page-hero__title">Privacy Policy</h1>
+    <div class="page-hero__meta">
+      Regulation (EU) 2016/679 (GDPR) · § 25 TDDDG · Last updated: June 2026
+    </div>
+  </div>
+</div>
+
+<main id="main-content" class="page-main">
+  <nav class="toc" aria-label="Table of contents">
+    <div class="toc__label">// Contents</div>
+    <ul class="toc__list">
+      <li><a href="#s1">Controller</a></li>
+      <li><a href="#s2">Scope</a></li>
+      <li><a href="#s3">Data Processed</a></li>
+      <li><a href="#s4">Cookies &amp; § 25 TDDDG</a></li>
+      <li><a href="#s5">Third-Party Processors</a></li>
+      <li><a href="#s6">International Data Transfers</a></li>
+      <li><a href="#s7">Data Retention Summary</a></li>
+      <li><a href="#s8">Your Rights</a></li>
+      <li><a href="#s9">Right to Lodge a Complaint</a></li>
+      <li><a href="#s10">Changes to This Policy</a></li>
+    </ul>
+  </nav>
+
+  <div class="highlight-box">
+    <p>
+      <strong>Overview:</strong> proxima·red is a zero-knowledge password-sharing service. All
+      secrets are encrypted in your browser using AES-256-GCM before any data leaves your device.
+      The server receives and stores only ciphertext — the encryption key is either embedded in the
+      URL fragment (anonymous sharing) or derived entirely client-side and never transmitted
+      (authenticated vault). No analytics tools, tracking pixels, or third-party scripts are
+      embedded. All assets (fonts, scripts, styles) are served from this server. No request is made
+      to any external service.
+    </p>
+  </div>
+
+  <section class="doc-section" id="s1">
+    <div class="doc-section__header">
+      <span class="doc-section__num">01</span>
+      <h2 class="doc-section__title">Controller</h2>
+    </div>
+    <div class="prose">
+      <p>The controller within the meaning of Art. 4(7) GDPR is:</p>
+      <div class="address-block">
+        <p>
+          Dominic M. Quaiser<br />
+          Jahnstraße 60<br />
+          09126 Chemnitz<br />
+          Germany<br /><br />
+          E-Mail&nbsp;&nbsp;&nbsp;<a href="mailto:signal@proxima.red">signal@proxima.red</a><br />
+        </p>
+      </div>
+      <p>
+        There is no designated Data Protection Officer (DPO). The controller is directly reachable
+        via the contact details above.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s2">
+    <div class="doc-section__header">
+      <span class="doc-section__num">02</span>
+      <h2 class="doc-section__title">Scope</h2>
+    </div>
+    <div class="prose">
+      <p>
+        This policy covers all processing carried out in connection with the website proxima·red and
+        its associated services, including anonymous password sharing, registered user accounts, and
+        the authenticated vault.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s3">
+    <div class="doc-section__header">
+      <span class="doc-section__num">03</span>
+      <h2 class="doc-section__title">Data Processed</h2>
+    </div>
+    <div class="prose">
+      <h3>3.1 Server Access Logs</h3>
+      <p>
+        <strong>What:</strong> When any page is loaded, the web server automatically records
+        standard HTTP access log data. This typically includes:
+      </p>
+      <ul>
+        <li>IP address of the requesting device</li>
+        <li>Date and time of the request (timestamp)</li>
+        <li>HTTP method, requested URL path, and protocol version</li>
+        <li>HTTP response status code and bytes transferred</li>
+        <li>Referrer URL (if transmitted by the browser)</li>
+        <li>User-Agent string (browser name, version, operating system)</li>
+      </ul>
+      <p>
+        <strong>Who processes it:</strong> The hosting provider (Hostiko, UA), acting as a
+        processor. No data processing agreement is currently in place; see
+        <a href="#s5">Section 05</a>. The controller does not have direct access to raw log files.
+      </p>
+      <p>
+        <strong>Purpose:</strong> Ensuring stable and secure operation — detecting attacks, abuse
+        prevention, and fault diagnosis.
+      </p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(f) GDPR — legitimate interests. The legitimate
+        interest is the secure and reliable provision of the service.
+      </p>
+      <p>
+        <strong>Retention:</strong> Log files are retained for a short period (up to 7 days) and
+        then automatically deleted by the hosting provider. The controller does not retain copies.
+      </p>
+
+      <h3>3.2 Session Cookie — Authenticated Users Only</h3>
+      <p>
+        <strong>What:</strong> Upon successful sign-in, Django sets a single session cookie named
+        <code>sessionid</code>. This cookie contains an opaque random token that links the browser
+        to the server-side session record. The session record stores:
+      </p>
+      <ul>
+        <li>The authenticated user's internal numeric user ID</li>
+        <li>A flag confirming successful authentication</li>
+      </ul>
+      <p>No personal name, e-mail address, or plaintext secret is stored in the session.</p>
+      <p>
+        <strong>Attributes:</strong> HttpOnly · Secure (HTTPS) · SameSite=Lax · max-age 30 minutes.
+        The cookie is not set for visitors who do not sign in.
+      </p>
+      <p>
+        <strong>Purpose:</strong> Maintaining the authenticated session so the user can access the
+        vault without re-authenticating on every request.
+      </p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(b) GDPR — processing is necessary for the
+        performance of the service contract with the user (providing authenticated access to the
+        vault). Under § 25(2) Nr. 2 TDDDG, no separate consent is required for cookies that are
+        strictly necessary for a service explicitly requested by the user; a session authentication
+        cookie meets this criterion.
+      </p>
+      <p>
+        <strong>Retention:</strong> The session is automatically invalidated after 30 minutes of
+        inactivity. The user can also invalidate it explicitly by signing out. Expired sessions are
+        purged from the database by Django's session cleanup mechanism.
+      </p>
+
+      <h3>3.3 CSRF Token Cookie</h3>
+      <p>
+        <strong>What:</strong> Django sets a CSRF cookie (<code>csrftoken</code>) on all pages that
+        include forms. It holds a random token used to verify that state-changing POST requests
+        originate from this site and not a third-party page (cross-site request forgery protection).
+      </p>
+      <p>
+        <strong>Attributes:</strong> Not HttpOnly (must be readable by the JavaScript AJAX client) ·
+        Secure (HTTPS) · SameSite=Lax.
+      </p>
+      <p>
+        <strong>Purpose:</strong> Security mechanism required by the web framework to prevent CSRF
+        attacks.
+      </p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(f) GDPR — legitimate interests (technical security
+        of the service). Under § 25(2) Nr. 2 TDDDG, no consent is required; the CSRF cookie is
+        strictly necessary for the secure operation of a service explicitly requested by the user.
+      </p>
+      <p>
+        <strong>Retention:</strong> Session-scoped; deleted when the browser session ends or on
+        sign-out.
+      </p>
+
+      <h3>3.4 Anonymous Password Shares</h3>
+      <p>
+        <strong>What:</strong> When a visitor creates a password share without an account, the
+        server stores in the database:
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>id</code></td>
+            <td>UUID (randomly generated, not linked to any person)</td>
+          </tr>
+          <tr>
+            <td><code>encrypted_data</code></td>
+            <td>AES-256-GCM ciphertext of the secret (Base64)</td>
+          </tr>
+          <tr>
+            <td><code>iv</code></td>
+            <td>Initialization vector used for encryption (Base64)</td>
+          </tr>
+          <tr>
+            <td><code>encrypted_title</code></td>
+            <td>AES-256-GCM ciphertext of the optional title (Base64), if provided</td>
+          </tr>
+          <tr>
+            <td><code>title_iv</code></td>
+            <td>IV for the title ciphertext (Base64), if provided</td>
+          </tr>
+          <tr>
+            <td><code>created_at</code></td>
+            <td>Timestamp of creation</td>
+          </tr>
+          <tr>
+            <td><code>expires_at</code></td>
+            <td>Expiry timestamp (1 hour · 1 day · 1 week · 4 weeks — chosen by the creator)</td>
+          </tr>
+          <tr>
+            <td><code>access_count</code></td>
+            <td>Number of times the share was retrieved</td>
+          </tr>
+          <tr>
+            <td><code>created_by</code></td>
+            <td>NULL (no account linked)</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The encryption key is never transmitted to the server. It is embedded solely in the URL
+        fragment (<code>#</code>), which browsers do not include in HTTP requests.
+      </p>
+      <p><strong>Purpose:</strong> Providing the password-sharing service.</p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(f) GDPR — legitimate interests. The legitimate
+        interest is providing the password-sharing service as explicitly requested by the user. No
+        account or contract exists for anonymous shares; the user initiates the transaction
+        voluntarily and the server processes only what is technically necessary to fulfil that
+        specific request.
+      </p>
+      <p>
+        <strong>Retention:</strong> Each share is automatically deleted when its expiry timestamp is
+        reached. A background job (<code>delete_expired</code>) runs every minute in production. A
+        share is also deleted immediately when it is accessed after its expiry time. The maximum
+        retention period is 4 weeks.
+      </p>
+
+      <h3>3.5 Registered User Accounts</h3>
+      <p><strong>What:</strong> When a visitor creates an account, the server stores:</p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>user_id</code></td>
+            <td>8-digit numeric identifier, randomly generated</td>
+          </tr>
+          <tr>
+            <td><code>password_hash</code></td>
+            <td>Argon2 hash of a client-derived authentication secret</td>
+          </tr>
+          <tr>
+            <td><code>auth_salt</code></td>
+            <td>Public KDF salt for the client-side auth secret derivation (Base64)</td>
+          </tr>
+          <tr>
+            <td><code>vault_salt</code></td>
+            <td>Public KDF salt for the client-side vault key derivation (Base64)</td>
+          </tr>
+          <tr>
+            <td><code>created_at</code></td>
+            <td>Account creation timestamp</td>
+          </tr>
+          <tr>
+            <td><code>updated_at</code></td>
+            <td>Timestamp of last account modification</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        <strong>There is no name, e-mail address, or any other identifying attribute.</strong> The
+        user's account password is never transmitted to or stored by the server. The browser derives
+        a separate authentication secret (via PBKDF2-SHA256, 100,000 iterations, domain-separated)
+        from the password and the <code>auth_salt</code>; only this derived secret is sent during
+        sign-in. The server stores its Argon2 hash. Possession of the hash does not allow the server
+        to derive the vault key.
+      </p>
+      <p>
+        The <code>auth_salt</code> and <code>vault_salt</code> are public inputs published by the
+        <code>/auth/salts/</code> endpoint. For unknown user IDs, deterministic decoy salts are
+        returned so that the endpoint is not an account-existence oracle.
+      </p>
+      <p>
+        <strong>Purpose:</strong> Providing authenticated access to the vault and associating
+        password shares with an account for management purposes.
+      </p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(b) GDPR — processing is necessary for the
+        performance of the service contract.
+      </p>
+      <p>
+        <strong>Retention:</strong> Account data is retained for as long as the account exists.
+        Users may request deletion of their account (see <a href="#s8">Section 08</a>). When an
+        account is deleted, all associated <code>SharedPassword</code> records and the encrypted
+        vault blob are cascade-deleted.
+      </p>
+
+      <h3>3.6 Encrypted Vault Blob (ServiceData)</h3>
+      <p>
+        <strong>What:</strong> Authenticated users who save data to the vault cause the server to
+        store a <code>ServiceData</code> record:
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>user</code></td>
+            <td>Foreign key to the <code>User</code> record</td>
+          </tr>
+          <tr>
+            <td><code>encrypted_data</code></td>
+            <td>AES-256-GCM ciphertext of the user's vault contents</td>
+          </tr>
+          <tr>
+            <td><code>iv</code></td>
+            <td>12-byte initialization vector for the encryption (binary)</td>
+          </tr>
+          <tr>
+            <td><code>created_at</code> · <code>updated_at</code></td>
+            <td>Timestamps</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The vault is encrypted with the vault key, which is derived entirely in the browser from the
+        account password and the <code>vault_salt</code>. The vault key is stored only in
+        <code>sessionStorage</code> for the duration of the browser session; it is never sent to the
+        server. The server stores only opaque ciphertext.
+      </p>
+      <p><strong>Purpose:</strong> Persisting the user's vault across devices and sessions.</p>
+      <p><strong>Legal basis:</strong> Art. 6(1)(b) GDPR — performance of the service contract.</p>
+      <p>
+        <strong>Retention:</strong> As long as the account exists. Cascade-deleted with the account.
+      </p>
+
+      <h3>3.7 Rate-Limiting Counters</h3>
+      <p>
+        <strong>What:</strong> To prevent abuse, the service enforces per-IP rate limits on
+        sensitive endpoints (share creation: 60/h; share retrieval: 120/h; vault access: 100/h;
+        vault updates: 20/min; data export: 10/h). Rate-limit counters are keyed on the client IP
+        address and stored in a shared in-memory cache (Redis in production). The IP address used
+        for rate limiting is derived from the <code>X-Forwarded-For</code> header (resolved for the
+        configured number of trusted proxies).
+      </p>
+      <p><strong>Purpose:</strong> Abuse prevention and protection of service availability.</p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(f) GDPR — legitimate interests (service security and
+        availability). The counters are ephemeral; they hold no content associated with a user's
+        identity beyond the IP address and a hit count.
+      </p>
+      <p>
+        <strong>Retention:</strong> Counters expire automatically in accordance with the rate-limit
+        window (minutes to hours). No persistent log of IP addresses is maintained by the
+        application itself.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s4">
+    <div class="doc-section__header">
+      <span class="doc-section__num">04</span>
+      <h2 class="doc-section__title">Cookies and § 25 TDDDG</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Under § 25(1) TDDDG, storing information on a user's device or accessing information already
+        stored requires the user's consent unless an exception applies. Under § 25(2) Nr. 2 TDDDG,
+        consent is <strong>not</strong> required if the storage or access is strictly necessary for
+        the provision of a telemedia service explicitly requested by the user.
+      </p>
+      <p>proxima·red sets exactly two cookies:</p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Cookie</th>
+            <th>Purpose</th>
+            <th>Necessity</th>
+            <th>Consent required?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>sessionid</code></td>
+            <td>Authentication session</td>
+            <td>Strictly necessary</td>
+            <td><span class="tag tag--no">No</span></td>
+          </tr>
+          <tr>
+            <td><code>csrftoken</code></td>
+            <td>CSRF protection</td>
+            <td>Strictly necessary</td>
+            <td><span class="tag tag--no">No</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        No marketing, analytics, profiling, or tracking cookies are set. No consent banner is shown
+        because no consent-requiring storage operations occur.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s5">
+    <div class="doc-section__header">
+      <span class="doc-section__num">05</span>
+      <h2 class="doc-section__title">Third-Party Processors (Art. 28 GDPR)</h2>
+    </div>
+    <div class="prose">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Processor</th>
+            <th>Role</th>
+            <th>Data involved</th>
+            <th>Safeguard</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Hostiko (UA)</td>
+            <td>Infrastructure, server, access logs</td>
+            <td>IP address, request metadata</td>
+            <td>
+              No DPA currently in place. A DPA has been requested; the provider has confirmed
+              EU-only data residency and added DPA support to their roadmap.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        No other third-party processors receive personal data. No third-party scripts, fonts,
+        analytics services, CDNs, or social media integrations are used.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s6">
+    <div class="doc-section__header">
+      <span class="doc-section__num">06</span>
+      <h2 class="doc-section__title">International Data Transfers</h2>
+    </div>
+    <div class="prose">
+      <p>
+        The hosting provider has confirmed that server infrastructure and all associated data
+        processing is located within the EU (Warsaw, Poland). No formal transfer mechanism has been
+        established with third countries, as no such transfer is understood to take place.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s7">
+    <div class="doc-section__header">
+      <span class="doc-section__num">07</span>
+      <h2 class="doc-section__title">Data Retention Summary</h2>
+    </div>
+    <div class="prose">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Retention period</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Server access logs</td>
+            <td>Up to 7 days (deleted by hosting provider)</td>
+          </tr>
+          <tr>
+            <td>Session cookie / session record</td>
+            <td>30 minutes inactivity timeout; deleted on sign-out</td>
+          </tr>
+          <tr>
+            <td>CSRF cookie</td>
+            <td>Browser session</td>
+          </tr>
+          <tr>
+            <td>Anonymous password shares</td>
+            <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
+          </tr>
+          <tr>
+            <td>User account data</td>
+            <td>Until account deletion</td>
+          </tr>
+          <tr>
+            <td>Encrypted vault blob</td>
+            <td>Until account deletion</td>
+          </tr>
+          <tr>
+            <td>Rate-limit counters</td>
+            <td>Minutes to hours (automatic expiry)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s8">
+    <div class="doc-section__header">
+      <span class="doc-section__num">08</span>
+      <h2 class="doc-section__title">Your Rights</h2>
+    </div>
+    <div class="prose">
+      <p>
+        Under the GDPR you have the following rights. To exercise any of them, contact
+        <a href="mailto:signal@proxima.red">signal@proxima.red</a>. A response will be provided
+        within one month (Art. 12(3) GDPR).
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Right</th>
+            <th>Article</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Access</strong></td>
+            <td>Art. 15 GDPR</td>
+            <td>Request confirmation of and access to personal data held about you.</td>
+          </tr>
+          <tr>
+            <td><strong>Rectification</strong></td>
+            <td>Art. 16 GDPR</td>
+            <td>Request correction of inaccurate or completion of incomplete data.</td>
+          </tr>
+          <tr>
+            <td><strong>Erasure</strong></td>
+            <td>Art. 17 GDPR</td>
+            <td>
+              Request deletion of your account and all associated data. Note: encrypted vault data
+              cannot be decrypted by the server; deletion removes the ciphertext.
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Restriction of processing</strong></td>
+            <td>Art. 18 GDPR</td>
+            <td>Request that processing be restricted under certain conditions.</td>
+          </tr>
+          <tr>
+            <td><strong>Data portability</strong></td>
+            <td>Art. 20 GDPR</td>
+            <td>
+              Receive your personal data in a structured, machine-readable format where processing
+              is automated and based on consent or contract.
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Objection</strong></td>
+            <td>Art. 21 GDPR</td>
+            <td>
+              Object to processing based on legitimate interests (Art. 6(1)(f)). This applies to
+              server log processing and rate-limiting.
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Withdrawal of consent</strong></td>
+            <td>Art. 7(3) GDPR</td>
+            <td>Not currently applicable (no processing relies on consent).</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        <strong>Practical note on access and portability requests:</strong> Account data held by the
+        server consists of a random 8-digit ID, an Argon2 hash, and two public KDF salts — none of
+        which reveals the account password or vault contents (which remain encrypted). Authenticated
+        users can export their vault data via the account page, which returns the encrypted blob;
+        decryption happens in the browser.
+      </p>
+      <p>
+        Requests relating to server log data will be forwarded to the hosting provider, as the
+        controller does not retain copies.
+      </p>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s9">
+    <div class="doc-section__header">
+      <span class="doc-section__num">09</span>
+      <h2 class="doc-section__title">Right to Lodge a Complaint</h2>
+    </div>
+    <div class="prose">
+      <p>
+        You have the right to lodge a complaint with a data protection supervisory authority (Art.
+        77 GDPR). The competent authority for the controller (located in Saxony, Germany) is:
+      </p>
+      <div class="address-block">
+        <p>
+          <strong>Sächsischer Datenschutz- und Transparenzbeauftragter (SDTB)</strong><br />
+          Devrientstraße 5<br />
+          01067 Dresden<br />
+          Germany<br />
+          <a href="https://www.sdtb.sachsen.de" rel="noopener noreferrer" target="_blank"
+            >https://www.sdtb.sachsen.de</a
+          >
+        </p>
+      </div>
+      <p>You may also contact the federal authority:</p>
+      <div class="address-block">
+        <p>
+          <strong>Bundesbeauftragter für den Datenschutz und die Informationsfreiheit (BfDI)</strong
+          ><br />
+          Graurheindorfer Str. 153<br />
+          53117 Bonn<br />
+          Germany<br />
+          <a href="https://www.bfdi.bund.de" rel="noopener noreferrer" target="_blank"
+            >https://www.bfdi.bund.de</a
+          >
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="doc-section" id="s10">
+    <div class="doc-section__header">
+      <span class="doc-section__num">10</span>
+      <h2 class="doc-section__title">Changes to This Policy</h2>
+    </div>
+    <div class="prose">
+      <p>
+        This policy will be updated if processing activities change. The "Last updated" date at the
+        top of this document reflects the date of the most recent revision. Continued use of the
+        service after a material change constitutes acknowledgement of the updated policy.
+      </p>
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,13 @@
+# Production dependencies.
+-r base.txt
+
+# WSGI application server
+gunicorn>=23.0,<24.0
+
+# PostgreSQL driver (psycopg 3, natively supported by Django 5.2).
+# The [binary] extra ships prebuilt wheels, so no system libpq build is needed.
+psycopg[binary]>=3.2,<4.0
+
+# Redis client for the shared cache backend (django-ratelimit counters).
+# Django 5.2 ships the RedisCache backend itself, so only the client is needed.
+redis>=5.0,<6.0

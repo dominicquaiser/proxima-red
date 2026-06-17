@@ -1,0 +1,65 @@
+{% extends "base.html" %} {% load static %} {% block favicon %}<link
+  rel="icon"
+  type="image/svg+xml"
+  href="{% static 'icons/phosphor/key-favicon.svg' %}"
+/>{% endblock %} {% block title %}Link Created{%endblock %} {% block meta_robots %}<meta
+  name="robots"
+  content="noindex"
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+{% endblock %} {% block content %}
+<main id="main-content">
+  <div class="card">
+    <div class="card__header">
+      <div class="card__eyebrow">Secure Password Sharing</div>
+      <div class="card__title">pass.]<span> /created</span></div>
+      <div class="card__subtitle">Your encrypted link is ready to share.</div>
+    </div>
+
+    <div class="card__body">
+      <div class="res">
+        <p class="res__message">
+          Decryption happens entirely in the recipient's browser, so the server never sees your
+          secret. Keep this link confidential —
+          <strong>anyone who has it can decrypt and view it</strong>.
+        </p>
+
+        <div
+          id="share-info"
+          data-retrieval-url-base="{{ retrieval_url_base }}"
+          data-dummy-share-id="{{ dummy_share_id }}"
+        >
+          <span id="share-id" style="display: none">{{ share.id }}</span>
+
+          <div class="res__field">
+            <input
+              id="share-link"
+              class="res__input"
+              type="text"
+              readonly
+              value="Generating secure link..."
+              aria-label="Shareable link"
+            />
+            <label id="copy-link-btn" class="res__copy" title="Copy link">
+              <span class="clipboard"></span>
+            </label>
+          </div>
+        </div>
+
+        <a href="{% url 'passwd:create' %}" class="res__btn">Create Another</a>
+      </div>
+    </div>
+
+    <div class="card-note">
+      <span class="card-note__tip"
+      >AES-256-GCM · zero-knowledge · open source · AGPL-3.0 licensed<span class="card-note__tooltip">└ 256-bit key + 96-bit random IV, generated with the Web Crypto API.
+The key lives only in the link fragment (#) and is never sent to
+the servers — it stores ciphertext and IV, nothing else.</span></span>
+    </div>
+  </div>
+</main>
+{% endblock %} {% block extra_js %}
+<script src="{% static 'js/crypto.js' %}" defer></script>
+<script src="{% static 'js/passwd.js' %}" defer></script>
+{% endblock %}

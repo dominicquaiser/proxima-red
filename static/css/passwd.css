@@ -1,0 +1,442 @@
+.hidden {
+  display: none !important;
+}
+
+/* Create form: key/password mode toggle */
+.field__label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.field__label-row .field__label {
+  margin-bottom: 0;
+}
+.field__mode-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-primary);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--color-putty);
+  transition: color 0.15s;
+}
+.field__mode-toggle:hover,
+.field__mode-toggle.is-active {
+  color: var(--color-tangerine);
+}
+
+/* Multi-line "key mode" variant of .field__input. */
+.field__textarea {
+  display: block;
+  min-height: 180px;
+  resize: vertical;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  /* Minimalist scrollbar (Firefox). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-stony-gray) transparent;
+}
+/* Minimalist scrollbar (WebKit/Blink). */
+.field__textarea::-webkit-scrollbar {
+  width: 8px;
+}
+.field__textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.field__textarea::-webkit-scrollbar-thumb {
+  background: var(--color-stony-gray);
+  border-radius: 4px;
+}
+.field__textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--color-taupe);
+}
+
+.expiry {
+  margin-bottom: 28px;
+}
+
+.expiry__label {
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--color-putty);
+  margin-bottom: 12px;
+  display: block;
+}
+
+.expiry__options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.expiry__option {
+  display: none;
+}
+.expiry__option-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 6px;
+  border: 1px solid var(--color-stony-gray);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--color-stony-gray);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  user-select: none;
+}
+.expiry__option-label:hover {
+  border-color: var(--color-burnt-orange);
+  color: var(--color-burnt-orange);
+}
+.expiry__option:checked + .expiry__option-label {
+  background: var(--color-burnt-orange);
+  border-color: var(--color-burnt-orange);
+  color: var(--color-charcoal);
+  font-weight: 600;
+}
+
+.card-note {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--color-muddy-brown);
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+}
+.card-note__tip {
+  display: inline-block;
+  position: relative;
+  cursor: default;
+}
+.card-note__tooltip {
+  display: none;
+  position: absolute;
+  top: 1.6em;
+  left: 0;
+  white-space: pre;
+  text-align: left;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+.card-note__tip:hover .card-note__tooltip {
+  display: block;
+}
+
+.form-wrap {
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+}
+.form-wrap.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  display: none;
+}
+
+#expiry-notice {
+  font-size: 14px;
+  margin-bottom: 28px;
+  color: var(--color-text-light);
+}
+
+#expiry-notice strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 22px;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Loader: four-corner spinner */
+.loader-container {
+  --width: 1em;
+  --height: 1em;
+  --accent-color: rgba(254, 128, 25, 0.18); /* tangerine, low alpha */
+  --light-accent-color: rgba(254, 128, 25, 0.4); /* tangerine, brighter */
+  --primary-color: var(--color-stony-gray);
+  --secondary-color: var(--color-wheat);
+  --min-border: 10%;
+  --max-border: 50%;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.1em;
+  margin: 32px auto; /* Provide some vertical spacing */
+  width: fit-content;
+}
+
+.loader {
+  background-color: var(--accent-color);
+  width: var(--width);
+  height: var(--height);
+  border: 1px solid var(--primary-color);
+  box-shadow: inset 0 0 2px var(--secondary-color);
+  animation: 1s roundThatCorner ease-in-out infinite;
+}
+
+.loader.top-left {
+  animation-delay: 0s;
+}
+.loader.top-right {
+  animation-delay: -0.5s;
+}
+.loader.bottom-right {
+  animation-delay: -1.5s;
+}
+.loader.bottom-left {
+  animation-delay: -1s;
+}
+
+@keyframes roundThatCorner {
+  0% {
+    border-radius: var(--max-border) var(--min-border) var(--min-border) var(--min-border);
+    box-shadow: inset 60px -60px 30px 10px var(--light-accent-color);
+  }
+  25% {
+    border-radius: var(--min-border) var(--max-border) var(--min-border) var(--min-border);
+    box-shadow: inset 60px 60px 30px 10px var(--light-accent-color);
+    background-color: var(--light-accent-color);
+  }
+  50% {
+    border-radius: var(--min-border) var(--min-border) var(--max-border) var(--min-border);
+    box-shadow: inset -60px 60px 30px 10px var(--light-accent-color);
+    background-color: var(--light-accent-color);
+  }
+  75% {
+    border-radius: var(--min-border) var(--min-border) var(--min-border) var(--max-border);
+    box-shadow: inset -60px -60px 30px 10px var(--light-accent-color);
+  }
+  100% {
+    border-radius: var(--max-border) var(--min-border) var(--min-border) var(--min-border);
+    box-shadow: inset 60px -60px 30px 10px var(--light-accent-color);
+  }
+}
+
+/* esult pages */
+/* Success, retrieve and expired pages. These reuse the card from
+   components.css and live inside .card__body. */
+.res {
+  text-align: center;
+}
+
+.res__icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 20px;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+.res__icon--error {
+  background-color: var(--color-marigold);
+  -webkit-mask-image: url("/static/icons/phosphor/exclamation-mark-duotone.svg");
+  mask-image: url("/static/icons/phosphor/exclamation-mark-duotone.svg");
+}
+
+.res__error-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.res__error-heading .res__title {
+  margin-bottom: 0;
+}
+.res__icon--sm {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.res__title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-alabaster);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin-bottom: 10px;
+  word-break: break-word;
+}
+.res__message {
+  font-size: 12px;
+  color: var(--color-putty);
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  max-width: 440px;
+  margin: 0 auto 24px;
+}
+.res__message strong {
+  color: var(--color-wheat);
+  font-weight: 500;
+}
+
+.res__field {
+  position: relative;
+  margin-bottom: 24px;
+}
+.res__input {
+  width: 100%;
+  background: var(--color-dark-asphalt);
+  border: 1px solid var(--color-stony-gray);
+  border-radius: 2px;
+  padding: 11px 44px 11px 14px;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  color: var(--color-parchment);
+  outline: none;
+  letter-spacing: 0.02em;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.res__input:focus {
+  border-color: var(--color-tangerine);
+  background: var(--color-input-focus-bg);
+}
+/* When both a reveal toggle and a copy button sit on the right. */
+.res__field--dual .res__input {
+  padding-right: 76px;
+}
+
+/* Multi-line revealed secret (PGP/SSH key). The reveal toggle is hidden in this
+   mode, so only the copy button needs room on the right. */
+.res__textarea {
+  display: block;
+  min-height: 160px;
+  resize: vertical;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  /* Minimalist scrollbar (Firefox). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-stony-gray) transparent;
+}
+/* Minimalist scrollbar (WebKit/Blink). */
+.res__textarea::-webkit-scrollbar {
+  width: 8px;
+}
+.res__textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+.res__textarea::-webkit-scrollbar-thumb {
+  background: var(--color-stony-gray);
+  border-radius: 4px;
+}
+.res__textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--color-taupe);
+}
+.res__field--dual .res__textarea {
+  padding-right: 44px;
+}
+/* Anchor the copy button to the top once the field is multi-line. */
+.res__field--multi .res__copy {
+  top: 12px;
+  transform: none;
+}
+
+/* The reveal toggle reuses .password-toggle from components.css; re-anchor it
+   vertically centred and to the left of the copy button. */
+.res__field .password-toggle {
+  right: 44px;
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.res__copy {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.res__copy input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+.res__copy .clipboard {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: var(--color-taupe);
+  -webkit-mask-image: url("/static/icons/phosphor/clipboard-text-duotone.svg");
+  mask-image: url("/static/icons/phosphor/clipboard-text-duotone.svg");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  transition:
+    transform 0.15s ease,
+    background-color 0.3s ease;
+}
+.res__copy:hover .clipboard {
+  background-color: var(--color-warm-slate);
+}
+.res__copy.copied .clipboard {
+  background-color: var(--color-lime-olive);
+}
+.res__copy:active .clipboard {
+  transform: scale(0.85);
+}
+
+.res__btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+  background: var(--color-burnt-orange);
+  border: none;
+  border-radius: 2px;
+  color: var(--color-charcoal);
+  padding: 13px;
+  font-family: var(--font-primary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+.res__btn:hover {
+  background: var(--color-brick-red);
+  transform: scale(1.01);
+}
+.res__btn:active {
+  transform: scale(0.99);
+}
+
+@media (max-width: 480px) {
+  .expiry__options {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

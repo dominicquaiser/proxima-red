@@ -1,0 +1,109 @@
+/**
+ * @fileoverview Shared HTTP utilities exposed as window.Http.
+ *
+ * Provides CSRF-aware fetch wrappers so every page can submit forms or
+ * JSON payloads without re-implementing CSRF lookup and fetch/parse boilerplate.
+ */
+(function () {
+  "use strict";
+
+  const DEFAULT_ERROR_MESSAGE = "An unexpected error occurred.";
+
+  /**
+   * Resolve the CSRF token from the DOM or cookie jar.
+   *
+   * Prefers a hidden `csrfmiddlewaretoken` form field anywhere in the
+   * document, falling back to the `csrftoken` cookie when no field is found.
+   *
+   * @returns {string|null} The CSRF token, or null if not found.
+   */
+  const getCsrfToken = () => {
+    const field = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    if (field && field.value) {
+      return field.value;
+    }
+    const match = document.cookie.match(/csrftoken=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  };
+
+  /**
+   * POST to `url` with this app's standard headers and parse the JSON reply.
+   *
+   * Body encoding is determined by type:
+   * - `HTMLFormElement` is converted to `FormData` first.
+   * - `FormData` / `URLSearchParams` are sent as `application/x-www-form-urlencoded`.
+   * - Any other object is sent as `application/json`.
+   *
+   * Both the raw `Response` and parsed body are returned so callers retain
+   * full control over success/error handling.
+   *
+   * @param {string} url - The endpoint to POST to.
+   * @param {FormData|URLSearchParams|HTMLFormElement|Object} body - Request payload.
+   * @returns {Promise<{response: Response, result: *}>}
+   */
+  const postForm = async (url, body) => {
+    const normalizedBody = body instanceof HTMLFormElement ? new FormData(body) : body;
+
+    const headers = { "X-Requested-With": "XMLHttpRequest" };
+    let payload;
+
+    if (normalizedBody instanceof FormData || normalizedBody instanceof URLSearchParams) {
+      const params = new URLSearchParams(normalizedBody);
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      headers["X-CSRFToken"] = params.get("csrfmiddlewaretoken") || getCsrfToken() || "";
+      payload = params;
+    } else {
+      headers["Content-Type"] = "application/json";
+      headers["X-CSRFToken"] = getCsrfToken() || "";
+      payload = JSON.stringify(normalizedBody);
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: payload,
+      credentials: "same-origin",
+    });
+    const result = await response.json();
+    return { response, result };
+  };
+
+  /**
+   * Extract the first human-readable message from a parsed AJAX response.
+   *
+   * Handles two shapes that the views produce:
+   * - `{ error: "string message" }`: a top-level error string.
+   * - `{ errors: ... }`: Django form errors: an array of strings, a plain
+   *   string, or an object mapping field names to a string or string array.
+   *
+   * @param {{ error?: string, errors?: string|string[]|Object }} result
+   * @returns {string} The first message found, or a generic fallback.
+   */
+  const firstError = (result) => {
+    const payload = result && (result.errors || result.error);
+    if (!payload) {
+      return DEFAULT_ERROR_MESSAGE;
+    }
+    if (typeof payload === "string") {
+      return payload;
+    }
+    if (Array.isArray(payload)) {
+      return payload[0];
+    }
+    // payload is a field-keyed errors object; grab the first field's message
+    const firstKey = Object.keys(payload)[0];
+    if (!firstKey) {
+      return DEFAULT_ERROR_MESSAGE;
+    }
+    const value = payload[firstKey];
+    if (Array.isArray(value)) {
+      return value[0];
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    return DEFAULT_ERROR_MESSAGE;
+  };
+
+  window.Http = { getCsrfToken, postForm, firstError };
+})();

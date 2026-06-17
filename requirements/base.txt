@@ -1,0 +1,14 @@
+# Dependencies common to every environment.
+
+# Core web framework
+Django==5.2.15
+
+# Rate limiting for authentication-sensitive endpoints
+django-ratelimit>=4.0,<5.0
+
+# Hashing backends required by PASSWORD_HASHERS
+argon2-cffi>=23.1,<24.0
+bcrypt>=4.1,<5.0
+
+# Environment-driven settings (.env parsing, DATABASE_URL)
+django-environ>=0.11,<0.13

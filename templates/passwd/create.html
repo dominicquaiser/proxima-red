@@ -1,0 +1,61 @@
+{% extends "base.html" %} {% load static %} {% block favicon %}<link
+  rel="icon"
+  type="image/svg+xml"
+  href="{% static 'icons/phosphor/key-favicon.svg' %}"
+/>{% endblock %} {% block title %}[pass·]{% endblock %} {% block meta_description %}<meta
+  name="description"
+  content="Share a password or secret with a self-destructing link. End-to-end encrypted in your browser — the server never sees your content. Free, no account required."
+/>{% endblock %} {% block og_description %}<meta
+  property="og:description"
+  content="Share a password or secret with a self-destructing link. End-to-end encrypted in your browser — the server never sees your content. Free, no account required."
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+{% endblock %} {% block content %}
+<main id="main-content">
+  <div class="card">
+    <div class="card__header">
+      <div class="card__eyebrow">Secure Password Sharing</div>
+      <div class="card__title">[pass·]<span> /create</span></div>
+      <div class="card__subtitle">
+        End-to-end encrypted in your browser.<br />Nothing leaves unencrypted.
+      </div>
+    </div>
+
+    <div class="card__body">
+      <div class="form-wrap" id="formWrap">
+        <form id="createForm" method="post" action="{% url 'passwd:create' %}">
+          {% include "passwd/_share_form_fields.html" with encrypted_data_id="encrypted_data" iv_id="iv" encrypted_title_id="encrypted_title" title_iv_id="title_iv" title_id="title" password_id="password" multiline_id="passwordMultiline" key_toggle_id="keyModeToggle" password_toggle_id="pwToggle" expiry_id_prefix="e" password_placeholder="Paste your password..." submit_label="Create Secure Link" %}
+        </form>
+      </div>
+    </div>
+
+    <div class="card-note">
+      <span class="card-note__tip"
+        >AES-256-GCM · zero-knowledge · open source · AGPL-3.0 licensed<span class="card-note__tooltip">└ 256-bit key + 96-bit random IV, generated with the Web Crypto API.
+  The key lives only in the link fragment (#) and is never sent to
+  the servers — it stores ciphertext and IV, nothing else.</span></span>
+    </div>
+  </div>
+</main>
+{% endblock %} {% block extra_js %}
+<script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "proxima·red [pass·]",
+    "url": "{{ request.scheme }}://{{ request.get_host }}/",
+    "description": "Zero-knowledge password sharing. Passwords are encrypted in your browser before anything is sent. The server stores only ciphertext and never sees your content. Shares expire by time, access count, or both.",
+    "applicationCategory": "SecurityApplication",
+    "operatingSystem": "All",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "license": "https://www.gnu.org/licenses/agpl-3.0.html"
+  }
+</script>
+<script src="{% static 'js/crypto.js' %}" defer></script>
+<script src="{% static 'js/passwd.js' %}" defer></script>
+{% endblock %}

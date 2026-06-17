@@ -1,0 +1,110 @@
+{% csrf_token %}
+<input
+  type="hidden"
+  id="{{ encrypted_data_id }}"
+  name="encrypted_data"
+  class="encrypted-data-input js-encrypted-data-input"
+/>
+<input type="hidden" id="{{ iv_id }}" name="iv" class="iv-input js-iv-input" />
+<input
+  type="hidden"
+  id="{{ encrypted_title_id }}"
+  name="encrypted_title"
+  class="encrypted-title-input js-encrypted-title-input"
+/>
+<input
+  type="hidden"
+  id="{{ title_iv_id }}"
+  name="title_iv"
+  class="title-iv-input js-title-iv-input"
+/>
+
+<div class="field">
+  <label class="field__label" for="{{ title_id }}">Title (optional)</label>
+  <input
+    class="field__input title-input js-title-input"
+    type="text"
+    id="{{ title_id }}"
+    placeholder="e.g. Production DB credentials"
+    autocomplete="off"
+    maxlength="500"
+  />
+</div>
+
+<div class="field">
+  <div class="field__label-row">
+    <label class="field__label" for="{{ password_id }}">Secret</label>
+    <button type="button" class="field__mode-toggle js-key-mode-toggle" id="{{ key_toggle_id }}">
+      Sharing a key?
+    </button>
+  </div>
+  <input
+    class="field__input field__input--password password-input js-password-input"
+    type="password"
+    id="{{ password_id }}"
+    placeholder="{{ password_placeholder }}"
+    autocomplete="new-password"
+    {% if password_required %}required{% endif %}
+  />
+  <textarea
+    class="field__input field__textarea multiline-input js-multiline-input hidden"
+    id="{{ multiline_id }}"
+    placeholder="Paste a PGP / SSH key..."
+    autocomplete="off"
+    spellcheck="false"
+  ></textarea>
+  <div class="password-toggle js-password-toggle" id="{{ password_toggle_id }}">
+    <input type="checkbox" class="toggle-password-cb" aria-label="Toggle password visibility" />
+    <span class="password-toggle__icon password-toggle__icon--visible"></span>
+    <span class="password-toggle__icon password-toggle__icon--hidden"></span>
+  </div>
+</div>
+
+<div class="expiry">
+  <span class="expiry__label">Link expires after</span>
+  <div class="expiry__options">
+    <div>
+      <input
+        class="expiry__option"
+        type="radio"
+        name="expiry_time"
+        id="{{ expiry_id_prefix }}1h"
+        value="1hour"
+      />
+      <label class="expiry__option-label" for="{{ expiry_id_prefix }}1h">60 minutes</label>
+    </div>
+    <div>
+      <input
+        class="expiry__option"
+        type="radio"
+        name="expiry_time"
+        id="{{ expiry_id_prefix }}1d"
+        value="1day"
+        checked
+      />
+      <label class="expiry__option-label" for="{{ expiry_id_prefix }}1d">24 hours</label>
+    </div>
+    <div>
+      <input
+        class="expiry__option"
+        type="radio"
+        name="expiry_time"
+        id="{{ expiry_id_prefix }}7d"
+        value="1week"
+      />
+      <label class="expiry__option-label" for="{{ expiry_id_prefix }}7d">7 days</label>
+    </div>
+    <div>
+      <input
+        class="expiry__option"
+        type="radio"
+        name="expiry_time"
+        id="{{ expiry_id_prefix }}4w"
+        value="1month"
+      />
+      <label class="expiry__option-label" for="{{ expiry_id_prefix }}4w">4 weeks</label>
+    </div>
+  </div>
+</div>
+
+<button type="submit" class="btn-create js-share-submit">{{ submit_label }}</button>

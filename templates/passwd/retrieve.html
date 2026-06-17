@@ -1,0 +1,124 @@
+{% extends "base.html" %} {% load static %} {% block favicon %}<link
+  rel="icon"
+  type="image/svg+xml"
+  href="{% static 'icons/phosphor/key-favicon.svg' %}"
+/>{% endblock %} {% block title %}Retrieve Secret{%endblock %} {% block meta_robots %}<meta
+  name="robots"
+  content="noindex"
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+{% endblock %} {% block content %}
+<main id="main-content">
+  <div class="card">
+    <div class="card__header">
+      <div class="card__eyebrow">Secure Password Sharing</div>
+      <div class="card__title">pass.<span> /retrieve</span></div>
+      <div class="card__subtitle">
+        Decryption happens in your browser.<br />The server never sees the secret.
+      </div>
+    </div>
+
+    <div class="card__body">
+      <div id="retrieval-container" class="res">
+        <div id="locked-state">
+          <h2 class="res__title" id="retrieved-title"></h2>
+          <p class="res__message" id="expiry-notice">
+            This link will expire and be permanently deleted in:
+            <br />
+            <strong id="expiry-countdown">...</strong>
+          </p>
+
+          <div class="res__field res__field--dual">
+            <input
+              id="retrieved-password"
+              class="res__input"
+              type="text"
+              readonly
+              value="********************************"
+              aria-label="Secret"
+            />
+            <!-- Shown instead of the input above when the decrypted secret spans
+                 multiple lines (e.g. a PGP/SSH key). Detected client-side. -->
+            <textarea
+              id="retrieved-password-multi"
+              class="res__input res__textarea hidden"
+              readonly
+              aria-label="Secret"
+            ></textarea>
+            <div class="password-toggle" id="reveal-toggle">
+              <input type="checkbox" id="togglePassword" aria-label="Toggle secret visibility" />
+              <span class="password-toggle__icon password-toggle__icon--visible"></span>
+              <span class="password-toggle__icon password-toggle__icon--hidden"></span>
+            </div>
+            <label id="copy-btn" class="res__copy" title="Copy secret">
+              <span class="clipboard"></span>
+            </label>
+          </div>
+        </div>
+
+        <div id="decrypting-state" class="hidden">
+          <div class="loader-container">
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+            <div class="loader top-left"></div>
+            <div class="loader top-right"></div>
+            <div class="loader bottom-right"></div>
+            <div class="loader bottom-left"></div>
+          </div>
+          <p class="res__message">Decrypting in your browser...</p>
+        </div>
+
+        <div id="error-state" class="hidden">
+          <div class="res__error-heading">
+            <div class="res__icon res__icon--error res__icon--sm"></div>
+            <h2 class="res__title">Decryption Failed</h2>
+          </div>
+          <p class="res__message" id="error-message"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-note">
+      <span class="card-note__tip"
+      >AES-256-GCM · zero-knowledge · open source · AGPL-3.0 licensed<span class="card-note__tooltip">└ 256-bit key + 96-bit random IV, generated with the Web Crypto API.
+  The key lives only in the link fragment (#) and is never sent to
+  the servers — it stores ciphertext and IV, nothing else.</span></span>
+    </div>
+  </div>
+</main>
+
+{{ share_data_json|json_script:"share-data" }} {% endblock %} {% block extra_js %}
+<script src="{% static 'js/crypto.js' %}" defer></script>
+<script src="{% static 'js/retrieve.js' %}" defer></script>
+{% endblock %}

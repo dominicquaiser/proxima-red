@@ -1,0 +1,9 @@
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+indent-width = 4
+quote-style = "double"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

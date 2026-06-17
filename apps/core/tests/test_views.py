@@ -1,0 +1,190 @@
+"""
+Tests for the core app views.
+
+Covers the static informational pages (about/imprint/privacy), the
+host-dependent robots.txt/sitemap.xml views, and the custom error handlers
+wired up as ``handler400``/``403``/``404``/``500`` in ``config/urls.py``. The
+error handlers are invoked directly via RequestFactory so the assertions don't
+depend on ``DEBUG`` or on triggering real failures.
+"""
+
+from django.http import HttpResponse
+from django.test import Client, RequestFactory, TestCase, override_settings
+from django.urls import reverse
+
+from apps.core import views
+from apps.core.middleware import SecurityHeadersMiddleware
+
+
+class StaticPageTests(TestCase):
+    """The informational pages render with their templates."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_about_page(self):
+        """GET about/ renders the about page."""
+        response = self.client.get(reverse("core:about"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/about.html")
+
+    def test_imprint_page(self):
+        """GET imprint/ renders the imprint page."""
+        response = self.client.get(reverse("core:imprint"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/imprint.html")
+
+    def test_privacy_page(self):
+        """GET privacy/ renders the privacy page."""
+        response = self.client.get(reverse("core:privacy"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "core/privacy.html")
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+)
+class RobotsTxtTests(TestCase):
+    """robots.txt serves a host-specific policy for the two sites."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_main_site_disallows_account_page(self):
+        """The main site's robots.txt hides the account page and links its sitemap."""
+        response = self.client.get(reverse("core:robots_txt"), HTTP_HOST="proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain; charset=utf-8")
+        body = response.content.decode()
+        self.assertIn("Disallow: /auth/account/", body)
+        self.assertIn("Sitemap: https://proxima.red/sitemap.xml", body)
+        self.assertNotIn("/vault/", body)
+
+    def test_pass_subdomain_disallows_vault_endpoints(self):
+        """The pass subdomain's robots.txt hides all vault endpoints."""
+        response = self.client.get(
+            reverse("core:robots_txt"), HTTP_HOST="pass.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        for path in ("/vault/", "/vault-data/", "/update-data/", "/export-data/"):
+            self.assertIn(f"Disallow: {path}", body)
+        self.assertIn("Sitemap: https://pass.proxima.red/sitemap.xml", body)
+        self.assertNotIn("/auth/account/", body)
+
+    def test_pass_subdomain_matches_with_explicit_port(self):
+        """Host matching strips the port before comparing hostnames."""
+        response = self.client.get(
+            reverse("core:robots_txt"), HTTP_HOST="pass.proxima.red:8443"
+        )
+        self.assertIn("Disallow: /vault/", response.content.decode())
+
+    def test_unrelated_host_gets_main_site_policy(self):
+        """Any host other than the pass subdomain falls back to the main policy."""
+        response = self.client.get(reverse("core:robots_txt"), HTTP_HOST="testserver")
+        self.assertIn("Disallow: /auth/account/", response.content.decode())
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+)
+class SitemapTests(TestCase):
+    """sitemap.xml renders the host-specific sitemap template."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_main_site_renders_proxima_sitemap(self):
+        """The main site serves sitemap_proxima.xml with SITE_URL locations."""
+        response = self.client.get(reverse("core:sitemap"), HTTP_HOST="proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/xml")
+        self.assertTemplateUsed(response, "core/sitemap_proxima.xml")
+        self.assertIn("https://proxima.red/about/", response.content.decode())
+
+    def test_pass_subdomain_renders_pass_sitemap(self):
+        """The pass subdomain serves sitemap_pass.xml with PASS_SITE_URL locations."""
+        response = self.client.get(
+            reverse("core:sitemap"), HTTP_HOST="pass.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/xml")
+        self.assertTemplateUsed(response, "core/sitemap_pass.xml")
+        self.assertIn("https://pass.proxima.red/", response.content.decode())
+
+
+class SecurityHeadersTests(TestCase):
+    """SecurityHeadersMiddleware attaches CSP and Permissions-Policy responses."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_csp_header_present_and_locks_scripts(self):
+        """Responses carry a CSP that confines scripts to same-origin."""
+        response = self.client.get(reverse("core:about"))
+        csp = response.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'self'", csp)
+        self.assertIn("script-src 'self'", csp)
+        self.assertIn("object-src 'none'", csp)
+        self.assertIn("frame-ancestors 'none'", csp)
+        # script-src must not allow inline/eval, or the protection is moot.
+        self.assertNotIn("'unsafe-inline'", csp.split("script-src")[1].split(";")[0])
+
+    def test_permissions_policy_header_present(self):
+        """Responses carry a Permissions-Policy disabling unused features."""
+        response = self.client.get(reverse("core:about"))
+        self.assertIn("camera=()", response.headers.get("Permissions-Policy", ""))
+
+    def test_view_set_headers_are_not_clobbered(self):
+        """Headers a view set deliberately win over the configured defaults."""
+
+        def get_response(request):
+            response = HttpResponse()
+            response["Content-Security-Policy"] = "default-src 'none'"
+            response["Permissions-Policy"] = "camera=(self)"
+            return response
+
+        middleware = SecurityHeadersMiddleware(get_response)
+        response = middleware(RequestFactory().get("/"))
+
+        self.assertEqual(response["Content-Security-Policy"], "default-src 'none'")
+        self.assertEqual(response["Permissions-Policy"], "camera=(self)")
+
+
+class ErrorHandlerTests(TestCase):
+    """Each custom handler renders its template with the matching status code."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_error_400(self):
+        """error_400 renders 400.html with a 400 status."""
+        request = self.factory.get("/")
+        with self.assertTemplateUsed("core/400.html"):
+            response = views.error_400(request, exception=None)
+        self.assertEqual(response.status_code, 400)
+
+    def test_error_403(self):
+        """error_403 renders 403.html with a 403 status."""
+        request = self.factory.get("/")
+        with self.assertTemplateUsed("core/403.html"):
+            response = views.error_403(request, exception=None)
+        self.assertEqual(response.status_code, 403)
+
+    def test_error_404(self):
+        """error_404 renders 404.html with a 404 status."""
+        request = self.factory.get("/")
+        with self.assertTemplateUsed("core/404.html"):
+            response = views.error_404(request, exception=None)
+        self.assertEqual(response.status_code, 404)
+
+    def test_error_500(self):
+        """error_500 renders 500.html with a 500 status (request-only signature)."""
+        request = self.factory.get("/")
+        with self.assertTemplateUsed("core/500.html"):
+            response = views.error_500(request)
+        self.assertEqual(response.status_code, 500)

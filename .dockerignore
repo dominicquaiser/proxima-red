@@ -1,0 +1,58 @@
+# --- Version control ---
+.git
+.gitignore
+.dockerignore
+
+# --- Python ---
+.venv
+__pycache__
+*.pyc
+*.pyo
+
+# --- Django ---
+*.sqlite3
+db.sqlite3-journal
+local_settings.py
+staticfiles/
+
+# --- Secrets / local config ---
+.env
+.envrc
+legal/legal_content.json
+
+# --- Data & logs ---
+backups/
+logs/
+*.log
+*.rdb
+*.aof
+*.pid
+
+# --- Tests & coverage ---
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Linters / type checkers ---
+.ruff_cache/
+.mypy_cache/
+
+# --- Build tooling ---
+docker-compose*.yml
+Makefile
+
+# --- Docs & planning ---
+docs/
+*.md
+
+# --- IDE & agent metadata ---
+.vscode
+.idea
+.ideas
+.claude
+
+# --- Node ---
+node_modules

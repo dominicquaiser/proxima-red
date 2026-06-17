@@ -1,0 +1,22 @@
+{% extends "base.html" %} {% load static %} {% block title %}500{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+{% endblock %} {% block content %}
+
+<div class="page-hero">
+  <div class="page-hero__inner">
+    <div class="page-hero__eyebrow">
+      <a href="{% url 'passwd:create' %}">proxima·red</a> / Error
+    </div>
+    <h1 class="page-hero__title page-hero__title--error">500</h1>
+    <p class="page-hero__meta">Something went wrong</p>
+  </div>
+</div>
+
+<main id="main-content" class="page-main">
+  <div class="prose">
+    <p>An unexpected error occurred on our end. It has been noted.</p>
+    <p><a href="{% url 'passwd:create' %}">Back to the home page</a></p>
+  </div>
+</main>
+
+{% endblock %}
