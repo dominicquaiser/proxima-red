@@ -4,6 +4,7 @@ error handlers (wired up as ``handler400``/``403``/``404``/``500`` in
 ``config/urls.py``).
 """
 
+from datetime import date
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -69,6 +70,8 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
         lines = [
             "User-agent: *",
             "Disallow: /auth/account/",
+            "Disallow: /auth/salts/",
+            "Disallow: /auth/signout/",
             "",
             f"Sitemap: {settings.SITE_URL}/sitemap.xml",
         ]
@@ -76,17 +79,18 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
 
 
 def sitemap(request: HttpRequest) -> HttpResponse:
+    lastmod = date.today().isoformat()
     if _is_pass_subdomain(request):
         return render(
             request,
             "core/sitemap_pass.xml",
-            {"site_url": settings.PASS_SITE_URL},
+            {"site_url": settings.PASS_SITE_URL, "lastmod": lastmod},
             content_type="application/xml",
         )
     return render(
         request,
         "core/sitemap_proxima.xml",
-        {"site_url": settings.SITE_URL},
+        {"site_url": settings.SITE_URL, "lastmod": lastmod},
         content_type="application/xml",
     )
 

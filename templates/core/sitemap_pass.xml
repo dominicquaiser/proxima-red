@@ -4,5 +4,6 @@
     <loc>{{ site_url }}/</loc>
     <priority>1.0</priority>
     <changefreq>weekly</changefreq>
+    <lastmod>{{ lastmod }}</lastmod>
   </url>
 </urlset>
