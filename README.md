@@ -2,7 +2,7 @@
   <img src="./static/icons/proxima-red-wordmark.svg" alt="proxima·red" width="320" />
 </p>
 <p align="center">
-  <a href="./LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-red.svg" alt="License: AGPL-3.0" /></a>
+  <a href="./AGPL-LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-red.svg" alt="License: AGPL-3.0" /></a>
   <img src="https://img.shields.io/github/v/release/dominicquaiser/proxima-red?sort=semver" alt="GitHub release (latest SemVer)" />
   <img src="https://img.shields.io/badge/python-3.13-blue.svg" alt="Python 3.13" />
   <img src="https://img.shields.io/badge/django-5.2-green.svg" alt="Django 5.2" />
@@ -11,8 +11,6 @@
 ---
 
 **[proxima·red](https://proxima.red/)** is a small collection of open-source web tools for secure sharing. The first tool, **[pass·]**, is a zero-knowledge password and secret sharer. No account required. No email. No tracking.
-
----
 
 ## How it works
 
@@ -42,8 +40,6 @@ Even a full database compromise yields nothing readable. There is no key to stea
 - The server holds ciphertext only — a forgotten password means data is unrecoverable, by design
 - Manage and search your shares across sessions
 
----
-
 ## Tech stack
 
 | Layer            | Technology                                                          |
@@ -57,8 +53,6 @@ Even a full database compromise yields nothing readable. There is no key to stea
 | Reverse proxy    | nginx + Let's Encrypt (certbot)                                     |
 | Frontend         | Vanilla JS · no framework · no bundler                              |
 | Container        | Docker Compose                                                      |
-
----
 
 ## Self-hosting
 
@@ -88,8 +82,6 @@ make up
 
 See [docs/deployment.md](./docs/deployment.md) for the full configuration reference, backup procedures, and operations guide.
 
----
-
 ## Development
 
 Without Docker:
@@ -104,23 +96,23 @@ python manage.py runserver
 
 See [docs/development.md](./docs/development.md) for the full setup guide, test commands, and code style tooling (Ruff + Prettier).
 
----
-
 ## Contributing
 
 Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) first.
 
 For security issues, do not open a public issue. See [SECURITY.md](./SECURITY.md).
 
----
-
 ## License
 
-Source code is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE.md).
+Source code is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](./AGPL-LICENSE.md).
 
-The AGPL was chosen deliberately: anyone who modifies and deploys proxima·red over a network must publish their source changes under the same terms. The proxima·red name and visual identity are not covered by this license. Forks must use a different name. See [NOTICE.md](./NOTICE.md) for details.
+The AGPL was chosen deliberately: anyone who modifies and deploys proxima·red over a network must publish their source changes under the same terms. The proxima·red name and visual identity are not covered by this license. Forks must use a different name. See [LICENSE.md](./LICENSE.md) for details.
 
----
+## Support
+
+proxima·red is free and open source. If you find it useful, a small donation helps cover server and infrastructure costs.
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-donate-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/dominicquaiser)
 
 ## Contact
 

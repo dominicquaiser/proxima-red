@@ -278,7 +278,7 @@
   color: var(--color-putty);
   line-height: 1.6;
   letter-spacing: 0.02em;
-  max-width: 440px;
+  max-width: 460px;
   margin: 0 auto 24px;
 }
 .res__message strong {
