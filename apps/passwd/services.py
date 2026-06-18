@@ -130,6 +130,25 @@ def _delete_in_batches(queryset: QuerySet[SharedPassword], batch_size: int) -> i
     return total_deleted
 
 
+def delete_user_share(user: User, share_id) -> bool:
+    """
+    Delete a share owned by ``user``.
+
+    Scoping the delete to ``created_by=user`` is the authorization gate: a user
+    can only revoke their own shares, and an unknown, foreign, or already-deleted
+    id is a harmless no-op (the operation is idempotent).
+
+    Args:
+        user: The authenticated owner requesting the deletion.
+        share_id: Primary key (UUID) of the share to delete.
+
+    Returns:
+        ``True`` if a row was deleted, ``False`` if nothing matched.
+    """
+    deleted, _ = SharedPassword.objects.filter(pk=share_id, created_by=user).delete()
+    return bool(deleted)
+
+
 def register_share_access(pk) -> None:
     """
     Atomically increment a share's access counter.

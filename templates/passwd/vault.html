@@ -33,7 +33,12 @@
       </div>
     </header>
 
-    <main id="main-content" class="vault" data-update-url="{% url 'passwd:update_data' %}">
+    <main
+      id="main-content"
+      class="vault"
+      data-update-url="{% url 'passwd:update_data' %}"
+      data-delete-url="{% url 'passwd:delete_share' %}"
+    >
       <div class="vault__banner">
         <div>
           <div class="vault__eyebrow">Encrypted Shared Password Vault</div>

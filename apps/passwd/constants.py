@@ -38,6 +38,7 @@ DUMMY_SHARE_ID: Final[str] = "00000000-0000-0000-0000-000000000000"
 RATE_LIMIT_CREATE: Final[str] = "60/h"  # 60 shares per hour per IP
 RATE_LIMIT_RETRIEVE: Final[str] = "120/h"  # 120 retrievals per hour per IP
 RATE_LIMIT_UPDATE_DATA: Final[str] = "20/m"  # 20 updates per minute per IP
+RATE_LIMIT_DELETE_SHARE: Final[str] = "30/m"  # 30 share deletions per minute per IP
 RATE_LIMIT_VAULT: Final[str] = "100/h"  # 100 vault page loads per hour per IP
 RATE_LIMIT_EXPORT: Final[str] = "10/h"  # 10 data exports per hour per IP
 
@@ -55,12 +56,14 @@ ERROR_MISSING_FIELDS: Final[str] = (
 ERROR_CREATE_FAILED: Final[str] = "Failed to create secure share. Please try again."
 ERROR_MISSING_REQUIRED: Final[str] = "Missing required fields"
 ERROR_INVALID_IV: Final[str] = "Invalid IV format."
+ERROR_INVALID_SHARE_ID: Final[str] = "Invalid share identifier."
 ERROR_USER_NOT_FOUND: Final[str] = "User not found"
 ERROR_INVALID_JSON: Final[str] = "Invalid JSON data"
 ERROR_UNEXPECTED: Final[str] = "An unexpected error occurred"
 
 # Success messages
 SUCCESS_DATA_SAVED: Final[str] = "Your data has been saved securely."
+SUCCESS_SHARE_DELETED: Final[str] = "The secure share has been revoked."
 
 # Logging messages
 LOG_CREATE_FAILED: Final[str] = "Failed to create share (%s)"
@@ -68,3 +71,5 @@ LOG_EXPIRED_DELETED: Final[str] = "Deleted expired share: %s"
 LOG_NO_SERVICE_DATA: Final[str] = "No service data found for user %s"
 LOG_UPDATE_DATA: Final[str] = "Updated service data for user %s"
 LOG_UPDATE_DATA_ERROR: Final[str] = "Update service data failed (%s)"
+LOG_SHARE_DELETED: Final[str] = "Deleted share %s for user %s"
+LOG_DELETE_SHARE_ERROR: Final[str] = "Delete share failed (%s)"

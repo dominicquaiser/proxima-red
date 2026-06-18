@@ -9,6 +9,7 @@ from apps.auth.tests.factories import create_user_with_password
 from apps.passwd.models import SharedPassword
 from apps.passwd.services import (
     delete_expired_shares,
+    delete_user_share,
     expired_shares,
     save_user_vault_data,
     serialize_service_data,
@@ -88,3 +89,28 @@ class ExpiredShareCleanupTests(TestCase):
         make_share(expires_at=timezone.now() + timedelta(minutes=1))
 
         self.assertEqual(list(expired_shares()), [expired])
+
+
+class DeleteUserShareTests(TestCase):
+    """Owners can revoke their own shares; everything else is a safe no-op."""
+
+    def setUp(self):
+        self.owner = create_user_with_password("TestPassword123!")
+        self.other = create_user_with_password("TestPassword456!")
+
+    def test_deletes_owner_share(self):
+        share = make_share(created_by=self.owner)
+
+        self.assertTrue(delete_user_share(self.owner, share.pk))
+        self.assertFalse(SharedPassword.objects.filter(pk=share.pk).exists())
+
+    def test_does_not_delete_another_users_share(self):
+        share = make_share(created_by=self.other)
+
+        self.assertFalse(delete_user_share(self.owner, share.pk))
+        self.assertTrue(SharedPassword.objects.filter(pk=share.pk).exists())
+
+    def test_unknown_share_id_is_noop(self):
+        import uuid
+
+        self.assertFalse(delete_user_share(self.owner, uuid.uuid4()))

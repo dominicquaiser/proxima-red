@@ -15,6 +15,10 @@
   // (cf. data-salts-url in signin.html).
   const SAVE_ENDPOINT = "/update-data/";
 
+  // Fallback endpoint for revoking a share server-side; the page normally
+  // carries the URLconf-defined URL in #main-content's data-delete-url.
+  const DELETE_ENDPOINT = "/delete-share/";
+
   // --- Masked icons (sourced from static/icons/phosphor; tinted via CSS) ---
   // The link/trash icons for a row live in the #share-row-template markup; the
   // copy button swaps to ICON_CHECK and back to ICON_LINK on copy (see
@@ -149,8 +153,9 @@
     };
     const userDataScript = document.getElementById("user-data");
     const rowTemplate = document.getElementById("share-row-template");
-    const saveEndpoint =
-      document.getElementById("main-content")?.dataset.updateUrl || SAVE_ENDPOINT;
+    const mainContent = document.getElementById("main-content");
+    const saveEndpoint = mainContent?.dataset.updateUrl || SAVE_ENDPOINT;
+    const deleteEndpoint = mainContent?.dataset.deleteUrl || DELETE_ENDPOINT;
 
     // --- State ---
     let userShares = [];
@@ -611,10 +616,26 @@
       isCopyingLink = false;
     };
 
-    // Remove a row from the vault (the underlying share stays live until expiry),
-    // rolling back the optimistic removal if the vault blob fails to persist.
+    const revokeShare = async (shareId) => {
+      try {
+        const { response, result } = await window.Http.postForm(deleteEndpoint, {
+          share_id: shareId,
+        });
+        return response.ok && result.success;
+      } catch (error) {
+        console.error("Failed to revoke share:", error);
+        return false;
+      }
+    };
+
     const handleRemoveClick = async (row) => {
       const shareId = row.dataset.shareId;
+
+      if (!(await revokeShare(shareId))) {
+        window.Notify.show("We could not revoke the secure share. Please try again.", "error");
+        return;
+      }
+
       const persisted = await commitShareChange((shares) =>
         shares.filter((share) => share.id !== shareId),
       );
@@ -622,10 +643,7 @@
         return;
       }
 
-      window.Notify.show(
-        "Link removed from vault. The secure share remains active until it expires.",
-        "info",
-      );
+      window.Notify.show("Link removed and the secure share has been revoked.", "info");
     };
 
     // Add a normalized tag to a share, persisting the encrypted vault blob.

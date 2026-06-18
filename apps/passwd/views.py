@@ -9,6 +9,7 @@ encrypted data storage and retrieval.
 
 import json
 import logging
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -41,6 +42,7 @@ from .constants import (
     RATE_LIMIT_EXPORT,
     RATE_LIMIT_RETRIEVE,
     RATE_LIMIT_UPDATE_DATA,
+    RATE_LIMIT_DELETE_SHARE,
     RATE_LIMIT_VAULT,
     TEMPLATE_CREATE,
     TEMPLATE_SUCCESS,
@@ -51,15 +53,19 @@ from .constants import (
     ERROR_CREATE_FAILED,
     ERROR_MISSING_REQUIRED,
     ERROR_INVALID_IV,
+    ERROR_INVALID_SHARE_ID,
     ERROR_USER_NOT_FOUND,
     ERROR_INVALID_JSON,
     ERROR_UNEXPECTED,
     SUCCESS_DATA_SAVED,
+    SUCCESS_SHARE_DELETED,
     LOG_CREATE_FAILED,
     LOG_EXPIRED_DELETED,
     LOG_NO_SERVICE_DATA,
     LOG_UPDATE_DATA,
     LOG_UPDATE_DATA_ERROR,
+    LOG_SHARE_DELETED,
+    LOG_DELETE_SHARE_ERROR,
 )
 from .models import SharedPassword
 
@@ -373,6 +379,59 @@ class VaultDataView(View):
             return error_response
 
         return json_ok(**(services.get_user_vault_data(user) or {}))
+
+
+class DeleteShareView(View):
+    """
+    API view to revoke a share owned by the authenticated user.
+
+    The vault calls this when an entry is removed so the underlying
+    ``SharedPassword`` is deleted server-side (the ``/<uuid>/`` link stops
+    working immediately) rather than lingering until it expires. Like the other
+    vault JSON APIs it gates with ``require_session_auth_api`` (JSON 401). The
+    delete is owner-scoped and idempotent: revoking an unknown, foreign, or
+    already-deleted share still reports success.
+    """
+
+    @method_decorator(
+        ratelimit(
+            key=client_ip_key, rate=RATE_LIMIT_DELETE_SHARE, method="POST", block=True
+        )
+    )
+    @method_decorator(require_session_auth_api)
+    def post(self, request: HttpRequest) -> JsonResponse:
+        """Delete the named share if it belongs to the authenticated user."""
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return json_error(ERROR_INVALID_JSON)
+
+        if not isinstance(data, dict):
+            return json_error(ERROR_INVALID_JSON)
+
+        share_id = data.get("share_id")
+        if not share_id or not isinstance(share_id, str):
+            return json_error(ERROR_MISSING_REQUIRED)
+
+        # Filtering a UUIDField with a non-UUID string raises, so validate first.
+        try:
+            uuid.UUID(share_id)
+        except (ValueError, TypeError):
+            return json_error(ERROR_INVALID_SHARE_ID)
+
+        user, error_response = _session_user_or_error(request)
+        if error_response:
+            return error_response
+
+        try:
+            deleted = services.delete_user_share(user, share_id)
+        except Exception as e:
+            logger.error(LOG_DELETE_SHARE_ERROR, exception_type(e))
+            return json_error(ERROR_UNEXPECTED, status=500)
+
+        if deleted:
+            logger.info(LOG_SHARE_DELETED, share_id, user.user_id)
+        return json_ok(SUCCESS_SHARE_DELETED)
 
 
 @method_decorator(

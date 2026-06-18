@@ -23,6 +23,7 @@ from apps.passwd.constants import (
     ERROR_CREATE_FAILED,
     ERROR_INVALID_JSON,
     ERROR_INVALID_IV,
+    ERROR_INVALID_SHARE_ID,
     ERROR_MISSING_REQUIRED,
     ERROR_UNEXPECTED,
     ERROR_USER_NOT_FOUND,
@@ -556,6 +557,72 @@ class UpdateEncryptedDataViewTests(TestCase):
         self.assertIn("RuntimeError", log_output)
         self.assertNotIn(raw_detail, log_output)
         self.assertNotIn("Traceback", log_output)
+
+
+class DeleteShareViewTests(TestCase):
+    """Test cases for DeleteShareView (revoking a vault share)."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = Client()
+        self.url = reverse("passwd:delete_share")
+        self.user = create_user_with_password("TestPassword123!")
+
+    def _authenticate(self):
+        session = self.client.session
+        session["authenticated"] = True
+        session["user_id"] = self.user.user_id
+        session.save()
+
+    def _post(self, body):
+        return self.client.post(
+            self.url, data=json.dumps(body), content_type="application/json"
+        )
+
+    def test_requires_authentication(self):
+        """Unauthenticated requests get a JSON 401."""
+        response = self._post({"share_id": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["success"])
+
+    def test_deletes_owned_share(self):
+        """The owner's share is revoked."""
+        share = make_share(created_by=self.user)
+        self._authenticate()
+        response = self._post({"share_id": str(share.pk)})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertFalse(SharedPassword.objects.filter(pk=share.pk).exists())
+
+    def test_unknown_share_id_is_idempotent_success(self):
+        """Revoking an already-gone share still reports success."""
+        self._authenticate()
+        response = self._post({"share_id": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+
+    def test_cannot_delete_another_users_share(self):
+        """A share owned by someone else is left intact."""
+        other = create_user_with_password("TestPassword456!")
+        share = make_share(created_by=other)
+        self._authenticate()
+        response = self._post({"share_id": str(share.pk)})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(SharedPassword.objects.filter(pk=share.pk).exists())
+
+    def test_missing_share_id_rejected(self):
+        """A POST without a share_id is rejected."""
+        self._authenticate()
+        response = self._post({})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], ERROR_MISSING_REQUIRED)
+
+    def test_invalid_share_id_rejected(self):
+        """A non-UUID share_id is rejected before hitting the database."""
+        self._authenticate()
+        response = self._post({"share_id": "not-a-uuid"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], ERROR_INVALID_SHARE_ID)
 
 
 class DataExportViewTests(TestCase):
