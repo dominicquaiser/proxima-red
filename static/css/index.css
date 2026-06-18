@@ -90,21 +90,16 @@
   font-weight: 500;
 }
 
-.index-hero::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--color-oil-slick);
-}
-
 @media (max-width: 1199px) {
+  /* The hero restructures to its centered "mobile" layout here. Drop the sun
+     so the narrow viewport isn't dominated by it; the footer is intentionally
+     left alone and follows the global 768px rule. */
   .index-hero {
     align-items: center;
   }
-  .index-hero__sun,
+  .index-hero__sun {
+    display: none;
+  }
   .index-hero__inner {
     padding: 40px 24px;
   }

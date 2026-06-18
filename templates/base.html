@@ -4,7 +4,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{% block title %}{% endblock %} – proxima·red</title>
+    <title>{% block full_title %}{% block title %}{% endblock %} – proxima·red{% endblock %}</title>
     {% block meta_description %}
     <meta
       name="description"
@@ -131,7 +131,7 @@
       <div class="footer__links">
         <a href="{{ pass_site_url }}/" class="footer__nav-link">Share a Password</a>
         <a href="{{ site_url }}/about/" class="footer__nav-link">About</a>
-        <a href="https://github.com/dominicquaiser" class="footer__nav-link">Source Code</a>
+        <a href="https://github.com/dominicquaiser/proxima-red" class="footer__nav-link">Source Code</a>
         <div class="footer__right">
           <a href="{{ site_url }}/imprint/">Imprint</a>
           <span class="footer__sep"></span>
