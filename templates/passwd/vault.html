@@ -25,8 +25,8 @@
         <button class="header__id-btn" type="button" id="user-id-btn" title="Copy your user ID">
           {{ user_id|slice:":4" }}-{{ user_id|slice:"4:" }}
         </button>
-        <a href="{{ site_url }}/auth/account/" class="header__btn header__btn--outline">Account</a>
-        <form method="post" action="{{ site_url }}/auth/signout/">
+        <a href="{{ pass_site_url }}/auth/account/" class="header__btn header__btn--outline">Account</a>
+        <form method="post" action="{{ pass_site_url }}/auth/signout/">
           {% csrf_token %}
           <button type="submit" class="header__btn header__btn--outline">Sign Out</button>
         </form>
@@ -193,7 +193,10 @@
       </div>
     </template>
 
+    {% include "partials/_unlock_modal.html" with user_id=user_id %}
+
     {% include "partials/_util_scripts.html" %} {% include "partials/_auth_scripts.html" %}
+    <script src="{% static 'js/unlock.js' %}" defer></script>
     <script src="{% static 'js/vault.js' %}" defer></script>
   </body>
 </html>

@@ -852,10 +852,19 @@
         return;
       }
 
-      const storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
+      let storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
       if (!storedKeyBase64) {
-        disableVault("Secure session expired. Please sign in again.");
-        return;
+        // This tab has no derived key (e.g. a second tab, or one opened after the
+        // sign-in tab closed): the key lives in per-tab sessionStorage and can't
+        // be shared. Offer an in-place unlock instead of forcing a full sign-in.
+        const unlocked = window.SecureSessionUnlock
+          ? await window.SecureSessionUnlock.ensureSecureSession()
+          : false;
+        if (!unlocked) {
+          disableVault("This tab is locked. Reload the page to unlock your vault.");
+          return;
+        }
+        storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
       }
 
       try {

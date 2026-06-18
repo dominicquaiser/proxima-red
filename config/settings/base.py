@@ -161,9 +161,6 @@ CSRF_COOKIE_HTTPONLY = False
 # Always-on hardening (safe in every environment).
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-# Set to ".proxima.red" in production so the session is shared across the
-# proxima.red and pass.proxima.red subdomains (e.g. sign in on proxima.red,
-# then use the vault on pass.proxima.red without re-authenticating).
 SESSION_COOKIE_DOMAIN = env("SESSION_COOKIE_DOMAIN", default=None)
 CSRF_COOKIE_SAMESITE = "Lax"
 
@@ -204,10 +201,7 @@ CONTENT_SECURITY_POLICY = env(
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "font-src 'self'",
-            # account.js (on proxima.red) fetches vault data from pass.proxima.red.
             f"connect-src 'self' {PASS_SITE_URL}",
-            # Cross-domain form submissions: vault signout posts to proxima.red,
-            # account change-password re-encrypts vault data on pass.proxima.red.
             f"form-action 'self' {SITE_URL} {PASS_SITE_URL}",
             "frame-ancestors 'none'",
             "base-uri 'none'",

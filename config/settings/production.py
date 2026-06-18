@@ -48,7 +48,7 @@ CACHES = {
     }
 }
 
-# e.g. ["https://share.example.com"] — required by Django for cross-origin POSTs.
+# e.g. ["https://share.example.com"] - required by Django for cross-origin POSTs.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")  # noqa: F405
 
 # nginx sits in front of the app and appends the real client IP to

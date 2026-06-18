@@ -7,7 +7,9 @@ gate logic lives in one place instead of being duplicated per view.
 """
 
 import logging
+from urllib.parse import urlparse
 
+from django.conf import settings
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect
@@ -22,6 +24,41 @@ from .services import get_user_by_id
 from .utils import get_authenticated_user_id, ratelimited_response
 
 logger = logging.getLogger(__name__)
+
+
+class PassSubdomainRedirectMixin:
+    """Send safe-method requests to the pass subdomain when one is configured.
+
+    The authenticated vault is served on ``PASS_SITE_URL``. Its AES key is
+    derived from the password at sign-in and held in ``sessionStorage``, which is
+    scoped to a single origin and cannot be shared across subdomains. So the
+    whole authenticated flow (sign in, sign up, account) must run on the pass
+    origin, or the vault page won't see the key the user just established and
+    reports "Secure session expired".
+
+    This mixin redirects a GET/HEAD auth page reached on the main host to the
+    same path on the pass host, *before* any key is derived. POSTs are left
+    alone (the form already loaded on, and posts back to, the pass origin).
+    """
+
+    def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
+        return self._redirect_to_pass_subdomain(request) or super().dispatch(
+            request, *args, **kwargs
+        )
+
+    @staticmethod
+    def _redirect_to_pass_subdomain(request: HttpRequest):
+        """Return a redirect to the pass host for off-host GETs, else ``None``."""
+        if request.method not in ("GET", "HEAD"):
+            return None
+        pass_host = urlparse(settings.PASS_SITE_URL).hostname
+        main_host = urlparse(settings.SITE_URL).hostname
+        # No distinct subdomain configured (single-domain / dev / tests).
+        if not pass_host or pass_host == main_host:
+            return None
+        if request.get_host().split(":")[0] == pass_host:
+            return None
+        return redirect(f"{settings.PASS_SITE_URL}{request.get_full_path()}")
 
 
 class SessionAuthRequiredMixin:

@@ -314,13 +314,17 @@ difference is the local `deploy.mk` include, which appends
    ```
 
 4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with
-   the host's certbot:
+   the host's certbot. List **both** the main domain and the vault subdomain in
+   `server_name` — Django dispatches by host, so a single upstream serves both
+   (the vault is canonically `pass.proxima.red`; see `PASS_SITE_URL`). Make sure
+   DNS `A`/`AAAA` records exist for `pass.proxima.red` as well as `proxima.red`
+   before requesting the certificate.
 
    ```nginx
    server {
        listen 80;
        listen [::]:80;
-       server_name proxima.red www.proxima.red;
+       server_name proxima.red www.proxima.red pass.proxima.red;
 
        location / {
            proxy_pass         http://127.0.0.1:8090;
@@ -336,10 +340,12 @@ difference is the local `deploy.mk` include, which appends
    ```bash
    sudo ln -s /etc/nginx/sites-available/proxima-red /etc/nginx/sites-enabled/
    sudo nginx -t && sudo systemctl reload nginx
-   sudo certbot --nginx -d proxima.red -d www.proxima.red
+   sudo certbot --nginx -d proxima.red -d www.proxima.red -d pass.proxima.red
    ```
 
-5. Verify: `curl -sI https://proxima.red | head -1`.
+5. Verify both hosts:
+   `curl -sI https://proxima.red | head -1` and
+   `curl -sI https://pass.proxima.red/vault/ | head -1`.
 
 From here, all the usual operations work unchanged: `make up`, `make down`,
 `make logs`, `make ps`, `make migrate`, `make shell`. To deploy a new release,

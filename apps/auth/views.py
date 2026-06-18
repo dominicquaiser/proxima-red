@@ -8,6 +8,7 @@ and AJAX requests.
 
 import logging
 
+from django.conf import settings
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -27,8 +28,13 @@ from apps.core.http import (
 )
 
 from .exceptions import UserCreationError
-from .mixins import RatelimitGateMixin, SessionAuthRequiredMixin
+from .mixins import (
+    PassSubdomainRedirectMixin,
+    RatelimitGateMixin,
+    SessionAuthRequiredMixin,
+)
 from .models import is_valid_user_id
+from .utils import get_authenticated_user_id, require_session_auth_api
 from .forms import (
     SignupForm,
     SigninForm,
@@ -63,7 +69,19 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 
-class AuthFormView(RatelimitGateMixin, View):
+def vault_url() -> str:
+    """Absolute URL of the vault on the pass subdomain.
+
+    The vault view answers ``/vault/`` on any host, but it is canonically served
+    on ``PASS_SITE_URL`` (e.g. https://pass.proxima.red). Auth flows live on the
+    main site, so they must send users to the subdomain explicitly rather than to
+    a relative ``/vault/`` that would keep them on whatever host they signed in
+    on. When both sites share a host (local dev, tests) this is just that host.
+    """
+    return f"{settings.PASS_SITE_URL}{reverse('passwd:vault')}"
+
+
+class AuthFormView(PassSubdomainRedirectMixin, RatelimitGateMixin, View):
     """
     Shared scaffolding for the public signup and signin pages.
 
@@ -80,7 +98,7 @@ class AuthFormView(RatelimitGateMixin, View):
     def redirect_if_authenticated(self, request: HttpRequest):
         """Return a redirect to the vault for an already-authenticated session, else None."""
         if request.session.get(SESSION_KEY_AUTHENTICATED):
-            return redirect("passwd:vault")
+            return redirect(vault_url())
         return None
 
     def get(self, request: HttpRequest) -> HttpResponse:
@@ -229,6 +247,40 @@ class AuthSaltsView(RatelimitGateMixin, View):
     ratelimit(key=client_ip_key, rate=RATE_LIMIT_SIGNIN, method="POST", block=False),
     name="dispatch",
 )
+class ReauthView(RatelimitGateMixin, View):
+    """
+    Re-verify the *current session's* password and return its public salts.
+
+    Backs the in-place "unlock" prompt (``static/js/unlock.js``): a tab with a
+    valid login but no derived vault key - the key lives in per-tab
+    ``sessionStorage`` and can't be shared across tabs/subdomains - re-derives it
+    without a full sign-out. Unlike ``SigninView`` this neither creates nor
+    short-circuits a session; it only confirms the supplied auth secret matches
+    the logged-in account and hands back the salts to derive the key client-side.
+    Verifying against the *session* user (not a posted ``user_id``) keeps it from
+    becoming a password-checking oracle for other accounts.
+    """
+
+    ratelimit_redirect = "auth:signin"
+
+    @method_decorator(require_session_auth_api)
+    def post(self, request: HttpRequest) -> HttpResponse:
+        auth_secret = (request.POST.get("auth_secret") or "").strip()
+        if not auth_secret:
+            return json_error(ERROR_INVALID_CREDENTIALS, status=400)
+
+        user_id = get_authenticated_user_id(request)
+        user = services.authenticate_user(user_id, auth_secret)
+        if not user:
+            return json_error(ERROR_INVALID_CREDENTIALS, status=401)
+
+        return json_ok(auth_salt=user.auth_salt, vault_salt=user.vault_salt)
+
+
+@method_decorator(
+    ratelimit(key=client_ip_key, rate=RATE_LIMIT_SIGNIN, method="POST", block=False),
+    name="dispatch",
+)
 class SigninView(AuthFormView):
     """
     Zero-knowledge signin view for user authentication.
@@ -295,9 +347,9 @@ class SigninView(AuthFormView):
                 SUCCESS_SIGNIN,
                 auth_salt=user.auth_salt,
                 vault_salt=user.vault_salt,
-                redirect_url=reverse("passwd:vault"),
+                redirect_url=vault_url(),
             ),
-            html=lambda: redirect("passwd:vault"),
+            html=lambda: redirect(vault_url()),
         )
 
 
@@ -331,7 +383,9 @@ class SignoutView(RatelimitGateMixin, View):
     ratelimit(key=client_ip_key, rate=RATE_LIMIT_ACCOUNT, method="POST", block=False),
     name="dispatch",
 )
-class AccountBaseView(RatelimitGateMixin, SessionAuthRequiredMixin, View):
+class AccountBaseView(
+    PassSubdomainRedirectMixin, RatelimitGateMixin, SessionAuthRequiredMixin, View
+):
     """
     Shared authentication gate, rate limiting, and helpers for the account
     pages (view page, password change, account deletion).

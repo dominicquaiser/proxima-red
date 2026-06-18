@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -19,6 +19,7 @@ from apps.auth.constants import (
 )
 from apps.auth.exceptions import UserCreationError
 from apps.auth.models import User
+from apps.auth.views import vault_url
 from apps.auth.tests.factories import create_user_with_password
 from apps.passwd.models import SharedPassword
 
@@ -107,7 +108,7 @@ class SignupViewTests(TestCase):
         self._authenticate_session()
         response = self.client.get(self.signup_url)
         self.assertRedirects(
-            response, reverse("passwd:vault"), fetch_redirect_response=False
+            response, vault_url(), fetch_redirect_response=False
         )
 
     def test_signup_post_redirects_when_authenticated(self):
@@ -122,7 +123,7 @@ class SignupViewTests(TestCase):
             },
         )
         self.assertRedirects(
-            response, reverse("passwd:vault"), fetch_redirect_response=False
+            response, vault_url(), fetch_redirect_response=False
         )
         self.assertEqual(User.objects.count(), 0)
 
@@ -249,7 +250,7 @@ class SigninViewTests(TestCase):
         self.assertTrue(body["success"])
         self.assertIn("vault_salt", body)
         self.assertIn("auth_salt", body)
-        self.assertEqual(body["redirect_url"], reverse("passwd:vault"))
+        self.assertEqual(body["redirect_url"], vault_url())
         self.assertTrue(self.client.session.get("authenticated"))
 
     def test_signin_post_wrong_password(self):
@@ -273,7 +274,7 @@ class SigninViewTests(TestCase):
         )
         response = self.client.get(self.signin_url)
         self.assertRedirects(
-            response, reverse("passwd:vault"), fetch_redirect_response=False
+            response, vault_url(), fetch_redirect_response=False
         )
 
     def test_signin_post_redirects_when_authenticated(self):
@@ -287,7 +288,7 @@ class SigninViewTests(TestCase):
             {"user_id": self.user.user_id, "auth_secret": WRONG_AUTH_SECRET},
         )
         self.assertRedirects(
-            response, reverse("passwd:vault"), fetch_redirect_response=False
+            response, vault_url(), fetch_redirect_response=False
         )
         # The short-circuit must not have torn down the session.
         self.assertTrue(self.client.session.get("authenticated"))
@@ -360,6 +361,158 @@ class SigninViewTests(TestCase):
         body = response.json()
         self.assertFalse(body["success"])
         self.assertEqual(body["error"], ERROR_RATE_LIMITED)
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+)
+class PassSubdomainRedirectTests(TestCase):
+    """The authenticated flow is pinned to the pass subdomain.
+
+    The vault key lives in origin-scoped sessionStorage on PASS_SITE_URL, so auth
+    pages reached on the main host must bounce to the pass host before the key is
+    derived (otherwise the vault reports "Secure session expired").
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.client = Client()
+        self.user = create_user_with_password(AUTH_SECRET)
+
+    def _authenticate(self):
+        session = self.client.session
+        session["authenticated"] = True
+        session["user_id"] = self.user.user_id
+        session.save()
+
+    def test_signin_get_on_main_host_redirects_to_pass(self):
+        """A signin GET on proxima.red is sent to the same path on pass."""
+        response = self.client.get(reverse("auth:signin"), HTTP_HOST="proxima.red")
+        self.assertRedirects(
+            response,
+            "https://pass.proxima.red/auth/signin/",
+            fetch_redirect_response=False,
+        )
+
+    def test_signup_get_on_main_host_redirects_to_pass(self):
+        """A signup GET on proxima.red is sent to the same path on pass."""
+        response = self.client.get(reverse("auth:signup"), HTTP_HOST="proxima.red")
+        self.assertRedirects(
+            response,
+            "https://pass.proxima.red/auth/signup/",
+            fetch_redirect_response=False,
+        )
+
+    def test_account_get_on_main_host_redirects_to_pass(self):
+        """An authenticated account GET on proxima.red is sent to pass."""
+        self._authenticate()
+        response = self.client.get(reverse("auth:account"), HTTP_HOST="proxima.red")
+        self.assertRedirects(
+            response,
+            "https://pass.proxima.red/auth/account/",
+            fetch_redirect_response=False,
+        )
+
+    def test_query_string_is_preserved_in_redirect(self):
+        """The bounce keeps the original path and query intact."""
+        response = self.client.get(
+            reverse("auth:signin") + "?next=/vault/", HTTP_HOST="proxima.red"
+        )
+        self.assertRedirects(
+            response,
+            "https://pass.proxima.red/auth/signin/?next=/vault/",
+            fetch_redirect_response=False,
+        )
+
+    def test_signin_get_on_pass_host_is_served_directly(self):
+        """On the pass host the page renders without a redirect."""
+        response = self.client.get(
+            reverse("auth:signin"), HTTP_HOST="pass.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(
+        SITE_URL="https://proxima.red", PASS_SITE_URL="https://proxima.red"
+    )
+    def test_single_domain_does_not_redirect(self):
+        """When both sites share a host the mixin is a no-op."""
+        response = self.client.get(reverse("auth:signin"), HTTP_HOST="proxima.red")
+        self.assertEqual(response.status_code, 200)
+
+
+class ReauthViewTests(TestCase):
+    """The reauth endpoint backs the in-place unlock prompt."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = Client()
+        self.reauth_url = reverse("auth:reauth")
+        self.user = create_user_with_password(AUTH_SECRET)
+
+    def _authenticate(self):
+        session = self.client.session
+        session["authenticated"] = True
+        session["user_id"] = self.user.user_id
+        session.save()
+
+    def test_requires_authentication(self):
+        """An unauthenticated request is rejected with a JSON 401."""
+        response = self.client.post(
+            self.reauth_url,
+            {"auth_secret": AUTH_SECRET},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["success"])
+
+    def test_correct_secret_returns_salts(self):
+        """The session user's correct secret returns the public salts."""
+        self._authenticate()
+        response = self.client.post(
+            self.reauth_url,
+            {"auth_secret": AUTH_SECRET},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["auth_salt"], self.user.auth_salt)
+        self.assertEqual(body["vault_salt"], self.user.vault_salt)
+
+    def test_wrong_secret_is_rejected(self):
+        """A wrong secret returns a 401 and no salts (so no bad key is derived)."""
+        self._authenticate()
+        response = self.client.post(
+            self.reauth_url,
+            {"auth_secret": WRONG_AUTH_SECRET},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["success"])
+
+    def test_missing_secret_is_rejected(self):
+        """An empty payload is a 400, not a server error."""
+        self._authenticate()
+        response = self.client.post(
+            self.reauth_url, {}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
+
+    def test_verifies_against_session_user_not_posted_id(self):
+        """A posted user_id can't redirect the check to another account."""
+        self._authenticate()
+        other = create_user_with_password(NEW_AUTH_SECRET)
+        # Correct secret for `other`, but the session belongs to self.user.
+        response = self.client.post(
+            self.reauth_url,
+            {"auth_secret": NEW_AUTH_SECRET, "user_id": other.user_id},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["success"])
 
 
 class AuthSaltsViewTests(TestCase):

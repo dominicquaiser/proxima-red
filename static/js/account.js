@@ -36,23 +36,24 @@
     return response.json();
   };
 
-  // Decrypt the stored vault blob with the *current* session key so it can be
-  // re-encrypted under the new key after the password (and vault salt) rotates.
-  // Returns the decrypted vault object, or null when the user has nothing stored.
-  // Throws when a blob exists but cannot be read (no/incorrect session key),
-  // so the caller can abort the password change instead of orphaning the data.
-  const recoverCurrentVaultData = async (vaultDataUrl) => {
+  const resolveCurrentVaultKey = async (currentPassword, currentVaultSalt) => {
+    const storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
+    if (storedKeyBase64) {
+      return window.AuthCrypto.importKeyFromBase64(storedKeyBase64);
+    }
+    if (!currentPassword || !currentVaultSalt) {
+      throw new Error("No session key available and cannot derive one to read existing vault data.");
+    }
+    return window.AuthCrypto.deriveKeyFromPassword(currentPassword, currentVaultSalt);
+  };
+
+  const recoverCurrentVaultData = async (vaultDataUrl, currentPassword, currentVaultSalt) => {
     const blob = await fetchVaultBlob(vaultDataUrl);
     if (!blob || !blob.success || !blob.encrypted_data || !blob.iv) {
       return null;
     }
 
-    const oldKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
-    if (!oldKeyBase64) {
-      throw new Error("No session key available to read existing vault data.");
-    }
-
-    const oldKey = await window.AuthCrypto.importKeyFromBase64(oldKeyBase64);
+    const oldKey = await resolveCurrentVaultKey(currentPassword, currentVaultSalt);
     return window.AuthCrypto.decryptAccountData(blob.encrypted_data, blob.iv, oldKey);
   };
 
@@ -94,14 +95,17 @@
   // (encrypted under the old key) must be re-encrypted or it becomes unreadable.
   // If a blob exists but can't be read, fail (ok: false) before the change so
   // the data isn't orphaned (the change is retryable; the saved links are not).
-  const recoverVaultBeforeChange = async (vaultDataUrl) => {
+  const recoverVaultBeforeChange = async (vaultDataUrl, currentPassword, currentVaultSalt) => {
     try {
-      return { ok: true, vaultData: await recoverCurrentVaultData(vaultDataUrl) };
+      return {
+        ok: true,
+        vaultData: await recoverCurrentVaultData(vaultDataUrl, currentPassword, currentVaultSalt),
+      };
     } catch (recoveryError) {
       console.error("Could not read existing vault before password change:", recoveryError);
       window.Notify.show(
         "We couldn't access your saved links to re-secure them. " +
-          "Please sign in again, then change your password.",
+          "Please check your current password and try again.",
         "error",
       );
       return { ok: false, vaultData: null };
@@ -198,7 +202,11 @@
         await window.FormUi.submitWithBusy(
           submitButton,
           async () => {
-            const recovery = await recoverVaultBeforeChange(vaultDataUrl);
+            const recovery = await recoverVaultBeforeChange(
+              vaultDataUrl,
+              currentPassword,
+              authData.vault_salt,
+            );
             if (!recovery.ok) return;
 
             await fillDerivedSecretFields(currentPassword, newPassword, authData.auth_salt);

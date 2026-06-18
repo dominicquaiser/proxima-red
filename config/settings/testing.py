@@ -18,3 +18,7 @@ DATABASES = {
 
 # Fast hashing for tests (the real Argon2 hasher is slow by design).
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+SITE_URL = "http://testserver"
+PASS_SITE_URL = "http://testserver"
+ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
