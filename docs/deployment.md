@@ -21,6 +21,7 @@ Production runs six containers behind an nginx reverse proxy with automatic Let'
   - [4. Issue TLS certificates](#4-issue-tls-certificates)
   - [5. Launch the stack](#5-launch-the-stack)
   - [6. Verify the deployment](#6-verify-the-deployment)
+- [Deploying behind an existing host nginx](#deploying-behind-an-existing-host-nginx)
 - [Operations](#operations)
   - [Viewing logs](#viewing-logs)
   - [Updating to a new release](#updating-to-a-new-release)
@@ -80,6 +81,7 @@ never exposed directly.
 | `docker-compose.yml`          | Base definition (`db` + `web`), shared by all environments               |
 | `docker-compose.override.yml` | Development overrides — **merged automatically** by `docker compose`     |
 | `docker-compose.prod.yml`     | Production overrides — adds `nginx`, `certbot`, `cron`, restart policies |
+| `docker-compose.host.yml`     | Host-nginx overrides — adds `staticproxy` for servers that run their own nginx ([see below](#deploying-behind-an-existing-host-nginx)) |
 
 ---
 
@@ -197,8 +199,8 @@ Install Docker Engine and the Compose plugin (see the
 repository:
 
 ```bash
-git clone <your-repository-url> proximared
-cd proximared
+git clone <your-repository-url> proxima-red
+cd proxima-red
 ```
 
 ### 2. Configure the environment
@@ -262,6 +264,98 @@ Then browse to `https://<DOMAIN>/`, confirm the certificate is valid, and that
 
 ---
 
+## Deploying behind an existing host nginx
+
+The standard setup above assumes the project's bundled `nginx` and `certbot`
+own ports 80/443. If your server **already runs its own (system) nginx** as the
+public reverse proxy — e.g. a multi-app host where nginx fronts several services
+— use the **host-nginx model** instead. The bundled `nginx`/`certbot` are not
+started; a small `staticproxy` container serves `/static/` and proxies to `web`,
+published only on `127.0.0.1:8090`, and the host nginx terminates TLS and proxies
+to it.
+
+> **Do not run `init-letsencrypt.sh` in this model.** It starts the bundled
+> nginx, which collides with the host nginx on ports 80/443.
+
+```
+Internet ─HTTPS─► host nginx (:443, system) ─► staticproxy (127.0.0.1:8090) ─► web (gunicorn :8000) ─► db / redis
+                  TLS via the host certbot      serves /static/, proxies                                + cron
+```
+
+**Extra files (alongside the standard compose files):**
+
+| File                             | Purpose                                                                                              |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `docker-compose.host.yml`        | Adds the `staticproxy` container on `127.0.0.1:8090`; the bundled `nginx`/`certbot` are not started  |
+| `deployment/nginx/host.conf`     | Plain-HTTP nginx config for `staticproxy` (no TLS; passes `X-Forwarded-Proto` **through** from host)  |
+| `deploy.mk` (from `deploy.mk.example`) | Per-host Makefile include that points the standard `make` targets at the host-nginx model      |
+
+This model uses the **same `make` targets** as the bundled setup — the only
+difference is the local `deploy.mk` include, which appends
+`docker-compose.host.yml` and limits the started services to
+`db redis web cron staticproxy`.
+
+**Steps:**
+
+1. Configure `.env` as in [step 2](#2-configure-the-environment). For a single
+   domain set `PASS_SITE_URL` equal to `SITE_URL`. Because there are **two**
+   proxy hops (host nginx + `staticproxy`), set `RATELIMIT_TRUSTED_PROXY_COUNT=2`.
+
+2. Enable the host-nginx model for `make` (git-ignored, one-time per host):
+
+   ```bash
+   cp deploy.mk.example deploy.mk
+   ```
+
+3. Start the stack with the usual target:
+
+   ```bash
+   make up
+   ```
+
+4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with
+   the host's certbot:
+
+   ```nginx
+   server {
+       listen 80;
+       listen [::]:80;
+       server_name proxima.red www.proxima.red;
+
+       location / {
+           proxy_pass         http://127.0.0.1:8090;
+           proxy_http_version 1.1;
+           proxy_set_header   Host $host;
+           proxy_set_header   X-Real-IP $remote_addr;
+           proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header   X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
+
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/proxima-red /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   sudo certbot --nginx -d proxima.red -d www.proxima.red
+   ```
+
+5. Verify: `curl -sI https://proxima.red | head -1`.
+
+From here, all the usual operations work unchanged: `make up`, `make down`,
+`make logs`, `make ps`, `make migrate`, `make shell`. To deploy a new release,
+`git pull` then `make up`.
+
+> **Firewall note (Docker + ufw).** If the host hardens Docker with
+> `"iptables": false` and a default-deny ufw, container networking breaks in
+> several non-obvious ways (forwarding, host↔container, loopback to published
+> ports). Prefer letting Docker manage iptables — since every container binds
+> `127.0.0.1`, nothing is publicly exposed and ufw still governs the host's
+> inbound. If you must keep ufw strict, allow the Docker bridge range with
+> `sudo ufw allow from 172.16.0.0/12` and ensure `ufw-before-input` keeps its
+> loopback/established accepts.
+
+---
+
 ## Operations
 
 Common production operations are available as Makefile targets — run `make help` for a full list. For ad-hoc commands not covered by the Makefile, export the alias below to avoid repeating the `-f` flags:
@@ -303,14 +397,14 @@ are available in your shell):
 
 ```bash
 set -a; . ./.env; set +a
-gunzip -c backups/proximared-YYYYMMDD-HHMMSS.sql.gz \
+gunzip -c backups/proxima-red-YYYYMMDD-HHMMSS.sql.gz \
   | dcp exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
 Schedule regular backups with a host cron entry, for example:
 
 ```cron
-0 3 * * * cd /path/to/proximared && ./deployment/scripts/backup.sh
+0 3 * * * cd /path/to/proxima-red && ./deployment/scripts/backup.sh
 ```
 
 ### Expired share cleanup
@@ -436,7 +530,11 @@ dcp ps                                     # container status
 dcp exec web python manage.py check --deploy
 dcp logs -f web                            # tail a specific service
 
+# --- Production (host-nginx model) ---
+cp deploy.mk.example deploy.mk             # one-time: point `make` at the host-nginx model
+make up                                    # then the usual targets work: up/down/logs/ps/migrate/shell
+
 # --- One-time / maintenance ---
-./deployment/scripts/init-letsencrypt.sh   # bootstrap TLS certificates
+./deployment/scripts/init-letsencrypt.sh   # bootstrap TLS certificates (bundled-nginx model only)
 ./deployment/scripts/backup.sh             # gzipped pg_dump into ./backups/
 ```

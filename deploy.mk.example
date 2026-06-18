@@ -1,0 +1,13 @@
+# Per-host deployment overrides for the Makefile. Copy to `deploy.mk` (which is
+# git-ignored) on hosts that run their OWN (system) nginx as the public reverse
+# proxy. With this in place, the standard `make` targets (up, down, logs, ps,
+# migrate, shell) drive the host-nginx model instead of the bundled nginx/certbot.
+#
+# See docs/deployment.md → "Deploying behind an existing host nginx".
+
+# Add the staticproxy override (serves /static/ + proxies to web on 127.0.0.1:8090).
+COMPOSE_EXTRA = -f docker-compose.host.yml
+
+# Start only these services — the bundled nginx/certbot are intentionally omitted
+# (the host's nginx owns ports 80/443 and terminates TLS).
+SERVICES = db redis web cron staticproxy

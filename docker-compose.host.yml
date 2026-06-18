@@ -1,0 +1,26 @@
+# Host-nginx deployment override.
+#
+# For servers that already run their own (system) nginx as the public reverse
+# proxy and TLS terminator.
+#
+# This adds a `staticproxy` nginx container that serves /static/ from the shared
+# volume and proxies to web:8000, published on 127.0.0.1:8090. The host nginx
+# terminates TLS and proxies to 127.0.0.1:8090.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.host.yml \
+#     up -d --build db redis web cron staticproxy
+#
+# (Or simply: `make up-host`.)  Do NOT run deployment/scripts/init-letsencrypt.sh
+# on a host-nginx server.
+
+services:
+  staticproxy:
+    image: nginx:1.27-alpine
+    depends_on:
+      - web
+    volumes:
+      - ./deployment/nginx/host.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_volume:/app/staticfiles:ro
+    ports:
+      - "127.0.0.1:8090:80"
+    restart: unless-stopped

@@ -18,6 +18,7 @@ local_settings.py
 # --- Environment ---
 .env
 .envrc
+deploy.mk
 .venv
 env/
 venv/
