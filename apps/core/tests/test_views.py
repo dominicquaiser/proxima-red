@@ -70,6 +70,18 @@ class IndexViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "passwd/create.html")
 
+    def test_main_site_post_falls_through_to_create(self):
+        """POST / on the main host reaches the share-create view, not the landing
+        page (the vault's create modal posts to passwd:create, i.e. "/")."""
+        response = self.client.post(
+            "/",
+            {"encrypted_data": "", "iv": ""},
+            HTTP_HOST="proxima.red",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
+
 
 @override_settings(
     SITE_URL="https://proxima.red",

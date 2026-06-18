@@ -40,8 +40,13 @@ def index(request: HttpRequest) -> HttpResponse:
 
     Both sites are served from one Django instance over ``/``; this dispatches
     by host the same way ``robots.txt``/``sitemap.xml`` do.
+
+    The landing page is read-only, so only safe-method requests are claimed for
+    it. Everything else falls through to the share view - notably the vault's
+    create-share POST, which reverses to ``passwd:create`` (``/``) and must
+    reach the JSON endpoint regardless of which host the vault was opened on.
     """
-    if _is_main_site(request):
+    if request.method in ("GET", "HEAD") and _is_main_site(request):
         return render(request, "core/index.html")
     # Imported here to avoid a core -> passwd import at module load.
     from apps.passwd.views import CreateShareView

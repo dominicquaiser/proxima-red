@@ -46,7 +46,27 @@
   // Label restored on the create-modal submit button when it is idle.
   const CREATE_LINK_LABEL = "Create Encrypted Link";
 
+  // Tag constraints. Tags live inside the encrypted vault blob (one normalized,
+  // lower-cased string each); these bound their length and per-share count.
+  const MAX_TAG_LENGTH = 24;
+  const MAX_TAGS_PER_SHARE = 6;
+
   // --- Pure helpers (no DOM access, no page state) ---
+
+  // Canonical form of a single tag: trimmed, lower-cased, length-capped.
+  const normalizeTag = (value) => (value || "").trim().toLowerCase().slice(0, MAX_TAG_LENGTH);
+
+  // Normalize a tag list: canonicalize each, drop empties/duplicates, cap count.
+  const normalizeTagList = (tags) => {
+    const seen = [];
+    (Array.isArray(tags) ? tags : []).forEach((raw) => {
+      const tag = normalizeTag(raw);
+      if (tag && !seen.includes(tag)) seen.push(tag);
+    });
+    return seen.slice(0, MAX_TAGS_PER_SHARE);
+  };
+
+  const getShareTags = (share) => (Array.isArray(share.tags) ? share.tags : []);
 
   const formatShortDate = (value) => {
     if (!value) return "—";
@@ -119,6 +139,8 @@
     const listingCount = document.getElementById("listing-count");
     const userIdBtn = document.getElementById("user-id-btn");
     const statusLinks = document.querySelectorAll(".status-link");
+    const tagCloud = document.getElementById("tag-cloud");
+    const tagCloudEmpty = document.getElementById("tag-cloud-empty");
     const sortHeaders = document.querySelectorAll(".row-head__cell[data-sort]");
     const countEls = {
       all: document.querySelector('[data-count="all"]'),
@@ -137,6 +159,7 @@
     let isCopyingLink = false;
     let searchTerm = "";
     let statusFilter = "all"; // 'all' | 'active' | 'expired'
+    let tagFilter = null; // null, or a single tag name to filter the listing by
     let sortKey = null; // 'title' | 'created' | 'status' | 'expiry' | null
     let sortDir = "asc"; // 'asc' | 'desc'
     let shareFormController = null; // set up in setupModalInputs()
@@ -193,6 +216,45 @@
       });
     };
 
+    // Fill a row's ".tags" cell: one colour-coded ".tag" chip (with a remove
+    // button) per tag, plus a trailing "+" affordance until the per-share cap is
+    // reached. Colours come from the shared deterministic tile palette.
+    const renderShareTags = (container, share) => {
+      const tags = getShareTags(share);
+      container.innerHTML = "";
+
+      tags.forEach((tag) => {
+        const chip = document.createElement("span");
+        chip.className = "tag";
+        chip.style.color = pickTileColor(tag);
+        chip.dataset.tag = tag;
+
+        const label = document.createElement("span");
+        label.className = "tag__label";
+        label.textContent = tag;
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "tag__remove";
+        remove.title = "Remove tag";
+        remove.setAttribute("aria-label", `Remove tag ${tag}`);
+        remove.textContent = "×";
+
+        chip.append(label, remove);
+        container.appendChild(chip);
+      });
+
+      if (tags.length < MAX_TAGS_PER_SHARE) {
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "tag-add";
+        addBtn.title = "Add tag";
+        addBtn.setAttribute("aria-label", "Add tag");
+        addBtn.textContent = "+";
+        container.appendChild(addBtn);
+      }
+    };
+
     // Clone the #share-row-template and fill in this share's data. The static
     // structure (cells, icon buttons, masked secret) lives in the template;
     // only the dynamic text/colour and the expired-state tweaks happen here.
@@ -214,6 +276,11 @@
       titleEl.textContent = title;
       titleEl.title = title;
       titleEl.classList.toggle("row__title--expired", isExpired);
+
+      const tagsContainer = row.querySelector(".tags");
+      if (tagsContainer) {
+        renderShareTags(tagsContainer, share);
+      }
 
       row.querySelector(".row__created").textContent = formatShortDate(share.created_at);
 
@@ -253,16 +320,56 @@
       if (countEls.expired) countEls.expired.textContent = expired;
     };
 
+    // Unique, sorted set of every tag in use across the vault.
+    const collectAllTags = () => {
+      const set = new Set();
+      userShares.forEach((share) => getShareTags(share).forEach((tag) => set.add(tag)));
+      return Array.from(set).sort((a, b) => a.localeCompare(b));
+    };
+
+    // Rebuild the sidebar tag cloud from the in-use tag set, highlighting the
+    // active filter. `tags` is the result of collectAllTags() (already reconciled
+    // against tagFilter by the caller).
+    const renderTagCloud = (tags) => {
+      if (!tagCloud) return;
+
+      tagCloud.innerHTML = "";
+      tags.forEach((tag) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.style.color = pickTileColor(tag);
+        chip.dataset.tag = tag;
+        chip.textContent = tag;
+        if (tag === tagFilter) {
+          chip.classList.add("chip--active");
+        }
+        tagCloud.appendChild(chip);
+      });
+
+      if (tagCloudEmpty) {
+        tagCloudEmpty.classList.toggle("hidden", tags.length > 0);
+      }
+    };
+
     const renderShares = () => {
       if (!shareList) return;
 
       shareList.innerHTML = "";
       updateCounts();
 
+      // Reconcile a stale tag filter (its tag may have been removed) before it is
+      // used for filtering, so the listing and cloud agree within one render.
+      const allTags = collectAllTags();
+      if (tagFilter && !allTags.includes(tagFilter)) {
+        tagFilter = null;
+      }
+
       const term = searchTerm.trim().toLowerCase();
       const visibleShares = userShares.filter((share) => {
         if (statusFilter === "active" && isShareExpired(share)) return false;
         if (statusFilter === "expired" && !isShareExpired(share)) return false;
+        if (tagFilter && !getShareTags(share).includes(tagFilter)) return false;
         if (term && !(share.title || "Untitled").toLowerCase().includes(term)) return false;
         return true;
       });
@@ -292,11 +399,13 @@
       }
 
       if (listingCount) {
-        const isFiltered = Boolean(term) || statusFilter !== "all";
+        const isFiltered = Boolean(term) || statusFilter !== "all" || Boolean(tagFilter);
         listingCount.textContent = isFiltered
           ? `Showing ${visibleShares.length} of ${userShares.length} shares`
           : `Showing ${userShares.length} share${userShares.length === 1 ? "" : "s"}`;
       }
+
+      renderTagCloud(allTags);
     };
 
     // --- Persistence ---
@@ -321,6 +430,9 @@
         );
 
         userShares = Array.isArray(decrypted?.shares) ? decrypted.shares : [];
+        userShares.forEach((share) => {
+          share.tags = normalizeTagList(share.tags);
+        });
       } catch (error) {
         console.error("Failed to decrypt saved vault data:", error);
         userShares = [];
@@ -443,6 +555,7 @@
           key,
           expires_at: result.expires_at,
           created_at: result.created_at,
+          tags: [],
         };
 
         // Optimistically add the share, rolling back if the vault blob won't persist.
@@ -515,10 +628,91 @@
       );
     };
 
+    // Add a normalized tag to a share, persisting the encrypted vault blob.
+    // No-ops (duplicate or over the per-share cap) leave the array untouched.
+    const addTagToShare = (shareId, tag) =>
+      commitShareChange((shares) =>
+        shares.map((share) => {
+          if (share.id !== shareId) return share;
+          const tags = getShareTags(share);
+          if (tags.includes(tag) || tags.length >= MAX_TAGS_PER_SHARE) return share;
+          return { ...share, tags: [...tags, tag] };
+        }),
+      );
+
+    // Remove a tag from a share, persisting the encrypted vault blob.
+    const removeTagFromShare = (shareId, tag) =>
+      commitShareChange((shares) =>
+        shares.map((share) =>
+          share.id === shareId
+            ? { ...share, tags: getShareTags(share).filter((existing) => existing !== tag) }
+            : share,
+        ),
+      );
+
+    // Swap a row's "+" affordance for an inline text input. Enter commits the
+    // normalized tag, Escape or blur cancels; either way the listing re-renders
+    // (restoring the "+"). A guard keeps the blur-after-Enter from double-firing.
+    const startTagInput = (addBtn, shareId) => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "tag-input";
+      input.maxLength = MAX_TAG_LENGTH;
+      input.setAttribute("aria-label", "New tag");
+
+      let settled = false;
+      const commit = () => {
+        if (settled) return;
+        settled = true;
+        const tag = normalizeTag(input.value);
+        if (tag) {
+          addTagToShare(shareId, tag);
+        } else {
+          renderShares();
+        }
+      };
+      const cancel = () => {
+        if (settled) return;
+        settled = true;
+        renderShares();
+      };
+
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          cancel();
+        }
+      });
+      input.addEventListener("blur", commit);
+
+      addBtn.replaceWith(input);
+      input.focus();
+    };
+
     // Delegated click handler routing row actions to the right handler.
     const handleShareListClick = async (event) => {
       const row = event.target.closest(".row");
       if (!row) return;
+
+      const tagRemoveBtn = event.target.closest(".tag__remove");
+      if (tagRemoveBtn) {
+        event.preventDefault();
+        const tag = tagRemoveBtn.closest(".tag")?.dataset.tag;
+        if (tag) {
+          await removeTagFromShare(row.dataset.shareId, tag);
+        }
+        return;
+      }
+
+      const tagAddBtn = event.target.closest(".tag-add");
+      if (tagAddBtn) {
+        event.preventDefault();
+        startTagInput(tagAddBtn, row.dataset.shareId);
+        return;
+      }
 
       const copyBtn = event.target.closest(".copy-link-btn");
       if (copyBtn) {
@@ -601,6 +795,19 @@
           renderShares();
         });
       });
+
+      // Clicking a sidebar tag filters the listing to shares carrying it; the
+      // active tag (or any other) toggles/replaces it. Chips are rebuilt on every
+      // render, so this is delegated from the container.
+      if (tagCloud) {
+        tagCloud.addEventListener("click", (event) => {
+          const chip = event.target.closest(".chip");
+          if (!chip) return;
+          const tag = chip.dataset.tag;
+          tagFilter = tagFilter === tag ? null : tag;
+          renderShares();
+        });
+      }
 
       if (userIdBtn) {
         userIdBtn.addEventListener("click", async () => {

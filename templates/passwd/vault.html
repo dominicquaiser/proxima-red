@@ -70,12 +70,8 @@
 
           <div class="sidebar__group">
             <div class="sidebar__label">// Tags</div>
-            <div class="tag-cloud">
-              <span class="chip chip--work">work</span>
-              <span class="chip chip--personal">personal</span>
-              <span class="chip chip--servers">servers</span>
-              <span class="chip chip--critical">critical</span>
-            </div>
+            <div class="tag-cloud" id="tag-cloud"></div>
+            <div class="tag-cloud__empty" id="tag-cloud-empty">No tags yet.</div>
           </div>
         </aside>
 
@@ -94,6 +90,7 @@
             <button type="button" class="row-head__cell" data-sort="title" aria-sort="none">
               Entry<span class="sort-caret"></span>
             </button>
+            <span class="row-head__label">Tags</span>
             <button type="button" class="row-head__cell" data-sort="created" aria-sort="none">
               Created<span class="sort-caret"></span>
             </button>
@@ -144,14 +141,7 @@
 
           <div class="card__body">
             <form id="inlinePasswordForm" method="post" action="{% url 'passwd:create' %}">
-              {% include "passwd/_share_form_fields.html" with
-              encrypted_data_id="modal-encrypted-data" iv_id="modal-iv"
-              encrypted_title_id="modal-encrypted-title" title_iv_id="modal-title-iv"
-              title_id="modal-share-title" password_id="modal-share-password"
-              multiline_id="modal-share-password-multiline" key_toggle_id="modal-key-mode-toggle"
-              password_toggle_id="modal-password-toggle" expiry_id_prefix="m-e"
-              password_placeholder="Paste your password or secret" submit_label="Create Encrypted
-              Link" password_required=True %}
+              {% include "passwd/_share_form_fields.html" with encrypted_data_id="modal-encrypted-data" iv_id="modal-iv" encrypted_title_id="modal-encrypted-title" title_iv_id="modal-title-iv" title_id="modal-share-title" password_id="modal-share-password" multiline_id="modal-share-password-multiline" key_toggle_id="modal-key-mode-toggle" password_toggle_id="modal-password-toggle" expiry_id_prefix="m-e" password_placeholder="Paste your password or secret" submit_label="Create Encrypted Link" password_required=True %}
             </form>
           </div>
         </div>
@@ -172,6 +162,9 @@
               ********************************
             </div>
           </div>
+        </div>
+        <div class="row__tags">
+          <div class="tags"></div>
         </div>
         <div class="row__created"></div>
         <div class="row__status">
