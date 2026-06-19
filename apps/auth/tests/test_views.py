@@ -368,12 +368,13 @@ class SigninViewTests(TestCase):
     PASS_SITE_URL="https://pass.proxima.red",
     ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
 )
-class PassSubdomainRedirectTests(TestCase):
-    """The authenticated flow is pinned to the pass subdomain.
+class MainSiteRedirectTests(TestCase):
+    """The auth flow is canonical on the main site (SITE_URL).
 
-    The vault key lives in origin-scoped sessionStorage on PASS_SITE_URL, so auth
-    pages reached on the main host must bounce to the pass host before the key is
-    derived (otherwise the vault reports "Secure session expired").
+    Auth is the shared identity origin for every tool, so auth pages reached on a
+    service subdomain (pass.proxima.red) bounce to the same path on the main host.
+    The vault key derived at sign-in is handed to the vault origin in the redirect
+    URL fragment (see static/js/auth-crypto.js consumeVaultKeyFromFragment).
     """
 
     def setUp(self):
@@ -387,50 +388,50 @@ class PassSubdomainRedirectTests(TestCase):
         session["user_id"] = self.user.user_id
         session.save()
 
-    def test_signin_get_on_main_host_redirects_to_pass(self):
-        """A signin GET on proxima.red is sent to the same path on pass."""
-        response = self.client.get(reverse("auth:signin"), HTTP_HOST="proxima.red")
+    def test_signin_get_on_pass_host_redirects_to_main(self):
+        """A signin GET on pass.proxima.red is sent to the same path on main."""
+        response = self.client.get(reverse("auth:signin"), HTTP_HOST="pass.proxima.red")
         self.assertRedirects(
             response,
-            "https://pass.proxima.red/auth/signin/",
+            "https://proxima.red/auth/signin/",
             fetch_redirect_response=False,
         )
 
-    def test_signup_get_on_main_host_redirects_to_pass(self):
-        """A signup GET on proxima.red is sent to the same path on pass."""
-        response = self.client.get(reverse("auth:signup"), HTTP_HOST="proxima.red")
+    def test_signup_get_on_pass_host_redirects_to_main(self):
+        """A signup GET on pass.proxima.red is sent to the same path on main."""
+        response = self.client.get(reverse("auth:signup"), HTTP_HOST="pass.proxima.red")
         self.assertRedirects(
             response,
-            "https://pass.proxima.red/auth/signup/",
+            "https://proxima.red/auth/signup/",
             fetch_redirect_response=False,
         )
 
-    def test_account_get_on_main_host_redirects_to_pass(self):
-        """An authenticated account GET on proxima.red is sent to pass."""
+    def test_account_get_on_pass_host_redirects_to_main(self):
+        """An authenticated account GET on pass.proxima.red is sent to main."""
         self._authenticate()
-        response = self.client.get(reverse("auth:account"), HTTP_HOST="proxima.red")
+        response = self.client.get(
+            reverse("auth:account"), HTTP_HOST="pass.proxima.red"
+        )
         self.assertRedirects(
             response,
-            "https://pass.proxima.red/auth/account/",
+            "https://proxima.red/auth/account/",
             fetch_redirect_response=False,
         )
 
     def test_query_string_is_preserved_in_redirect(self):
         """The bounce keeps the original path and query intact."""
         response = self.client.get(
-            reverse("auth:signin") + "?next=/vault/", HTTP_HOST="proxima.red"
+            reverse("auth:signin") + "?next=/vault/", HTTP_HOST="pass.proxima.red"
         )
         self.assertRedirects(
             response,
-            "https://pass.proxima.red/auth/signin/?next=/vault/",
+            "https://proxima.red/auth/signin/?next=/vault/",
             fetch_redirect_response=False,
         )
 
-    def test_signin_get_on_pass_host_is_served_directly(self):
-        """On the pass host the page renders without a redirect."""
-        response = self.client.get(
-            reverse("auth:signin"), HTTP_HOST="pass.proxima.red"
-        )
+    def test_signin_get_on_main_host_is_served_directly(self):
+        """On the main host the page renders without a redirect."""
+        response = self.client.get(reverse("auth:signin"), HTTP_HOST="proxima.red")
         self.assertEqual(response.status_code, 200)
 
     @override_settings(

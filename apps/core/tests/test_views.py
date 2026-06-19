@@ -146,7 +146,11 @@ class SitemapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/xml")
         self.assertTemplateUsed(response, "core/sitemap_proxima.xml")
-        self.assertIn("https://proxima.red/about/", response.content.decode())
+        body = response.content.decode()
+        self.assertIn("https://proxima.red/about/", body)
+        # Auth is canonical on the main site, so it advertises the auth pages.
+        self.assertIn("https://proxima.red/auth/signin/", body)
+        self.assertIn("https://proxima.red/auth/signup/", body)
 
     def test_pass_subdomain_renders_pass_sitemap(self):
         """The pass subdomain serves sitemap_pass.xml with PASS_SITE_URL locations."""
@@ -156,7 +160,10 @@ class SitemapTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/xml")
         self.assertTemplateUsed(response, "core/sitemap_pass.xml")
-        self.assertIn("https://pass.proxima.red/", response.content.decode())
+        body = response.content.decode()
+        self.assertIn("https://pass.proxima.red/", body)
+        # Auth moved to the main site; the pass sitemap must not list it.
+        self.assertNotIn("/auth/", body)
 
 
 class SecurityHeadersTests(TestCase):

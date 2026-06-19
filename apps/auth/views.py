@@ -29,7 +29,7 @@ from apps.core.http import (
 
 from .exceptions import UserCreationError
 from .mixins import (
-    PassSubdomainRedirectMixin,
+    MainSiteRedirectMixin,
     RatelimitGateMixin,
     SessionAuthRequiredMixin,
 )
@@ -81,7 +81,7 @@ def vault_url() -> str:
     return f"{settings.PASS_SITE_URL}{reverse('passwd:vault')}"
 
 
-class AuthFormView(PassSubdomainRedirectMixin, RatelimitGateMixin, View):
+class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
     """
     Shared scaffolding for the public signup and signin pages.
 
@@ -384,7 +384,7 @@ class SignoutView(RatelimitGateMixin, View):
     name="dispatch",
 )
 class AccountBaseView(
-    PassSubdomainRedirectMixin, RatelimitGateMixin, SessionAuthRequiredMixin, View
+    MainSiteRedirectMixin, RatelimitGateMixin, SessionAuthRequiredMixin, View
 ):
     """
     Shared authentication gate, rate limiting, and helpers for the account

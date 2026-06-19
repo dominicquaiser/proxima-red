@@ -25,8 +25,8 @@
         <button class="header__id-btn" type="button" id="user-id-btn" title="Copy your user ID">
           {{ user_id|slice:":4" }}-{{ user_id|slice:"4:" }}
         </button>
-        <a href="{{ pass_site_url }}/auth/account/" class="header__btn header__btn--outline">Account</a>
-        <form method="post" action="{{ pass_site_url }}/auth/signout/">
+        <a href="{{ site_url }}/auth/account/" class="header__btn header__btn--outline">Account</a>
+        <form method="post" action="{% url 'auth:signout' %}">
           {% csrf_token %}
           <button type="submit" class="header__btn header__btn--outline">Sign Out</button>
         </form>

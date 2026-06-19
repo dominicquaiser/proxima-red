@@ -275,3 +275,93 @@ describe("secure session storage", () => {
     assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), null);
   });
 });
+
+describe("deriveVaultKeyBase64", () => {
+  test("returns the same Base64 key establishSecureSession would store", async () => {
+    const salt = AuthCrypto.generateSalt();
+
+    const exported = await AuthCrypto.deriveVaultKeyBase64("handoff-password", salt);
+    assert.equal(base64ByteLength(exported), 32);
+
+    // establishSecureSession derives the same (password, salt) key; deriving for
+    // a cross-origin handoff must match what the same-origin path stores.
+    AuthCrypto.clearSecureSession();
+    await AuthCrypto.establishSecureSession("handoff-password", salt);
+    assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), exported);
+  });
+
+  test("does not store the key itself", async () => {
+    AuthCrypto.clearSecureSession();
+    await AuthCrypto.deriveVaultKeyBase64("handoff-password", AuthCrypto.generateSalt());
+    assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), null);
+  });
+
+  test("requires a salt", async () => {
+    await assert.rejects(
+      AuthCrypto.deriveVaultKeyBase64("password", ""),
+      cryptoError("MISSING_SALT"),
+    );
+  });
+});
+
+describe("consumeVaultKeyFromFragment", () => {
+  // The fragment handoff touches window.location/history; stub them per test.
+  // `window` is globalThis in the loader, so assignment is visible to the module.
+  function withFragment(hash, { existingKey = null } = {}) {
+    AuthCrypto.clearSecureSession();
+    if (existingKey) sessionStorage.setItem(AuthCrypto.STORAGE_KEYS.masterKey, existingKey);
+    const replaceCalls = [];
+    window.location = { hash, pathname: "/vault/", search: "?x=1" };
+    window.history = {
+      replaceState: (state, title, url) => replaceCalls.push(url),
+    };
+    return replaceCalls;
+  }
+
+  test("adopts a valid key from the fragment and scrubs the URL", async () => {
+    const key = await AuthCrypto.deriveVaultKeyBase64("pw", AuthCrypto.generateSalt());
+    // signin.js hands the key over with encodeURIComponent (base64 has +/=).
+    const replaceCalls = withFragment("#" + encodeURIComponent(key));
+
+    assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), true);
+    assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), key);
+    // The fragment (and the key) is gone from the URL; path + query are kept.
+    assert.deepEqual(replaceCalls, ["/vault/?x=1"]);
+  });
+
+  test("ignores but still scrubs a malformed fragment", async () => {
+    const replaceCalls = withFragment("#not-a-valid-key");
+
+    assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), false);
+    assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), null);
+    assert.deepEqual(replaceCalls, ["/vault/?x=1"]);
+  });
+
+  test("rejects a Base64 value of the wrong length", async () => {
+    // Valid Base64, but 16 bytes rather than the required 32 (AES-256).
+    const shortKey = Buffer.alloc(16, 7).toString("base64");
+    const replaceCalls = withFragment("#" + encodeURIComponent(shortKey));
+
+    assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), false);
+    assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), null);
+    assert.deepEqual(replaceCalls, ["/vault/?x=1"]);
+  });
+
+  test("no-ops without a fragment (no scrub)", async () => {
+    const replaceCalls = withFragment("");
+
+    assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), false);
+    assert.deepEqual(replaceCalls, []);
+  });
+
+  test("does not overwrite a key already stored for this origin", async () => {
+    const key = await AuthCrypto.deriveVaultKeyBase64("pw", AuthCrypto.generateSalt());
+    const replaceCalls = withFragment("#" + encodeURIComponent("c2VudGluZWw="), {
+      existingKey: key,
+    });
+
+    assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), false);
+    assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), key);
+    assert.deepEqual(replaceCalls, []);
+  });
+});

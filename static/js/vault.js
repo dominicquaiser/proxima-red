@@ -852,6 +852,11 @@
         return;
       }
 
+      // Adopt a vault key handed over from sign-in on the main site (it arrives
+      // in the URL fragment because sessionStorage can't cross origins) and
+      // scrub it from the URL before anything else reads location.
+      window.AuthCrypto.consumeVaultKeyFromFragment();
+
       let storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
       if (!storedKeyBase64) {
         // This tab has no derived key (e.g. a second tab, or one opened after the

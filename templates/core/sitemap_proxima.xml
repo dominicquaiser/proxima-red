@@ -13,6 +13,18 @@
     <lastmod>{{ lastmod }}</lastmod>
   </url>
   <url>
+    <loc>{{ site_url }}/auth/signin/</loc>
+    <priority>0.5</priority>
+    <changefreq>monthly</changefreq>
+    <lastmod>{{ lastmod }}</lastmod>
+  </url>
+  <url>
+    <loc>{{ site_url }}/auth/signup/</loc>
+    <priority>0.5</priority>
+    <changefreq>monthly</changefreq>
+    <lastmod>{{ lastmod }}</lastmod>
+  </url>
+  <url>
     <loc>{{ site_url }}/imprint/</loc>
     <priority>0.2</priority>
     <changefreq>yearly</changefreq>

@@ -69,8 +69,24 @@
             return;
           }
 
+          // The vault key is origin-scoped. When the vault lives on the same
+          // origin as this page (single-domain / dev) store it locally and
+          // redirect normally; when it lives on another origin (the pass
+          // subdomain) hand the key over in the redirect URL fragment instead -
+          // it can't be read from this origin's sessionStorage over there. The
+          // fragment is never sent to the server and is scrubbed on arrival
+          // (auth-crypto.js consumeVaultKeyFromFragment).
+          const target = new URL(result.redirect_url || "/vault/", window.location.href);
           try {
-            await window.AuthCrypto.establishSecureSession(password, result.vault_salt);
+            if (target.origin === window.location.origin) {
+              await window.AuthCrypto.establishSecureSession(password, result.vault_salt);
+            } else {
+              const vaultKey = await window.AuthCrypto.deriveVaultKeyBase64(
+                password,
+                result.vault_salt,
+              );
+              target.hash = encodeURIComponent(vaultKey);
+            }
           } catch (cryptoError) {
             console.error("Failed to establish secure session:", cryptoError);
             window.Notify.show(
@@ -87,7 +103,7 @@
           window.Notify.show(result.message || "Signed in successfully! Redirecting...", "success");
 
           setTimeout(() => {
-            window.location.href = result.redirect_url || "/vault/";
+            window.location.href = target.href;
           }, 1000);
         },
         {

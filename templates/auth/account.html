@@ -16,7 +16,7 @@
     <div id="notification-container"></div>
 
     <header class="header">
-      <a href="{{ pass_site_url }}/" class="header__logo">
+      <a href="{{ site_url }}/" class="header__logo">
         proxima<span class="header__logo-dot">·</span>red
       </a>
       <div class="header__auth">
@@ -81,8 +81,8 @@
             id="change-password-form"
             method="post"
             action="{% url 'auth:change_password' %}"
-            data-vault-data-url="{{ pass_site_url }}/vault-data/"
-            data-update-data-url="{{ pass_site_url }}/update-data/"
+            data-vault-data-url="{% url 'passwd:vault_data' %}"
+            data-update-data-url="{% url 'passwd:update_data' %}"
             novalidate
           >
             {% csrf_token %}
@@ -155,7 +155,7 @@
             Download a copy of all data stored about your account, including
             your encrypted vault.
           </p>
-          <a href="{{ pass_site_url }}/export-data/" class="export-action">
+          <a href="{% url 'passwd:export_data' %}" class="export-action">
             <span class="export-action__label">Download My Data:</span>
             <svg
               class="export-action__icon"

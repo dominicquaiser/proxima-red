@@ -50,6 +50,7 @@ echo "### Requesting a real certificate from Let's Encrypt ..."
 $COMPOSE run --rm --entrypoint certbot certbot certonly \
     --webroot -w /var/www/certbot \
     -d "$DOMAIN" \
+    -d "pass.$DOMAIN" \
     --email "$CERTBOT_EMAIL" \
     --agree-tos --no-eff-email --non-interactive \
     $STAGING_FLAG

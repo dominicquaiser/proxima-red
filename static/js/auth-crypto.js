@@ -281,6 +281,34 @@
   };
 
   /**
+   * Derive the master key from (password, salt) and return it Base64-encoded,
+   * WITHOUT persisting it. Used when the key must travel to another origin (the
+   * vault subdomain) rather than be stored on the current one - see signin.js.
+   * Throws on missing salt or derivation failure.
+   * @param {string} password
+   * @param {string} salt Base64-encoded salt returned by the server.
+   * @returns {Promise<string>} Base64-encoded AES-256 vault key.
+   */
+  async function deriveVaultKeyBase64(password, salt) {
+    if (!salt) {
+      throw new CryptoError("Missing salt from authentication response.", "MISSING_SALT");
+    }
+
+    const derivedKey = await deriveKeyFromPassword(password, salt, KDF_ITERATIONS, true);
+    return exportKeyToBase64(derivedKey);
+  }
+
+  /**
+   * Persist an already-exported Base64 vault key in this origin's sessionStorage
+   * so the vault can decrypt this session's data without re-deriving on every
+   * request.
+   * @param {string} exportedKey Base64-encoded vault key.
+   */
+  function storeVaultKey(exportedKey) {
+    sessionStorage.setItem(SECURE_SESSION_STORAGE_KEYS.masterKey, exportedKey);
+  }
+
+  /**
    * Derive the master key from (password, salt) and persist it in
    * sessionStorage, so the vault can decrypt this session's data. Throws on
    * missing salt or derivation failure.
@@ -289,14 +317,49 @@
    * @returns {Promise<void>}
    */
   async function establishSecureSession(password, salt) {
-    if (!salt) {
-      throw new CryptoError("Missing salt from authentication response.", "MISSING_SALT");
+    storeVaultKey(await deriveVaultKeyBase64(password, salt));
+  }
+
+  /**
+   * Adopt a vault key handed over in the URL fragment and scrub it from the URL.
+   *
+   * After sign-in on the main site, the vault key is passed to the vault origin
+   * in the redirect fragment (`/vault/#<base64key>`) because sessionStorage is
+   * origin-scoped and can't be shared across subdomains. The fragment is never
+   * sent to the server (by spec) and is stripped from Referer headers - the same
+   * model as the anonymous share links. This validates it is a 32-byte key,
+   * stores it for this origin, and replaces the history entry so the key does
+   * not linger in the address bar, history, or bookmarks. A non-empty but
+   * malformed fragment is still scrubbed (then ignored). No-op without a
+   * fragment, or when a key is already stored for this origin.
+   * @returns {boolean} True when a valid key was adopted from the fragment.
+   */
+  function consumeVaultKeyFromFragment() {
+    const hash = window.location.hash;
+    if (!hash || hash.length < 2) return false;
+    if (sessionStorage.getItem(SECURE_SESSION_STORAGE_KEYS.masterKey)) return false;
+
+    const scrub = () =>
+      window.history.replaceState(
+        null,
+        document.title,
+        window.location.pathname + window.location.search,
+      );
+
+    let adopted = false;
+    try {
+      const exportedKey = decodeURIComponent(hash.slice(1));
+      // A vault key is a Base64-encoded 32-byte (AES-256) value; reject anything
+      // else rather than storing a key that will fail to import/decrypt later.
+      if (base64ToBuffer(exportedKey).length === AES_KEY_LENGTH_BITS / 8) {
+        storeVaultKey(exportedKey);
+        adopted = true;
+      }
+    } catch (error) {
+      // Malformed fragment (bad base64/encoding): fall through and just scrub.
     }
-
-    const derivedKey = await deriveKeyFromPassword(password, salt, KDF_ITERATIONS, true);
-    const exportedKey = await exportKeyToBase64(derivedKey);
-
-    sessionStorage.setItem(SECURE_SESSION_STORAGE_KEYS.masterKey, exportedKey);
+    scrub();
+    return adopted;
   }
 
   /**
@@ -314,7 +377,10 @@
     encryptAccountData,
     decryptAccountData,
     validatePassword,
+    deriveVaultKeyBase64,
+    storeVaultKey,
     establishSecureSession,
+    consumeVaultKeyFromFragment,
     clearSecureSession,
     STORAGE_KEYS: SECURE_SESSION_STORAGE_KEYS,
     exportKeyToBase64,

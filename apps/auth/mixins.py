@@ -26,39 +26,42 @@ from .utils import get_authenticated_user_id, ratelimited_response
 logger = logging.getLogger(__name__)
 
 
-class PassSubdomainRedirectMixin:
-    """Send safe-method requests to the pass subdomain when one is configured.
+class MainSiteRedirectMixin:
+    """Send safe-method auth requests to the main site, the shared identity origin.
 
-    The authenticated vault is served on ``PASS_SITE_URL``. Its AES key is
-    derived from the password at sign-in and held in ``sessionStorage``, which is
-    scoped to a single origin and cannot be shared across subdomains. So the
-    whole authenticated flow (sign in, sign up, account) must run on the pass
-    origin, or the vault page won't see the key the user just established and
-    reports "Secure session expired".
+    The auth flow (sign in, sign up, account) is canonically served on
+    ``SITE_URL`` (e.g. https://proxima.red): it is the single account origin for
+    every tool, not just the password vault. One Django instance answers every
+    host, so the same auth URLs are reachable on a service subdomain such as
+    ``pass.proxima.red`` too; this mixin redirects a GET/HEAD auth page reached
+    off the main host back to the same path on it, so the canonical origin owns
+    the session cookie and the page the user actually signs in on.
 
-    This mixin redirects a GET/HEAD auth page reached on the main host to the
-    same path on the pass host, *before* any key is derived. POSTs are left
-    alone (the form already loaded on, and posts back to, the pass origin).
+    POSTs are left alone, so the subdomain-hosted unlock modal can still reach
+    ``/auth/salts/`` and ``/auth/reauth/`` on its own origin. The vault's AES key
+    is derived from the password at sign-in and held in ``sessionStorage`` (a
+    single origin, not shareable across subdomains); after sign-in on the main
+    site it is handed to the vault origin in the redirect URL fragment (see
+    ``static/js/auth-crypto.js`` ``consumeVaultKeyFromFragment``).
     """
 
     def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
-        return self._redirect_to_pass_subdomain(request) or super().dispatch(
+        return self._redirect_to_main_site(request) or super().dispatch(
             request, *args, **kwargs
         )
 
     @staticmethod
-    def _redirect_to_pass_subdomain(request: HttpRequest):
-        """Return a redirect to the pass host for off-host GETs, else ``None``."""
+    def _redirect_to_main_site(request: HttpRequest):
+        """Return a redirect to the main host for off-host GETs, else ``None``."""
         if request.method not in ("GET", "HEAD"):
             return None
-        pass_host = urlparse(settings.PASS_SITE_URL).hostname
         main_host = urlparse(settings.SITE_URL).hostname
-        # No distinct subdomain configured (single-domain / dev / tests).
-        if not pass_host or pass_host == main_host:
+        # No canonical host configured (single-domain / dev / tests).
+        if not main_host:
             return None
-        if request.get_host().split(":")[0] == pass_host:
+        if request.get_host().split(":")[0] == main_host:
             return None
-        return redirect(f"{settings.PASS_SITE_URL}{request.get_full_path()}")
+        return redirect(f"{settings.SITE_URL}{request.get_full_path()}")
 
 
 class SessionAuthRequiredMixin:
