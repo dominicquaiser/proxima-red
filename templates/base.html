@@ -11,12 +11,12 @@
       content="Securely share passwords and sensitive information with end-to-end encrypted, expiring links."
     />
     {% endblock %} {% block meta_robots %}{% endblock %}
-    <link rel="canonical" href="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}" />
+    <link rel="canonical" href="{{ canonical_base }}{{ request.path }}" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="proxima·red" />
     <meta
       property="og:url"
-      content="{{ request.scheme }}://{{ request.get_host }}{{ request.path }}"
+      content="{{ canonical_base }}{{ request.path }}"
     />
     {% block og_title %}
     <meta property="og:title" content="proxima·red — Secure Password Sharing" />
@@ -26,7 +26,7 @@
       content="Securely share passwords and sensitive information with end-to-end encrypted, expiring links."
     />
     {% endblock %} {% block og_image %}
-    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'images/og-image.png' %}" />
+    <meta property="og:image" content="{{ canonical_base }}{% static 'images/og-image.png' %}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     {% endblock %}

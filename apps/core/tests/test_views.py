@@ -237,3 +237,21 @@ class ErrorHandlerTests(TestCase):
         with self.assertTemplateUsed("core/500.html"):
             response = views.error_500(request)
         self.assertEqual(response.status_code, 500)
+
+    @override_settings(
+        ALLOWED_HOSTS=["proxima.red"], SITE_URL="https://proxima.red"
+    )
+    def test_error_page_renders_with_disallowed_host(self):
+        """A bad Host header still renders a clean 400 instead of cascading to 500.
+
+        The error templates extend base.html, which builds the canonical/OG URLs.
+        If that touched ``request.get_host()`` it would re-raise ``DisallowedHost``
+        mid-render and escalate the 400 into a 500 (the production cascade these
+        handlers must survive). The canonical base must fall back to ``SITE_URL``
+        rather than echo the spoofed host.
+        """
+        request = self.factory.get("/", HTTP_HOST="www.junk-domain.example")
+        with self.assertTemplateUsed("core/400.html"):
+            response = views.error_400(request, exception=None)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn(b"junk-domain", response.content)

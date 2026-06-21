@@ -312,6 +312,28 @@ make up
    }
    ```
 
+   Optionally, reject requests for any host you don't serve (raw-IP probes and
+   junk domains other people have pointed at your IP) at the host nginx edge, so
+   they never reach the app. Without this, nginx falls back to the first matching
+   `server` block and forwards the bad `Host`, which Django then rejects with a
+   noisy `DisallowedHost`. The bundled-nginx model already does this in
+   `deployment/nginx/default.conf.template`; under the host-nginx model the edge
+   is your system nginx, so add a catch-all `server` alongside the vhost above:
+
+   ```nginx
+   # 444 closes the connection with no response; ssl_reject_handshake aborts the
+   # TLS handshake for unknown SNI without needing a cert (nginx >= 1.19.4).
+   server {
+       listen 80 default_server;
+       listen [::]:80 default_server;
+       listen 443 ssl default_server;
+       listen [::]:443 ssl default_server;
+       server_name _;
+       ssl_reject_handshake on;
+       return 444;
+   }
+   ```
+
    ```bash
    sudo ln -s /etc/nginx/sites-available/proxima-red /etc/nginx/sites-enabled/
    sudo nginx -t && sudo systemctl reload nginx

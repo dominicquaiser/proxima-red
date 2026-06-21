@@ -2,6 +2,20 @@
 # substituting only ${DOMAIN} (NGINX_ENVSUBST_FILTER=DOMAIN keeps nginx's own
 # $variables intact).
 
+# Default servers: reject any request whose Host/SNI isn't one we serve before
+# it reaches Django.
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
 # HTTP: serve ACME http-01 challenges, redirect everything else to HTTPS.
 server {
     listen 80;
