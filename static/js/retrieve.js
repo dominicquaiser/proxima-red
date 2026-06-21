@@ -176,7 +176,7 @@
       if (plaintext === null) return;
 
       if (await window.ClipboardUtil.copy(plaintext)) {
-        window.ClipboardUtil.flash(copyBtn);
+        window.Notify.show("Secret copied to clipboard.", "success");
       } else {
         window.Notify.show("Failed to copy to clipboard.", "error");
       }

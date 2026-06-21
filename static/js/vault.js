@@ -602,10 +602,8 @@
 
       isCopyingLink = true;
       if (await window.ClipboardUtil.copy(shareUrl)) {
-        copyBtn.classList.add("is-copied");
         copyBtn.innerHTML = ICON_CHECK;
         setTimeout(() => {
-          copyBtn.classList.remove("is-copied");
           copyBtn.innerHTML = ICON_LINK;
         }, 2000);
 

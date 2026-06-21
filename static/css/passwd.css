@@ -399,9 +399,6 @@
 .res__copy:hover .clipboard {
   background-color: var(--color-warm-slate);
 }
-.res__copy.copied .clipboard {
-  background-color: var(--color-lime-olive);
-}
 .res__copy:active .clipboard {
   transform: scale(0.85);
 }

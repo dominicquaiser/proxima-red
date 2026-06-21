@@ -15,8 +15,7 @@
 
   const hero = document.querySelector(".about-hero");
   const sun = document.querySelector(".about-hero__sun");
-  const glow = document.querySelector(".about-hero__sun-glow");
-  if (!hero || !sun || !glow) return;
+  if (!hero || !sun) return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
   let currentX = 0;
@@ -36,10 +35,9 @@
     if (Math.abs(target - currentX) < SNAP_THRESHOLD) currentX = target;
 
     if (currentX < HOME_THRESHOLD) {
-      sun.style.left = glow.style.left = "";
+      sun.style.left = "";
     } else {
       sun.style.left = currentX + "px";
-      glow.style.left = currentX + "px";
     }
 
     if (Math.abs(target - currentX) > REST_THRESHOLD) {

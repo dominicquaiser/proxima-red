@@ -524,9 +524,6 @@
 .iconbtn--danger:active {
   transform: scale(0.9);
 }
-.iconbtn.is-copied {
-  color: var(--color-sage-mint);
-}
 .icon-default,
 .icon-hover {
   position: absolute;

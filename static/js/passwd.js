@@ -53,8 +53,26 @@
 
     if (shareId && shareKey && shareLinkInput && retrievalUrlBase && dummyShareId) {
       const shareableUrl = `${retrievalUrlBase.replace(dummyShareId, shareId)}#${shareKey}`;
-      shareLinkInput.value = shareableUrl;
+      // The decryption key lives in the URL fragment. Mask it by default so it
+      // isn't shoulder-surfed; the copy button always copies the real URL.
+      const maskedUrl = `${shareableUrl.split("#")[0]}#${"*".repeat(32)}`;
+
+      let keyRevealed = false;
+      shareLinkInput.value = maskedUrl;
+
+      const revealToggle = document.getElementById("reveal-key-toggle");
+      const revealCheckbox = document.getElementById("toggleKey");
+      if (revealToggle && revealCheckbox) {
+        revealToggle.addEventListener("click", (event) => {
+          event.preventDefault();
+          keyRevealed = !keyRevealed;
+          revealCheckbox.checked = keyRevealed;
+          shareLinkInput.value = keyRevealed ? shareableUrl : maskedUrl;
+        });
+      }
+
       window.ClipboardUtil.setupButton(document.getElementById("copy-link-btn"), shareableUrl, {
+        onSuccess: () => window.Notify.show("Link copied to clipboard.", "success"),
         onError: () => window.Notify.show("Failed to copy to clipboard.", "error"),
       });
       sessionStorage.removeItem("shareKey");

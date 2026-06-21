@@ -32,7 +32,7 @@
         >
           <span id="share-id" style="display: none">{{ share.id }}</span>
 
-          <div class="res__field">
+          <div class="res__field res__field--dual">
             <input
               id="share-link"
               class="res__input"
@@ -41,6 +41,11 @@
               value="Generating secure link..."
               aria-label="Shareable link"
             />
+            <div class="password-toggle" id="reveal-key-toggle">
+              <input type="checkbox" id="toggleKey" aria-label="Toggle decryption key visibility" />
+              <span class="password-toggle__icon password-toggle__icon--visible"></span>
+              <span class="password-toggle__icon password-toggle__icon--hidden"></span>
+            </div>
             <label id="copy-link-btn" class="res__copy" title="Copy link">
               <span class="clipboard"></span>
             </label>
