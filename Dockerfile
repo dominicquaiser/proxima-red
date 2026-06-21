@@ -48,3 +48,15 @@ EXPOSE 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["gunicorn", "config.wsgi:application", "-c", "deployment/gunicorn.conf.py"]
+
+
+# --- Dev stage: production image plus local-only tooling ---
+# Adds the development requirements (django-extensions / Werkzeug / pyOpenSSL) so
+# `runserver_plus` can serve the dev stack over HTTPS. Built only by
+# docker-compose.override.yml; production builds target `final` explicitly, so
+# this stage being last never leaks into a production image.
+FROM final AS dev
+
+USER root
+RUN pip install -r requirements/development.txt
+USER app

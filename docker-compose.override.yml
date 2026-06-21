@@ -2,18 +2,30 @@
 #
 # Merged automatically by `docker compose up`.
 #
-# Runs Django's autoreloading dev server, bind-mounts the source for live edits,
-# and publishes port 8000. The db service (from `docker-compose.yml`) provides
-# Postgres parity with production; DATABASE_URL in .env points web at it.
+# Serves the dev stack over HTTPS with `runserver_plus` (autoreloading), bind-mounts
+# the source for live edits, and publishes port 8000. HTTPS is required to test the
+# real auth/vault topology: the session cookie is shared across the `pass.*`
+# subdomain (SESSION_COOKIE_DOMAIN) and the client-side Web Crypto API only runs in
+# a secure context. Create the local cert first (see docs/deployment.md under Development):
+#
+#   mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test
+#
+# The db service (from `docker-compose.yml`) provides Postgres parity with
+# production; DATABASE_URL in .env points web at it.
 
 services:
   web:
+    build:
+      target: dev
+    image: proximared:dev
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.development
       # Dev server serves static directly from STATICFILES_DIRS; skip collectstatic
       # so the bind-mounted source tree stays clean.
       SKIP_COLLECTSTATIC: "1"
-    command: python manage.py runserver 0.0.0.0:8000
+    command: >
+      python manage.py runserver_plus 0.0.0.0:8000
+      --cert-file certs/dev.pem --key-file certs/dev-key.pem
     volumes:
       - .:/app
     ports:

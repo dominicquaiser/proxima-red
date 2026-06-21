@@ -18,3 +18,13 @@ ALLOWED_HOSTS = env.list(
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
+
+# django-extensions provides `runserver_plus`, used to serve the dev site over
+# HTTPS (see docs/development.md). It is optional, so don't hard-fail the whole
+# dev environment if it isn't installed.
+try:
+    import django_extensions  # noqa: F401
+
+    INSTALLED_APPS += ["django_extensions"]
+except ImportError:
+    pass

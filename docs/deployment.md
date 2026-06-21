@@ -1,10 +1,8 @@
 # Deployment Guide
 
-This guide describes how to run **Proxima Red** in both local development and production using Docker Compose.
+This guide describes how to run **proxima·red** in both local development and production using Docker Compose.
 
 Production runs six containers behind an nginx reverse proxy with automatic Let's Encrypt TLS, a PostgreSQL database, a Redis cache, a Gunicorn application server, and a scheduled cleanup worker. Everything is configured through a single `.env` file.
-
----
 
 ## Table of contents
 
@@ -34,13 +32,10 @@ Production runs six containers behind an nginx reverse proxy with automatic Let'
 - [Scaling and limitations](#scaling-and-limitations)
 - [Command reference](#command-reference)
 
----
-
 ## Architecture
 
 In production the stack is composed of five services on a private Docker network.
-Only nginx publishes ports to the host; the application server and database are
-never exposed directly.
+Only nginx publishes ports to the host; the application server and database are never exposed directly.
 
 ```
                           :80 / :443
@@ -76,19 +71,16 @@ never exposed directly.
 
 **Compose files**
 
-| File                          | Purpose                                                                  |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| `docker-compose.yml`          | Base definition (`db` + `web`), shared by all environments               |
-| `docker-compose.override.yml` | Development overrides — **merged automatically** by `docker compose`     |
-| `docker-compose.prod.yml`     | Production overrides — adds `nginx`, `certbot`, `cron`, restart policies |
+| File                          | Purpose                                                                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `docker-compose.yml`          | Base definition (`db` + `web`), shared by all environments                                                                             |
+| `docker-compose.override.yml` | Development overrides — **merged automatically** by `docker compose`                                                                   |
+| `docker-compose.prod.yml`     | Production overrides — adds `nginx`, `certbot`, `cron`, restart policies                                                               |
 | `docker-compose.host.yml`     | Host-nginx overrides — adds `staticproxy` for servers that run their own nginx ([see below](#deploying-behind-an-existing-host-nginx)) |
-
----
 
 ## Prerequisites
 
-- **Docker Engine** 24+ and the **Docker Compose v2** plugin
-  (`docker compose version`).
+- **Docker Engine** 24+ and the **Docker Compose v2** plugin (`docker compose version`).
 - For production:
   - A host with public IPv4/IPv6 and ports **80** and **443** reachable.
   - A **domain name** with a DNS `A`/`AAAA` record pointing at the host.
@@ -96,52 +88,40 @@ never exposed directly.
 
 No Python toolchain is required on the host — everything runs inside containers.
 
----
-
 ## Configuration
 
-All configuration is supplied through environment variables, loaded from a `.env`
-file in the repository root. Start from the template:
+All configuration is supplied through environment variables, loaded from a `.env` file in the repository root. Start from the template:
 
 ```bash
 cp .env.example .env
 ```
 
-Docker Compose reads `.env` for two purposes: interpolating `${VAR}` references
-in the Compose files (e.g. `POSTGRES_*`, `DOMAIN`) and injecting variables into
-the `web` and `cron` containers for Django.
+Docker Compose reads `.env` for two purposes: interpolating `${VAR}` references in the Compose files (e.g. `POSTGRES_*`, `DOMAIN`) and injecting variables into the `web` and `cron` containers for Django.
 
 ### Environment variables
 
-| Variable                        | Required    | Example                                        | Description                                                                                                                                                               |
-| ------------------------------- | ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SECRET_KEY`                    | **prod**    | _(50+ random chars)_                           | Django cryptographic key. Generate with the command below.                                                                                                                |
-| `DEBUG`                         | no          | `False`                                        | Never enable in production. Ignored by the dev settings (always `True`).                                                                                                  |
-| `ALLOWED_HOSTS`                 | **prod**    | `proxima.red,pass.proxima.red`                 | Comma-separated hostnames Django will serve.                                                                                                                              |
-| `CSRF_TRUSTED_ORIGINS`          | **prod**    | `https://proxima.red,https://pass.proxima.red` | Comma-separated, **scheme-qualified** origins for cross-origin POSTs.                                                                                                     |
-| `SITE_URL`                      | **prod**    | `https://proxima.red`                          | Canonical base URL of the main site (no trailing slash). Used in the `Content-Security-Policy` `form-action` directive.                                                   |
-| `PASS_SITE_URL`                 | **prod**    | `https://pass.proxima.red`                     | Base URL of the vault subdomain (no trailing slash). Used in CSP `connect-src` and `form-action`. Equal to `SITE_URL` for single-domain.                                  |
-| `SESSION_COOKIE_DOMAIN`         | no          | `.proxima.red`                                 | Cookie domain shared across subdomains (leading dot). Required when the vault runs on a different subdomain from the main site.                                           |
-| `DATABASE_URL`                  | **prod**    | `postgres://user:pass@db:5432/proximared`      | Django database DSN. Host is the Compose service name `db`.                                                                                                               |
-| `POSTGRES_DB`                   | yes         | `proximared`                                   | Database name created by the `db` container.                                                                                                                              |
-| `POSTGRES_USER`                 | yes         | `proximared`                                   | Database role.                                                                                                                                                            |
-| `POSTGRES_PASSWORD`             | yes         | _(strong password)_                            | Database password. Must match `DATABASE_URL`.                                                                                                                             |
-| `CONN_MAX_AGE`                  | no          | `60`                                           | Max age of DB connections in seconds (production only). Defaults to `60`.                                                                                                 |
-| `DOMAIN`                        | **prod**    | `proxima.red`                                  | Primary domain; used by nginx for the certificate and default vhost.                                                                                                      |
-| `CERTBOT_EMAIL`                 | **prod**    | `admin@example.com`                            | Contact address for Let's Encrypt expiry notices.                                                                                                                         |
-| `RATELIMIT_TRUSTED_PROXY_COUNT` | no          | `1`                                            | Trusted reverse-proxy hops for reading the real client IP from `X-Forwarded-For`. Production defaults to `1` (nginx); raise for each additional proxy layer (e.g. a CDN). |
-| `GUNICORN_WORKERS`              | no          | `3`                                            | Worker process count. Defaults to `(2 × CPU cores) + 1`.                                                                                                                  |
-| `GUNICORN_TIMEOUT`              | no          | `60`                                           | Worker timeout in seconds. Defaults to `60`.                                                                                                                              |
-| `STAGING`                       | no (script) | `1`                                            | When set for `init-letsencrypt.sh`, uses the Let's Encrypt staging CA.                                                                                                    |
+| Variable                        | Required    | Example                                        | Description                                                                                                                                                                                                                     |
+| ------------------------------- | ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SECRET_KEY`                    | **prod**    | _(50+ random chars)_                           | Django cryptographic key. Generate with the command below.                                                                                                                                                                      |
+| `DEBUG`                         | no          | `False`                                        | Never enable in production. Ignored by the dev settings (always `True`).                                                                                                                                                        |
+| `ALLOWED_HOSTS`                 | **prod**    | `proxima.red,pass.proxima.red`                 | Comma-separated hostnames Django will serve.                                                                                                                                                                                    |
+| `CSRF_TRUSTED_ORIGINS`          | **prod**    | `https://proxima.red,https://pass.proxima.red` | Comma-separated, **scheme-qualified** origins for cross-origin POSTs.                                                                                                                                                           |
+| `SITE_URL`                      | **prod**    | `https://proxima.red`                          | Canonical base URL of the main site (no trailing slash); the shared origin that serves the auth flow (sign in/up, account). Used in the `Content-Security-Policy` `form-action` directive.                                      |
+| `PASS_SITE_URL`                 | **prod**    | `https://pass.proxima.red`                     | Base URL of the vault subdomain (no trailing slash). After sign-in on `SITE_URL` the vault key is handed here in the redirect URL fragment. Used in CSP `connect-src` and `form-action`. Equal to `SITE_URL` for single-domain. |
+| `SESSION_COOKIE_DOMAIN`         | no          | `.proxima.red`                                 | Cookie domain shared across subdomains (leading dot). Required when the vault runs on a different subdomain from the main site.                                                                                                 |
+| `DATABASE_URL`                  | **prod**    | `postgres://user:pass@db:5432/proximared`      | Django database DSN. Host is the Compose service name `db`.                                                                                                                                                                     |
+| `POSTGRES_DB`                   | yes         | `proximared`                                   | Database name created by the `db` container.                                                                                                                                                                                    |
+| `POSTGRES_USER`                 | yes         | `proximared`                                   | Database role.                                                                                                                                                                                                                  |
+| `POSTGRES_PASSWORD`             | yes         | _(strong password)_                            | Database password. Must match `DATABASE_URL`.                                                                                                                                                                                   |
+| `CONN_MAX_AGE`                  | no          | `60`                                           | Max age of DB connections in seconds (production only). Defaults to `60`.                                                                                                                                                       |
+| `DOMAIN`                        | **prod**    | `proxima.red`                                  | Primary domain; used by nginx for the certificate and default vhost.                                                                                                                                                            |
+| `CERTBOT_EMAIL`                 | **prod**    | `admin@example.com`                            | Contact address for Let's Encrypt expiry notices.                                                                                                                                                                               |
+| `RATELIMIT_TRUSTED_PROXY_COUNT` | no          | `1`                                            | Trusted reverse-proxy hops for reading the real client IP from `X-Forwarded-For`. Production defaults to `1` (nginx); raise for each additional proxy layer (e.g. a CDN).                                                       |
+| `GUNICORN_WORKERS`              | no          | `3`                                            | Worker process count. Defaults to `(2 × CPU cores) + 1`.                                                                                                                                                                        |
+| `GUNICORN_TIMEOUT`              | no          | `60`                                           | Worker timeout in seconds. Defaults to `60`.                                                                                                                                                                                    |
+| `STAGING`                       | no (script) | `1`                                            | When set for `init-letsencrypt.sh`, uses the Let's Encrypt staging CA.                                                                                                                                                          |
 
-> `DJANGO_SETTINGS_MODULE` is **not** set in `.env` — each Compose service selects
-> the correct settings module itself (development vs production).
-
-Generate a strong secret key:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(50))"
-```
+> `DJANGO_SETTINGS_MODULE` is **not** set in `.env` — each Compose service selects the correct settings module itself (development vs production).
 
 Protect the file once it contains real secrets:
 
@@ -160,46 +140,72 @@ Settings are a split package under `config/settings/`:
 | `config.settings.production`  | `web`/`cron` containers, WSGI    | `DEBUG=False`, HTTPS hardening, secrets required |
 | `config.settings.testing`     | test suite                       | In-memory SQLite, fast password hasher           |
 
-The default `DJANGO_SETTINGS_MODULE` is `config.settings.development` in
-`manage.py` and `config.settings.production` in `wsgi.py`/`asgi.py`.
-
----
+The default `DJANGO_SETTINGS_MODULE` is `config.settings.development` in `manage.py` and `config.settings.production` in `wsgi.py`/`asgi.py`.
 
 ## Development
 
-The development overrides run Django's autoreloading server with the source tree
-bind-mounted for live edits, alongside a PostgreSQL container for parity with
-production.
+The development overrides run Django's autoreloading server over **HTTPS** with the source tree bind-mounted for live edits, alongside a PostgreSQL container for parity with production.
+
+HTTPS in development is not optional cosmetics. It's required to exercise the real auth/vault topology:
+
+- **Shared session cookie.** Auth is canonical on the main site (`SITE_URL`) and the vault lives on the `pass.*` subdomain (`PASS_SITE_URL`). The signed-in session must be readable on both hosts via `SESSION_COOKIE_DOMAIN`, which only works across a real registrable parent domain — `localhost` doesn't qualify, so sign-in loops endlessly between the two hosts.
+- **Web Crypto API.** Client-side key derivation needs `window.crypto.subtle`, which browsers expose only in a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). `http://localhost` is special-cased as secure; a custom hostname over plain HTTP is not.
+
+The dev image's `dev` build stage adds `django-extensions` (for `runserver_plus`) and `pyOpenSSL`; the override runs the HTTPS dev server automatically.
+
+**1. Map the hostnames to loopback** (`.test` is RFC 6761-reserved, so it never collides with real DNS). Add to `/etc/hosts`:
+
+```
+127.0.0.1   proxima.test pass.proxima.test
+```
+
+**2. Mint a locally-trusted cert** with [mkcert](https://github.com/FiloSottile/mkcert),
+written to the `certs/` directory the compose file expects (git-ignored):
 
 ```bash
-cp .env.example .env          # the defaults are fine for local use
+mkcert -install  # one-time: trust the local CA
+mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test
+```
+
+> The cert/key are bind-mounted into the container and read by its non-root `app` user (uid 1000). If your host user isn't uid 1000, make them readable: `chmod 644 certs/dev*.pem`.
+
+**3. Set the HTTPS origins in `.env`** (override the production-oriented `.env.example` defaults):
+
+```
+ALLOWED_HOSTS=proxima.test,pass.proxima.test
+CSRF_TRUSTED_ORIGINS=https://proxima.test:8000,https://pass.proxima.test:8000
+SITE_URL=https://proxima.test:8000
+PASS_SITE_URL=https://pass.proxima.test:8000
+SESSION_COOKIE_DOMAIN=.proxima.test
+```
+
+**4. Start the stack:**
+
+```bash
 docker compose up --build
 ```
 
-- Application: <http://localhost:8000/>
+- Application: <https://proxima.test:8000/> (vault at <https://pass.proxima.test:8000/vault/>)
 - `docker-compose.override.yml` is applied automatically — no extra `-f` flags.
 - Database migrations run on container start (via the entrypoint).
-- Static files are served directly by `runserver`; `collectstatic` is skipped in
-  development so the bind-mounted tree stays clean.
+- Static files are served directly by the dev server; `collectstatic` is skipped in development so the bind-mounted tree stays clean.
+
+> Single-domain shortcut: to skip the cross-subdomain handoff entirely, set `SITE_URL` and `PASS_SITE_URL` to the same origin and drop `SESSION_COOKIE_DOMAIN`. The vault key then stays in `sessionStorage`; you can revert the override's `command:` to plain `runserver` over `http://localhost:8000` and skip the cert.
 
 Stop the stack:
 
 ```bash
-docker compose down            # add -v to also remove the database volume
+docker compose down  # add -v to also remove the database volume
 ```
-
----
 
 ## Production
 
 ### 1. Prepare the server
 
-Install Docker Engine and the Compose plugin (see the
-[official instructions](https://docs.docker.com/engine/install/)), then clone the
-repository:
+Install Docker Engine and the Compose plugin (see the [official instructions](https://docs.docker.com/engine/install/)), then clone the repository:
 
 ```bash
-git clone <your-repository-url> proxima-red
+git clone https://github.com/dominicquaiser/proxima-red.git proxima-red
 cd proxima-red
 ```
 
@@ -207,17 +213,13 @@ cd proxima-red
 
 ```bash
 cp .env.example .env
-python -c "import secrets; print(secrets.token_urlsafe(50))"   # paste into SECRET_KEY
 ```
 
-Edit `.env` and set at minimum: `SECRET_KEY`, `ALLOWED_HOSTS`,
-`CSRF_TRUSTED_ORIGINS`, `POSTGRES_PASSWORD`, `DATABASE_URL` (matching the Postgres
-credentials), `DOMAIN`, and `CERTBOT_EMAIL`. Then `chmod 600 .env`.
+Edit `.env` and set at minimum: `SECRET_KEY`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `POSTGRES_PASSWORD`, `DATABASE_URL` (matching the Postgres credentials), `DOMAIN`, and `CERTBOT_EMAIL`. Then `chmod 600 .env`.
 
 ### 3. Point DNS at the host
 
-Create an `A` (and optionally `AAAA`) record for `DOMAIN` pointing at the
-server's public IP. Verify it resolves before continuing:
+Create an `A` (and optionally `AAAA`) record for `DOMAIN` pointing at the server's public IP. Verify it resolves before continuing:
 
 ```bash
 dig +short share.example.com
@@ -225,18 +227,13 @@ dig +short share.example.com
 
 ### 4. Issue TLS certificates
 
-Run the one-time bootstrap script. It seeds a temporary self-signed certificate
-so nginx can start, then requests a real certificate over HTTP-01 and reloads
-nginx:
+Run the one-time bootstrap script. It seeds a temporary self-signed certificate so nginx can start, then requests a real certificate over HTTP-01 and reloads nginx:
 
 ```bash
 ./deployment/scripts/init-letsencrypt.sh
 ```
 
-> **Tip:** Run it first with `STAGING=1 ./deployment/scripts/init-letsencrypt.sh`
-> to validate the flow against the Let's Encrypt staging environment and avoid
-> the production [rate limits](https://letsencrypt.org/docs/rate-limits/). Once it
-> succeeds, re-run without `STAGING` to obtain a trusted certificate.
+> **Tip:** Run it first with `STAGING=1 ./deployment/scripts/init-letsencrypt.sh` to validate the flow against the Let's Encrypt staging environment and avoid the production [rate limits](https://letsencrypt.org/docs/rate-limits/). Once it succeeds, re-run without `STAGING` to obtain a trusted certificate.
 
 ### 5. Launch the stack
 
@@ -244,9 +241,7 @@ nginx:
 make up
 ```
 
-On startup the `web` container applies migrations and runs `collectstatic` into
-the shared `static_volume`. nginx then serves those assets and proxies all other
-requests to Gunicorn.
+On startup the `web` container applies migrations and runs `collectstatic` into the shared `static_volume`. nginx then serves those assets and proxies all other requests to Gunicorn.
 
 ### 6. Verify the deployment
 
@@ -259,66 +254,46 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web \
     python manage.py check --deploy
 ```
 
-Then browse to `https://<DOMAIN>/`, confirm the certificate is valid, and that
-`http://<DOMAIN>/` redirects to HTTPS.
-
----
+Then browse to `https://<DOMAIN>/`, confirm the certificate is valid, and that `http://<DOMAIN>/` redirects to HTTPS.
 
 ## Deploying behind an existing host nginx
 
-The standard setup above assumes the project's bundled `nginx` and `certbot`
-own ports 80/443. If your server **already runs its own (system) nginx** as the
-public reverse proxy — e.g. a multi-app host where nginx fronts several services
-— use the **host-nginx model** instead. The bundled `nginx`/`certbot` are not
-started; a small `staticproxy` container serves `/static/` and proxies to `web`,
-published only on `127.0.0.1:8090`, and the host nginx terminates TLS and proxies
-to it.
+The standard setup above assumes the project's bundled `nginx` and `certbot` own ports 80/443. If your server **already runs its own (system) nginx** as the public reverse proxy — e.g. a multi-app host where nginx fronts several services — use the **host-nginx model** instead. The bundled `nginx`/`certbot` are not started; a small `staticproxy` container serves `/static/` and proxies to `web`, published only on `127.0.0.1:8090`, and the host nginx terminates TLS and proxies to it.
 
-> **Do not run `init-letsencrypt.sh` in this model.** It starts the bundled
-> nginx, which collides with the host nginx on ports 80/443.
+> **Do not run `init-letsencrypt.sh` in this model.** It starts the bundled nginx, which collides with the host nginx on ports 80/443.
 
 ```
 Internet ─HTTPS─► host nginx (:443, system) ─► staticproxy (127.0.0.1:8090) ─► web (gunicorn :8000) ─► db / redis
-                  TLS via the host certbot      serves /static/, proxies                                + cron
+                  TLS via the host certbot     serves /static/, proxies                                + cron
 ```
 
 **Extra files (alongside the standard compose files):**
 
-| File                             | Purpose                                                                                              |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `docker-compose.host.yml`        | Adds the `staticproxy` container on `127.0.0.1:8090`; the bundled `nginx`/`certbot` are not started  |
-| `deployment/nginx/host.conf`     | Plain-HTTP nginx config for `staticproxy` (no TLS; passes `X-Forwarded-Proto` **through** from host)  |
-| `deploy.mk` (from `deploy.mk.example`) | Per-host Makefile include that points the standard `make` targets at the host-nginx model      |
+| File                                   | Purpose                                                                                              |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `docker-compose.host.yml`              | Adds the `staticproxy` container on `127.0.0.1:8090`; the bundled `nginx`/`certbot` are not started  |
+| `deployment/nginx/host.conf`           | Plain-HTTP nginx config for `staticproxy` (no TLS; passes `X-Forwarded-Proto` **through** from host) |
+| `deploy.mk` (from `deploy.mk.example`) | Per-host Makefile include that points the standard `make` targets at the host-nginx model            |
 
-This model uses the **same `make` targets** as the bundled setup — the only
-difference is the local `deploy.mk` include, which appends
-`docker-compose.host.yml` and limits the started services to
-`db redis web cron staticproxy`.
+This model uses the **same `make` targets** as the bundled setup — the only difference is the local `deploy.mk` include, which appends `docker-compose.host.yml` and limits the started services to `db redis web cron staticproxy`.
 
 **Steps:**
 
-1. Configure `.env` as in [step 2](#2-configure-the-environment). For a single
-   domain set `PASS_SITE_URL` equal to `SITE_URL`. Because there are **two**
-   proxy hops (host nginx + `staticproxy`), set `RATELIMIT_TRUSTED_PROXY_COUNT=2`.
+1. Configure `.env` as in [step 2](#2-configure-the-environment). For a single domain set `PASS_SITE_URL` equal to `SITE_URL`. Because there are **two** proxy hops (host nginx + `staticproxy`), set `RATELIMIT_TRUSTED_PROXY_COUNT=2`.
 
 2. Enable the host-nginx model for `make` (git-ignored, one-time per host):
 
-   ```bash
-   cp deploy.mk.example deploy.mk
-   ```
+```bash
+cp deploy.mk.example deploy.mk
+```
 
 3. Start the stack with the usual target:
 
-   ```bash
-   make up
-   ```
+```bash
+make up
+```
 
-4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with
-   the host's certbot. List **both** the main domain and the vault subdomain in
-   `server_name` — Django dispatches by host, so a single upstream serves both
-   (the vault is canonically `pass.proxima.red`; see `PASS_SITE_URL`). Make sure
-   DNS `A`/`AAAA` records exist for `pass.proxima.red` as well as `proxima.red`
-   before requesting the certificate.
+4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with the host's certbot. List **both** the main domain and the vault subdomain in `server_name` — Django dispatches by host, so a single upstream serves both (the vault is canonically `pass.proxima.red`; see `PASS_SITE_URL`). Make sure DNS `A`/`AAAA` records exist for `pass.proxima.red` as well as `proxima.red` before requesting the certificate.
 
    ```nginx
    server {
@@ -343,28 +318,13 @@ difference is the local `deploy.mk` include, which appends
    sudo certbot --nginx -d proxima.red -d www.proxima.red -d pass.proxima.red
    ```
 
-5. Verify both hosts:
-   `curl -sI https://proxima.red | head -1` and
-   `curl -sI https://pass.proxima.red/vault/ | head -1`.
+5. Verify both hosts: `curl -sI https://proxima.red | head -1` and `curl -sI https://pass.proxima.red/vault/ | head -1`.
 
-From here, all the usual operations work unchanged: `make up`, `make down`,
-`make logs`, `make ps`, `make migrate`, `make shell`. To deploy a new release,
-`git pull` then `make up`.
-
-> **Firewall note (Docker + ufw).** If the host hardens Docker with
-> `"iptables": false` and a default-deny ufw, container networking breaks in
-> several non-obvious ways (forwarding, host↔container, loopback to published
-> ports). Prefer letting Docker manage iptables — since every container binds
-> `127.0.0.1`, nothing is publicly exposed and ufw still governs the host's
-> inbound. If you must keep ufw strict, allow the Docker bridge range with
-> `sudo ufw allow from 172.16.0.0/12` and ensure `ufw-before-input` keeps its
-> loopback/established accepts.
-
----
+From here, all the usual operations work unchanged: `make up`, `make down`, `make logs`, `make ps`, `make migrate`, `make shell`. To deploy a new release, `git pull` then `make up`.
 
 ## Operations
 
-Common production operations are available as Makefile targets — run `make help` for a full list. For ad-hoc commands not covered by the Makefile, export the alias below to avoid repeating the `-f` flags:
+Common production operations are available as Makefile targets (run `make help` for a full list). For ad-hoc commands not covered by the Makefile, export the alias below to avoid repeating the `-f` flags:
 
 ```bash
 alias dcp='docker compose -f docker-compose.yml -f docker-compose.prod.yml'
@@ -375,10 +335,10 @@ alias dcp='docker compose -f docker-compose.yml -f docker-compose.prod.yml'
 Application and access logs are written to stdout/stderr and captured by Docker:
 
 ```bash
-make logs              # tail all services
-dcp logs -f web        # application + Gunicorn access logs only
-dcp logs -f nginx      # proxy logs only
-dcp logs certbot       # certificate renewal output
+make logs           # tail all services
+dcp logs -f web     # application + Gunicorn access logs only
+dcp logs -f nginx   # proxy logs only
+dcp logs certbot    # certificate renewal output
 ```
 
 ### Updating to a new release
@@ -398,8 +358,7 @@ Create a timestamped, gzipped dump in `./backups/`:
 ./deployment/scripts/backup.sh
 ```
 
-Restore a dump into the running database (load `.env` first so the credentials
-are available in your shell):
+Restore a dump into the running database (load `.env` first so the credentials are available in your shell):
 
 ```bash
 set -a; . ./.env; set +a
@@ -415,9 +374,7 @@ Schedule regular backups with a host cron entry, for example:
 
 ### Expired share cleanup
 
-The `cron` service runs `manage.py delete_expired` every minute and
-`manage.py clearsessions` every hour. To run cleanup manually or preview what
-would be removed:
+The `cron` service runs `manage.py delete_expired` every minute and `manage.py clearsessions` every hour. To run cleanup manually or preview what would be removed:
 
 ```bash
 dcp run --rm web python manage.py delete_expired --dry-run
@@ -426,9 +383,7 @@ dcp run --rm web python manage.py delete_expired --statistics
 
 ### TLS certificate renewal
 
-The `certbot` container attempts renewal twice daily and only acts when a
-certificate is near expiry; nginx picks up renewed certificates on its next
-reload. To force a renewal and reload:
+The `certbot` container attempts renewal twice daily and only acts when a certificate is near expiry; nginx picks up renewed certificates on its next reload. To force a renewal and reload:
 
 ```bash
 dcp run --rm --entrypoint "certbot renew --webroot -w /var/www/certbot" certbot
@@ -437,83 +392,39 @@ dcp exec nginx nginx -s reload
 
 ### Running tests
 
-Tests use isolated, fast settings (in-memory SQLite). They can run in any
-environment:
+Tests use isolated, fast settings (in-memory SQLite). They can run in any environment:
 
 ```bash
 dcp exec web python manage.py test --settings=config.settings.testing
 ```
 
----
-
 ## Troubleshooting
 
-**`502 Bad Gateway` from nginx**
-The `web` container is not ready or crashed during startup. Inspect it with
-`dcp logs web` — common causes are a failed migration or a missing required
-environment variable (production settings fail fast if `SECRET_KEY`,
-`ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, or `DATABASE_URL` are unset).
-
-**Certificate issuance fails**
-Confirm DNS for `DOMAIN` resolves to the host and that port 80 is reachable from
-the internet (the HTTP-01 challenge is served over plain HTTP). Test with
-`STAGING=1` first. Inspect `dcp logs certbot` for the specific ACME error.
-
 **`DisallowedHost` / `400 Bad Request`**
-The requested host is not in `ALLOWED_HOSTS`. Ensure `ALLOWED_HOSTS` and `DOMAIN`
-match the hostname users actually visit, then recreate `web`.
+The requested host is not in `ALLOWED_HOSTS`. Ensure `ALLOWED_HOSTS` and `DOMAIN` match the hostname users actually visit, then recreate `web`.
 
 **`CSRF verification failed` (403) on form submission**
 `CSRF_TRUSTED_ORIGINS` must list the scheme-qualified origin, e.g.
 `https://share.example.com` (not just the bare hostname).
 
-**Static files return 404 or look unstyled**
-Confirm `collectstatic` ran (`dcp logs web` shows "Collecting static files") and
-that nginx and web share the same `static_volume`. Re-run manually if needed:
-`dcp exec web python manage.py collectstatic --noinput`.
-
 **Database authentication failed**
-`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` must be consistent with the
-credentials in `DATABASE_URL`. If you change them after the volume was created,
-the existing `pgdata` retains the original credentials — reset with
-`dcp down -v` (this destroys data) or update the role inside Postgres.
-
----
+`POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` must be consistent with the credentials in `DATABASE_URL`. If you change them after the volume was created, the existing `pgdata` retains the original credentials — reset with `dcp down -v` (this destroys data) or update the role inside Postgres.
 
 ## Security considerations
 
-- **Secrets:** never commit `.env`. It is git-ignored; keep it `chmod 600`. Use a
-  unique, high-entropy `SECRET_KEY` and a strong `POSTGRES_PASSWORD`.
-- **Transport security:** production enables `SECURE_SSL_REDIRECT`, secure session
-  and CSRF cookies, and HSTS (`max-age` of one year, including subdomains). nginx
-  terminates TLS and forwards `X-Forwarded-Proto`, which Django trusts via
-  `SECURE_PROXY_SSL_HEADER`.
-- **Network exposure:** only nginx publishes ports. PostgreSQL and Gunicorn are
-  reachable only on the internal Docker network.
+- **Secrets:** never commit `.env`. It is git-ignored; keep it `chmod 600`. Use a unique, high-entropy `SECRET_KEY` and a strong `POSTGRES_PASSWORD`.
+- **Transport security:** production enables `SECURE_SSL_REDIRECT`, secure session and CSRF cookies, and HSTS (`max-age` of one year, including subdomains). nginx terminates TLS and forwards `X-Forwarded-Proto`, which Django trusts via `SECURE_PROXY_SSL_HEADER`.
+- **Network exposure:** only nginx publishes ports. PostgreSQL and Gunicorn are reachable only on the internal Docker network.
 - **Least privilege:** the application image runs as a non-root user.
-- **Rate limiting:** authentication-sensitive endpoints are rate limited via
-  `django-ratelimit`.
-- **Zero-knowledge design:** encryption keys are derived/generated client-side and
-  never sent to the server. Compromise of the database does not reveal shared
-  secrets. See the project architecture notes for details.
-- **Stay patched:** periodically rebuild to pick up base-image and dependency
-  updates (`dcp build --pull`).
-
----
+- **Rate limiting:** authentication-sensitive endpoints are rate limited via `django-ratelimit`.
+- **Zero-knowledge design:** encryption keys are derived/generated client-side and never sent to the server. Compromise of the database does not reveal shared secrets. See the project architecture notes for details.
+- **Stay patched:** periodically rebuild to pick up base-image and dependency updates (`dcp build --pull`).
 
 ## Scaling and limitations
 
-- A **single `web` instance** is assumed, so applying migrations on container
-  start is safe. To scale horizontally, move `migrate` to a one-shot job and run
-  multiple `web` replicas behind nginx.
-- There is **no CI/CD pipeline or image registry** wired up; production updates
-  are `git pull` + rebuild on the host. Adding a registry-based deploy is
-  straightforward if needed later.
-- PostgreSQL runs as a container with a local volume. For higher durability
-  requirements, point `DATABASE_URL` at a managed database and drop the `db`
-  service.
-
----
+- A **single `web` instance** is assumed, so applying migrations on container start is safe. To scale horizontally, move `migrate` to a one-shot job and run multiple `web` replicas behind nginx.
+- There is **no CI/CD pipeline or image registry** wired up; production updates are `git pull` + rebuild on the host. Adding a registry-based deploy is straightforward if needed later.
+- PostgreSQL runs as a container with a local volume. For higher durability requirements, point `DATABASE_URL` at a managed database and drop the `db` service.
 
 ## Command reference
 

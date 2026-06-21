@@ -56,3 +56,6 @@ docs/
 
 # --- Node ---
 node_modules
+
+# --- Local dev TLS certs (mkcert) ---
+certs/

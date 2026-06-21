@@ -56,3 +56,12 @@ docs/_build/
 .vscode/
 .ideas/
 tempCodeRunnerFile.py
+
+# --- AI agents ---
+.agent/
+.claude/
+AGENT.md
+CLAUDE.md
+
+# --- Local dev TLS certs (mkcert) ---
+certs/

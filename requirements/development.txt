@@ -1,4 +1,11 @@
 # Development dependencies.
 -r base.txt
 
-# Add local-only tooling here (linters, debug toolbar, etc.) as needed.
+# Local HTTPS dev server: `manage.py runserver_plus --cert-file ...`.
+# Web Crypto (and shared cookies across the pass.* subdomain) need a secure
+# context, which plain-HTTP custom hostnames don't provide. See development.md.
+django-extensions>=3.2
+Werkzeug>=3.0
+pyOpenSSL>=24.0
+
+# Add other local-only tooling here (linters, debug toolbar, etc.) as needed.

@@ -22,7 +22,10 @@ services:
     restart: unless-stopped
 
   web:
-    build: .
+    build:
+      context: .
+      # Explicit so the production/default build never picks up the `dev` stage.
+      target: final
     image: proximared:latest
     env_file:
       - path: .env
