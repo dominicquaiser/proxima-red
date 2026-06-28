@@ -162,6 +162,8 @@
     let masterKey = null;
     let isPersisting = false;
     let isCopyingLink = false;
+    let armedRemoveBtn = null;
+    let armedRemoveTimer = null;
     let searchTerm = "";
     let statusFilter = "all"; // 'all' | 'active' | 'expired'
     let tagFilter = null; // null, or a single tag name to filter the listing by
@@ -626,7 +628,38 @@
       }
     };
 
-    const handleRemoveClick = async (row) => {
+    // Restore an armed remove button to its idle (non-confirming) appearance and
+    // clear the pending disarm timer.
+    const disarmRemoveBtn = () => {
+      if (armedRemoveTimer) {
+        clearTimeout(armedRemoveTimer);
+        armedRemoveTimer = null;
+      }
+      if (armedRemoveBtn) {
+        armedRemoveBtn.classList.remove("remove-btn--confirm");
+        armedRemoveBtn.title = "Remove from vault";
+        armedRemoveBtn = null;
+      }
+    };
+
+    // First click arms the button (turns the trash icon red) and waits for a
+    // confirming second click; inaction disarms it after a short window.
+    const armRemoveBtn = (removeBtn) => {
+      disarmRemoveBtn();
+      armedRemoveBtn = removeBtn;
+      removeBtn.classList.add("remove-btn--confirm");
+      removeBtn.title = "Click again to delete";
+      armedRemoveTimer = setTimeout(disarmRemoveBtn, 3000);
+    };
+
+    const handleRemoveClick = async (row, removeBtn) => {
+      // Require a confirming second click before the destructive delete.
+      if (armedRemoveBtn !== removeBtn) {
+        armRemoveBtn(removeBtn);
+        return;
+      }
+
+      disarmRemoveBtn();
       const shareId = row.dataset.shareId;
 
       if (!(await revokeShare(shareId))) {
@@ -713,6 +746,13 @@
       const row = event.target.closest(".row");
       if (!row) return;
 
+      // Any click that isn't a confirming click on the armed remove button
+      // cancels the pending two-click delete.
+      const clickedRemoveBtn = event.target.closest(".remove-btn");
+      if (armedRemoveBtn && clickedRemoveBtn !== armedRemoveBtn) {
+        disarmRemoveBtn();
+      }
+
       const tagRemoveBtn = event.target.closest(".tag__remove");
       if (tagRemoveBtn) {
         event.preventDefault();
@@ -738,9 +778,8 @@
         return;
       }
 
-      const removeBtn = event.target.closest(".remove-btn");
-      if (removeBtn) {
-        await handleRemoveClick(row);
+      if (clickedRemoveBtn) {
+        await handleRemoveClick(row, clickedRemoveBtn);
       }
     };
 
