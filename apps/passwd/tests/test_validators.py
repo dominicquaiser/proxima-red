@@ -12,6 +12,7 @@ from apps.passwd.constants import (
     MAX_ENCRYPTED_DATA_LENGTH,
     MAX_ENCRYPTED_TITLE_LENGTH,
     MAX_IV_LENGTH,
+    MAX_VAULT_DATA_LENGTH,
 )
 from apps.passwd.validators import (
     validate_encrypted_data,
@@ -19,6 +20,7 @@ from apps.passwd.validators import (
     validate_iv_bytes,
     validate_optional_encrypted_title,
     validate_optional_iv,
+    validate_vault_data,
 )
 
 
@@ -40,6 +42,25 @@ class ValidatorTests(TestCase):
         """Payloads beyond the maximum length are rejected."""
         with self.assertRaises(ValidationError):
             validate_encrypted_data("A" * (MAX_ENCRYPTED_DATA_LENGTH + 1))
+
+    def test_validate_vault_data_accepts_beyond_single_share_cap(self):
+        """The vault holds many shares, so it accepts more than one share's worth."""
+        # Length kept a multiple of 4 so it is valid Base64; above the single-share
+        # cap but well within the vault cap.
+        oversized_for_share = "A" * (MAX_ENCRYPTED_DATA_LENGTH + 4)
+        with self.assertRaises(ValidationError):
+            validate_encrypted_data(oversized_for_share)
+        validate_vault_data(oversized_for_share)  # should not raise
+
+    def test_validate_vault_data_rejects_too_long(self):
+        """Payloads beyond the vault cap are rejected."""
+        with self.assertRaises(ValidationError):
+            validate_vault_data("A" * (MAX_VAULT_DATA_LENGTH + 1))
+
+    def test_validate_vault_data_rejects_empty(self):
+        """Empty vault payloads are rejected like any encrypted blob."""
+        with self.assertRaises(ValidationError):
+            validate_vault_data("")
 
     def test_validate_iv_accepts_base64(self):
         """A valid Base64 IV passes validation."""

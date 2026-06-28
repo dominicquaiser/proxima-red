@@ -29,6 +29,7 @@ from apps.passwd.constants import (
     ERROR_USER_NOT_FOUND,
     GCM_IV_LENGTH_BYTES,
     MAX_ENCRYPTED_DATA_LENGTH,
+    MAX_VAULT_DATA_LENGTH,
     RATE_LIMIT_EXPORT,
     RATE_LIMIT_VAULT,
 )
@@ -496,6 +497,32 @@ class UpdateEncryptedDataViewTests(TestCase):
         self._authenticate()
         response = self._post(
             {"encrypted_data": "not base64!!", "iv": "AAAAAAAAAAAAAAAA"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
+        self.assertFalse(ServiceData.objects.filter(user=self.user).exists())
+
+    def test_accepts_blob_larger_than_single_share_cap(self):
+        """The vault stores many shares, so it accepts more than one share's worth."""
+        self._authenticate()
+        response = self._post(
+            {
+                "encrypted_data": "A" * (MAX_ENCRYPTED_DATA_LENGTH + 4),
+                "iv": "AAAAAAAAAAAAAAAA",
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertTrue(ServiceData.objects.filter(user=self.user).exists())
+
+    def test_oversized_vault_blob_rejected(self):
+        """A vault blob beyond the vault cap is rejected before storage."""
+        self._authenticate()
+        response = self._post(
+            {
+                "encrypted_data": "A" * (MAX_VAULT_DATA_LENGTH + 1),
+                "iv": "AAAAAAAAAAAAAAAA",
+            }
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json()["success"])

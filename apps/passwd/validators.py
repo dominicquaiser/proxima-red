@@ -15,6 +15,7 @@ from .constants import (
     MAX_ENCRYPTED_DATA_LENGTH,
     MAX_ENCRYPTED_TITLE_LENGTH,
     MAX_IV_LENGTH,
+    MAX_VAULT_DATA_LENGTH,
 )
 
 
@@ -58,15 +59,15 @@ def _check_iv_byte_length(value: str, label: str = "IV") -> None:
     _check_iv_length(len(_decode_base64(value, label)))
 
 
-def validate_encrypted_data(value: str) -> None:
+def _validate_encrypted_blob(value: str, max_length: int) -> None:
     """
-    Validate a required encrypted data field.
+    Shared rules for a required Base64 ciphertext blob.
 
-    Ensures the encrypted data is not empty and doesn't exceed the maximum
-    allowed length to prevent abuse.
-
-    Args:
-        value: The encrypted data string to validate
+    Ensures the value is non-empty, within ``max_length`` characters (to prevent
+    abuse), and valid Base64. The byte cap is the only thing that differs between
+    an anonymous single share (:data:`MAX_ENCRYPTED_DATA_LENGTH`) and the
+    authenticated vault, which packs every share into one blob
+    (:data:`MAX_VAULT_DATA_LENGTH`).
 
     Raises:
         ValidationError: If validation fails
@@ -75,10 +76,27 @@ def validate_encrypted_data(value: str) -> None:
         raise ValidationError(
             _("Encrypted data cannot be empty."), code="empty_encrypted_data"
         )
-    _check_max_length(
-        value, MAX_ENCRYPTED_DATA_LENGTH, "Encrypted data", "encrypted_data_too_long"
-    )
+    _check_max_length(value, max_length, "Encrypted data", "encrypted_data_too_long")
     _decode_base64(value, "Encrypted data")
+
+
+def validate_encrypted_data(value: str) -> None:
+    """Validate the ciphertext of a single anonymous share.
+
+    Capped at :data:`MAX_ENCRYPTED_DATA_LENGTH`; the unauthenticated create
+    endpoint relies on this tight bound to limit abuse.
+    """
+    _validate_encrypted_blob(value, MAX_ENCRYPTED_DATA_LENGTH)
+
+
+def validate_vault_data(value: str) -> None:
+    """Validate the authenticated vault blob.
+
+    The vault is a single encrypted document holding every share a user has saved
+    (share id + per-share key + title/tags), so it is capped at the larger
+    :data:`MAX_VAULT_DATA_LENGTH` rather than the one-secret share limit.
+    """
+    _validate_encrypted_blob(value, MAX_VAULT_DATA_LENGTH)
 
 
 def validate_optional_encrypted_title(value: str) -> None:

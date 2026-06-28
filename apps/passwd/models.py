@@ -21,6 +21,7 @@ from .validators import (
     validate_iv_bytes,
     validate_optional_encrypted_title,
     validate_optional_iv,
+    validate_vault_data,
 )
 
 
@@ -167,7 +168,7 @@ class ServiceData(models.Model):
     )
 
     encrypted_data = models.TextField(
-        validators=[validate_encrypted_data],
+        validators=[validate_vault_data],
         help_text=_("Client-encrypted JSON blob for the sharing service"),
     )
 

@@ -21,7 +21,11 @@ EXPIRY_MAP: Final[dict[str, timedelta]] = {
 DEFAULT_EXPIRY: Final[str] = "1day"
 
 # Maximum field lengths for security and database constraints
-MAX_ENCRYPTED_DATA_LENGTH: Final[int] = 50000  # ~50KB encrypted data limit
+MAX_ENCRYPTED_DATA_LENGTH: Final[int] = 50000  # ~50KB cap for a single anonymous share
+# The authenticated vault is one encrypted blob holding ALL of a user's shares
+# (share id + per-share key + title/tags), so it gets a far larger cap than the
+# one-secret anonymous share flow. ~500KB of Base64 ciphertext.
+MAX_VAULT_DATA_LENGTH: Final[int] = 500000  # ~500KB encrypted vault blob
 # Cross-runtime contract: must match GCM_IV_LENGTH_BYTES in static/js/crypto.js.
 GCM_IV_LENGTH_BYTES: Final[int] = 12
 # AES-GCM uses a 12-byte IV -> 16 Base64 chars; 24 leaves generous headroom
