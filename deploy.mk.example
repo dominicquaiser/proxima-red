@@ -8,6 +8,6 @@
 # Add the staticproxy override (serves /static/ + proxies to web on 127.0.0.1:8090).
 COMPOSE_EXTRA = -f docker-compose.host.yml
 
-# Start only these services — the bundled nginx/certbot are intentionally omitted
+# Start only these services. The bundled nginx/certbot are intentionally omitted
 # (the host's nginx owns ports 80/443 and terminates TLS).
 SERVICES = db redis web cron staticproxy

@@ -36,6 +36,7 @@
     <main
       id="main-content"
       class="vault"
+      data-vault-data-url="{% url 'passwd:vault_data' %}"
       data-update-url="{% url 'passwd:update_data' %}"
       data-delete-url="{% url 'passwd:delete_share' %}"
     >
@@ -152,8 +153,6 @@
         </div>
       </div>
     </div>
-
-    {{ user_data_json|json_script:"user-data" }}
 
     <!-- Row template cloned per share by vault.js (buildShareRow). The copy
          button is removed for expired shares; all text/colour is filled in JS. -->

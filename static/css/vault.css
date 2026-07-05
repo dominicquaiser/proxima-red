@@ -732,6 +732,29 @@
   width: 16px;
   height: 16px;
 }
+
+.unlock-signout {
+  margin-top: 14px;
+  text-align: center;
+}
+.unlock-signout__btn {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  color: var(--color-warm-sand);
+  font-family: var(--font-primary);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+.unlock-signout__btn:hover {
+  opacity: 1;
+}
 /* Inside the modal the card stretches to the modal width. */
 .modal .card {
   max-width: none;

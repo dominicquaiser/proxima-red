@@ -71,9 +71,7 @@ services:
         condition: service_healthy
     # Bypass the web entrypoint (no migrate/collectstatic); just run cleanup loops.
     # Expired share ciphertext is pruned every minute; expired DB-backed
-    # sessions are pruned hourly (clearsessions is a single indexed DELETE on
-    # expire_date, so an hourly sweep is cheap and bounds how long expired
-    # session rows — which Django already refuses to authenticate — linger).
+    # sessions are pruned hourly.
     entrypoint: []
     command: sh -c 'while :; do python manage.py delete_expired --verbosity 0; sleep 60; done & while :; do python manage.py clearsessions; sleep 3600; done & wait'
     restart: unless-stopped

@@ -10,6 +10,12 @@
 (function () {
   "use strict";
 
+  // Fallback endpoint for reading the encrypted vault blob; the page normally
+  // carries the URLconf-defined URL in #main-content's data-vault-data-url. The
+  // blob is fetched after the vault key is established (not embedded in the page
+  // HTML), so a logged-in-but-locked tab never receives ciphertext.
+  const VAULT_DATA_ENDPOINT = "/vault-data/";
+
   // Fallback endpoint for saving the encrypted vault blob; the page normally
   // carries the URLconf-defined URL in #main-content's data-update-url
   // (cf. data-salts-url in signin.html).
@@ -151,9 +157,9 @@
       active: document.querySelector('[data-count="active"]'),
       expired: document.querySelector('[data-count="expired"]'),
     };
-    const userDataScript = document.getElementById("user-data");
     const rowTemplate = document.getElementById("share-row-template");
     const mainContent = document.getElementById("main-content");
+    const vaultDataEndpoint = mainContent?.dataset.vaultDataUrl || VAULT_DATA_ENDPOINT;
     const saveEndpoint = mainContent?.dataset.updateUrl || SAVE_ENDPOINT;
     const deleteEndpoint = mainContent?.dataset.deleteUrl || DELETE_ENDPOINT;
 
@@ -417,22 +423,39 @@
 
     // --- Persistence ---
 
+    // Fetch the encrypted vault blob from the server (it is no longer embedded in
+    // the page) and decrypt it under the session key. A failed fetch disables the
+    // vault rather than rendering an empty one, so a transient error can't lead to
+    // a later save overwriting the stored blob with nothing; an empty payload (no
+    // blob stored yet) renders an empty vault normally.
     const loadSavedShares = async () => {
-      if (!masterKey || !userDataScript) {
+      if (!masterKey) {
+        renderShares();
+        return;
+      }
+
+      let blob;
+      try {
+        const { response, result } = await window.Http.getJson(vaultDataEndpoint);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        blob = result;
+      } catch (error) {
+        console.error("Failed to load saved vault data:", error);
+        disableVault("Could not load your saved links. Please reload the page.");
+        return;
+      }
+
+      if (!blob?.success || !blob.encrypted_data || !blob.iv) {
         renderShares();
         return;
       }
 
       try {
-        const payload = JSON.parse(userDataScript.textContent);
-        if (!payload?.encrypted_data || !payload?.iv) {
-          renderShares();
-          return;
-        }
-
         const decrypted = await window.AuthCrypto.decryptAccountData(
-          payload.encrypted_data,
-          payload.iv,
+          blob.encrypted_data,
+          blob.iv,
           masterKey,
         );
 

@@ -24,18 +24,6 @@
     });
   };
 
-  // GET the current user's encrypted vault blob. Throws on network/HTTP error.
-  const fetchVaultBlob = async (vaultDataUrl) => {
-    const response = await fetch(vaultDataUrl, {
-      headers: { "X-Requested-With": "XMLHttpRequest" },
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return response.json();
-  };
-
   const resolveCurrentVaultKey = async (currentPassword, currentVaultSalt) => {
     const storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
     if (storedKeyBase64) {
@@ -48,7 +36,14 @@
   };
 
   const recoverCurrentVaultData = async (vaultDataUrl, currentPassword, currentVaultSalt) => {
-    const blob = await fetchVaultBlob(vaultDataUrl);
+    // A failed read must throw (not return null): the caller aborts the password
+    // change on a throw, but treats null as "no vault to migrate". Silently
+    // mapping an HTTP error to null would let the change proceed and orphan the
+    // existing blob under the new key.
+    const { response, result: blob } = await window.Http.getJson(vaultDataUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
     if (!blob || !blob.success || !blob.encrypted_data || !blob.iv) {
       return null;
     }

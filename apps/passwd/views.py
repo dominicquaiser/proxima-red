@@ -61,7 +61,6 @@ from .constants import (
     SUCCESS_SHARE_DELETED,
     LOG_CREATE_FAILED,
     LOG_EXPIRED_DELETED,
-    LOG_NO_SERVICE_DATA,
     LOG_UPDATE_DATA,
     LOG_UPDATE_DATA_ERROR,
     LOG_SHARE_DELETED,
@@ -293,28 +292,17 @@ class VaultView(SessionAuthRequiredMixin, View):
 
     def get(self, request: HttpRequest) -> HttpResponse:
         """
-        Display the vault with the user's encrypted share data.
+        Display the vault shell (no encrypted data embedded).
 
-        The vault blob is fetched and passed to the client still encrypted (an
-        empty vault when none exists); the master key for decryption lives only
-        in the browser's session storage.
+        The page fetches the encrypted blob from ``/vault-data/`` only after the
+        browser has established its vault key, so a logged-in-but-locked tab
+        never receives ciphertext in the page HTML. The master key for
+        decryption lives only in the browser's session storage.
         """
         user = self.get_authenticated_user(request)
-        user_data = services.get_user_vault_data(user) if user else None
         user_id = user.user_id if user else request.session.get(SESSION_KEY_USER_ID)
 
-        if not user_data:
-            # User has no saved data yet (or no matching user)
-            logger.debug(LOG_NO_SERVICE_DATA, user_id)
-
-        return render(
-            request,
-            TEMPLATE_VAULT,
-            {
-                "user_id": user_id,
-                "user_data_json": user_data or {},
-            },
-        )
+        return render(request, TEMPLATE_VAULT, {"user_id": user_id})
 
 
 class UpdateEncryptedDataView(View):
@@ -357,9 +345,12 @@ class VaultDataView(View):
     """
     Return the authenticated user's encrypted vault blob as JSON.
 
-    The account page uses this to migrate the vault when the password changes:
-    a new password derives a new vault key, so the stored blob must be read,
-    re-encrypted under the new key, and saved again (see ``static/js/account.js``).
+    The vault page (``static/js/vault.js``) fetches the blob from here after the
+    browser establishes its vault key, so ciphertext is never embedded in the
+    vault page HTML (a logged-in-but-locked tab receives none). The account page
+    also uses it to migrate the vault when the password changes: a new password
+    derives a new vault key, so the stored blob must be read, re-encrypted under
+    the new key, and saved again (see ``static/js/account.js``).
     Like ``UpdateEncryptedDataView`` this is a JSON API, so it gates with
     ``require_session_auth_api`` (JSON 401) rather than the redirect mixin. The
     returned ``encrypted_data``/``iv`` are ciphertext the server cannot read; an

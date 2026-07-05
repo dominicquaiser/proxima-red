@@ -69,6 +69,27 @@
   };
 
   /**
+   * GET `url` as an AJAX request and parse the JSON reply.
+   *
+   * The read-only counterpart to `postForm`: sends the
+   * `X-Requested-With: XMLHttpRequest` header (so Django's `is_ajax_request`
+   * sees it) with same-origin credentials, and returns both the raw `Response`
+   * and the parsed body so callers control success/error handling. No CSRF
+   * token is needed for a GET.
+   *
+   * @param {string} url - The endpoint to GET.
+   * @returns {Promise<{response: Response, result: *}>}
+   */
+  const getJson = async (url) => {
+    const response = await fetch(url, {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      credentials: "same-origin",
+    });
+    const result = await response.json();
+    return { response, result };
+  };
+
+  /**
    * Extract the first human-readable message from a parsed AJAX response.
    *
    * Handles two shapes that the views produce:
@@ -105,5 +126,5 @@
     return DEFAULT_ERROR_MESSAGE;
   };
 
-  window.Http = { getCsrfToken, postForm, firstError };
+  window.Http = { getCsrfToken, postForm, getJson, firstError };
 })();

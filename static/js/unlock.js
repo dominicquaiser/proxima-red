@@ -26,14 +26,13 @@
   const form = overlay.querySelector("#unlock-form");
   const passwordInput = overlay.querySelector("#unlock-password");
   const submitButton = overlay.querySelector("#unlock-btn");
-  const closeButton = overlay.querySelector("#unlock-close");
 
   const userId = (overlay.dataset.userId || "").replace(/\D/g, "").slice(0, 8);
   const saltsUrl = overlay.dataset.saltsUrl || "/auth/salts/";
   const reauthUrl = overlay.dataset.reauthUrl || "/auth/reauth/";
 
   // Resolver for the in-flight ensureSecureSession() promise, set while the modal
-  // is open so the form/close handlers can settle it.
+  // is open so the form submit handler can settle it once the tab is unlocked.
   let pendingResolve = null;
 
   const show = () => {
@@ -41,12 +40,16 @@
     passwordInput?.focus();
   };
 
-  const settle = (unlocked) => {
+  // Hide the modal and resolve the pending ensureSecureSession() promise. Only
+  // reached on a successful unlock: the overlay has no dismiss path (no close
+  // button), so it always resolves true. The only non-unlock exit is the
+  // sign-out form, which navigates away instead of settling.
+  const settle = () => {
     const resolve = pendingResolve;
     pendingResolve = null;
     overlay.classList.add("hidden");
     if (passwordInput) passwordInput.value = "";
-    if (resolve) resolve(unlocked);
+    if (resolve) resolve(true);
   };
 
   // Verify the password against the server and re-derive + store the vault key
@@ -97,7 +100,7 @@
         async () => {
           if (await deriveAndStoreKey(password)) {
             window.Notify.show("Unlocked.", "success");
-            settle(true);
+            settle();
           } else {
             window.Notify.show("Incorrect password. Please try again.", "error");
           }
@@ -112,14 +115,11 @@
     });
   }
 
-  if (closeButton) {
-    closeButton.addEventListener("click", () => settle(false));
-  }
-
   /**
    * Resolve true when this tab has a usable vault key, prompting the user to
-   * unlock (re-enter their password) when it doesn't. Resolves false if the user
-   * dismisses the prompt without unlocking.
+   * unlock (re-enter their password) when it doesn't. The prompt can't be
+   * dismissed, so this only resolves once the tab is unlocked; the user's other
+   * option is the modal's sign-out, which navigates away instead of resolving.
    * @returns {Promise<boolean>}
    */
   const ensureSecureSession = () => {

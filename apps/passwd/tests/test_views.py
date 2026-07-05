@@ -320,8 +320,14 @@ class VaultViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "passwd/vault.html")
 
-    def test_authenticated_with_data_passes_encrypted_blob(self):
-        """Stored ServiceData is surfaced (with Base64-encoded IV) to the page."""
+    def test_authenticated_with_data_does_not_embed_blob(self):
+        """The vault shell never embeds ciphertext; the client fetches it instead.
+
+        A logged-in-but-locked tab must not receive the encrypted blob in the
+        page HTML (it is fetched from ``/vault-data/`` only after the browser
+        establishes its vault key). Delivery of the blob itself is covered by
+        ``VaultDataViewTests.test_returns_encrypted_blob``.
+        """
         ServiceData.objects.create(
             user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12
         )
@@ -329,9 +335,9 @@ class VaultViewTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        user_data = response.context["user_data_json"]
-        self.assertEqual(user_data["encrypted_data"], "ZW5jcnlwdGVk")
-        self.assertEqual(user_data["iv"], "AAAAAAAAAAAAAAAA")  # b"\x00" * 12 in base64
+        self.assertNotIn("user_data_json", response.context)
+        self.assertNotContains(response, 'id="user-data"')
+        self.assertNotContains(response, "ZW5jcnlwdGVk")
 
     def test_rate_limited_returns_403(self):
         """Requests past RATE_LIMIT_VAULT in one window are blocked with 403."""

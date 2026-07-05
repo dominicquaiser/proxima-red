@@ -72,7 +72,6 @@ SUCCESS_SHARE_DELETED: Final[str] = "The secure share has been revoked."
 # Logging messages
 LOG_CREATE_FAILED: Final[str] = "Failed to create share (%s)"
 LOG_EXPIRED_DELETED: Final[str] = "Deleted expired share: %s"
-LOG_NO_SERVICE_DATA: Final[str] = "No service data found for user %s"
 LOG_UPDATE_DATA: Final[str] = "Updated service data for user %s"
 LOG_UPDATE_DATA_ERROR: Final[str] = "Update service data failed (%s)"
 LOG_SHARE_DELETED: Final[str] = "Deleted share %s for user %s"

@@ -1,9 +1,9 @@
-{% load static %} {% comment %} In-place unlock overlay: re-derive the per-tab
-vault key without a full sign-out, for a tab that has a valid login but an empty
-sessionStorage (e.g. a second tab, or one opened after the original sign-in tab
-closed). Wired by static/js/unlock.js (window.SecureSessionUnlock). Include with
-the account's user id: {% templatetag openblock %} include
-"partials/_unlock_modal.html" with user_id=user_id {% templatetag closeblock %}
+{% load static %} {% comment %} In-place unlock overlay: re-derive the per-tab vault key without a
+full sign-out, for a tab that has a valid login but an empty sessionStorage (e.g. a second tab, or
+one opened after the original sign-in tab closed). The overlay can't be dismissed (no close button)
+so nothing behind the lock is exposed by closing it. Wired by static/js/unlock.js
+(window.SecureSessionUnlock). Include with the account's user id: {% templatetag openblock %}
+include "partials/_unlock_modal.html" with user_id=user_id {% templatetag closeblock %}
 {% endcomment %}
 <div
   id="unlock-modal"
@@ -16,16 +16,13 @@ the account's user id: {% templatetag openblock %} include
   data-reauth-url="{% url 'auth:reauth' %}"
 >
   <div class="modal">
-    <button class="modal__close" id="unlock-close" type="button" aria-label="Close">
-      <span class="vicon vicon--x" aria-hidden="true"></span>
-    </button>
     <div class="card">
       <div class="card__header">
         <div class="card__eyebrow">Locked Tab</div>
         <div class="card__title" id="unlock-title">[pass·]<span> /unlock</span></div>
         <div class="card__subtitle">
           Your encryption key lives only in the tab you signed in on.<br />
-          Re-enter your password to unlock this tab — your data stays encrypted.
+          Re-enter your password to unlock this tab.
         </div>
       </div>
 
@@ -44,6 +41,10 @@ the account's user id: {% templatetag openblock %} include
             />
           </div>
           <button type="submit" class="btn-create" id="unlock-btn">Unlock</button>
+        </form>
+        <form method="post" action="{% url 'auth:signout' %}" class="unlock-signout">
+          {% csrf_token %}
+          <button type="submit" class="unlock-signout__btn">Sign out instead</button>
         </form>
       </div>
     </div>
