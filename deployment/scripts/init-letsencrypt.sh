@@ -51,6 +51,7 @@ $COMPOSE run --rm --entrypoint certbot certbot certonly \
     --webroot -w /var/www/certbot \
     -d "$DOMAIN" \
     -d "pass.$DOMAIN" \
+    -d "note.$DOMAIN" \
     --email "$CERTBOT_EMAIL" \
     --agree-tos --no-eff-email --non-interactive \
     $STAGING_FLAG

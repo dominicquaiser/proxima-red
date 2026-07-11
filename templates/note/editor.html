@@ -1,0 +1,469 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Share a Note – proxima·red</title>
+    <meta
+      name="description"
+      content="Write a markdown note and share it with an end-to-end encrypted, expiring link. Zero-knowledge: the server never sees your text."
+    />
+    <link rel="canonical" href="{{ canonical_base }}{{ request.path }}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="proxima·red" />
+    <meta property="og:url" content="{{ canonical_base }}{{ request.path }}" />
+    <meta property="og:title" content="proxima·red — Encrypted Note Sharing" />
+    <meta
+      property="og:description"
+      content="Write a markdown note and share it with an end-to-end encrypted, expiring link."
+    />
+    <meta property="og:image" content="{{ canonical_base }}{% static 'images/og-image.png' %}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#1D2021" />
+    <link rel="icon" type="image/svg+xml" href="{% static 'icons/note-pencil-favicon.svg' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/note.css' %}" />
+
+    <!-- With JavaScript off the fixed editor shell cannot work; let the page
+         flow, hide the JS-only chrome (rail, counter, preview), and reveal the
+         plain-text share form so a note can still be written and shared. -->
+    <noscript>
+      <style>
+        body.note-editor {
+          overflow: auto;
+        }
+        .header {
+          position: static;
+        }
+        .rail,
+        .meta,
+        .editor-tabs,
+        #note-preview {
+          display: none;
+        }
+        .editor {
+          position: static;
+          padding-left: 0;
+        }
+        /* No JS autosize/undo stack: give the textarea its own scroll and a
+           resize grip so a longer note stays editable. Shrink its default
+           height so the expiry buttons + submit stay above the fold on a
+           1080p screen (the grip lets a visitor grow it back). */
+        .editor__text {
+          overflow: auto;
+          resize: vertical;
+          min-height: 38vh;
+        }
+        .editor__noscript-share {
+          display: block;
+        }
+      </style>
+    </noscript>
+  </head>
+  <body class="note-editor">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <noscript>
+      <div class="noscript-warning" role="alert">
+        <strong>JavaScript is off</strong>. You can still write a note and share it as an
+        <strong>unencrypted, plain-text</strong> link using the form below. End-to-end encryption,
+        live preview, and the formatting toolbar require JavaScript.
+      </div>
+    </noscript>
+
+    <div id="notification-container"></div>
+
+    <header class="header">
+      <a href="{{ site_url }}/" class="header__logo">
+        proxima<span class="header__logo-dot">·</span>red
+      </a>
+
+      <div class="editor-tabs" role="tablist" aria-label="Editor mode">
+        <button
+          class="editor-tabs__item editor-tabs__item--active"
+          id="tab-edit"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="note-content"
+        >
+          Edit
+        </button>
+        <button
+          class="editor-tabs__item"
+          id="tab-preview"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="note-preview"
+        >
+          Preview
+        </button>
+      </div>
+
+      <div class="header__auth">
+        <details class="mobile-menu" id="mobile-menu">
+          <summary class="header__menu-toggle" aria-label="Menu">
+            <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
+              <line
+                x1="40"
+                y1="64"
+                x2="216"
+                y2="64"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="16"
+              />
+              <line
+                x1="40"
+                y1="128"
+                x2="216"
+                y2="128"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="16"
+              />
+              <line
+                x1="40"
+                y1="192"
+                x2="216"
+                y2="192"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="16"
+              />
+            </svg>
+          </summary>
+          <nav class="mobile-menu__panel" aria-label="Site menu">
+            <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
+            <a href="{{ note_site_url }}/" class="mobile-menu__link">Share a Note</a>
+            <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
+            <a href="https://github.com/dominicquaiser" class="mobile-menu__link">Source Code</a>
+            <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
+            <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
+            <a href="{{ site_url }}/auth/signin/" class="mobile-menu__link">Sign In</a>
+            <a href="{{ site_url }}/auth/signup/" class="mobile-menu__link">Sign Up</a>
+          </nav>
+        </details>
+        <a href="{{ site_url }}/auth/signin/" class="header__btn header__btn--outline">Sign In</a>
+        <a href="{{ site_url }}/auth/signup/" class="header__btn header__btn--solid">Sign Up</a>
+      </div>
+    </header>
+
+    <main
+      id="main-content"
+      class="editor"
+      data-create-url="{% url 'note:create' %}"
+      data-retrieve-url-base="{{ retrieval_url_base }}"
+      data-dummy-note-id="{{ dummy_note_id }}"
+    >
+      {% if error %}
+      <p class="editor__notice editor__notice--error" role="alert">{{ error }}</p>
+      {% endif %} {% if created_note %}
+      <p class="editor__notice">
+        Your note link:
+        <a id="created-note-url" href="/{{ created_note.id }}/">/{{ created_note.id }}/</a>
+      </p>
+      {% endif %} {% comment %} This form provides the unencrypted no-JavaScript fallback; editor.js
+      handles the encrypted AJAX flow. {% endcomment %}
+      <form class="editor__form" method="post" action="{% url 'note:create' %}">
+        {% csrf_token %}
+        <input type="hidden" name="is_encrypted" value="0" />
+        <div class="editor__doc">
+          <textarea
+            id="note-content"
+            class="editor__text"
+            name="content"
+            placeholder="# Write your markdown here"
+            spellcheck="false"
+            aria-label="Note content"
+          ></textarea>
+          <span id="note-caret" class="editor__caret" aria-hidden="true"></span>
+          <div
+            id="note-preview"
+            class="md-render hidden"
+            role="tabpanel"
+            aria-label="Preview"
+          ></div>
+
+          <div class="editor__noscript-share">
+            <p class="editor__noscript-hint">
+              Without JavaScript, notes can be shared only as an <strong>unencrypted</strong>
+              plain-text link — readable by anyone with the link and by the server.
+            </p>
+            <div class="editor__noscript-controls">
+              <div>
+                <span class="editor__noscript-label" id="noscript-expiry-label">Expires after</span>
+                <div class="share-expiry" role="radiogroup" aria-labelledby="noscript-expiry-label">
+                  <div>
+                    <input
+                      class="share-expiry__option"
+                      type="radio"
+                      name="expiry_time"
+                      id="noscript-expiry-1h"
+                      value="1hour"
+                    />
+                    <label class="share-expiry__label" for="noscript-expiry-1h">1 hour</label>
+                  </div>
+                  <div>
+                    <input
+                      class="share-expiry__option"
+                      type="radio"
+                      name="expiry_time"
+                      id="noscript-expiry-1d"
+                      value="1day"
+                      checked
+                    />
+                    <label class="share-expiry__label" for="noscript-expiry-1d">1 day</label>
+                  </div>
+                  <div>
+                    <input
+                      class="share-expiry__option"
+                      type="radio"
+                      name="expiry_time"
+                      id="noscript-expiry-1w"
+                      value="1week"
+                    />
+                    <label class="share-expiry__label" for="noscript-expiry-1w">1 week</label>
+                  </div>
+                  <div>
+                    <input
+                      class="share-expiry__option"
+                      type="radio"
+                      name="expiry_time"
+                      id="noscript-expiry-1mo"
+                      value="1month"
+                    />
+                    <label class="share-expiry__label" for="noscript-expiry-1mo">1 month</label>
+                  </div>
+                </div>
+              </div>
+              <button type="submit" class="editor__noscript-submit">Create plain-text link</button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </main>
+
+    <div class="meta" id="note-meta" aria-hidden="true"></div>
+
+    <nav class="rail" aria-label="Formatting toolbar">
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="bold" title="Bold">
+          <span class="nicon nicon--text-b" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="italic" title="Italic">
+          <span class="nicon nicon--text-italic" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="strikethrough" title="Strikethrough">
+          <span class="nicon nicon--text-strikethrough" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="h1" title="Heading 1">
+          <span class="nicon nicon--text-h-one" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h2" title="Heading 2">
+          <span class="nicon nicon--text-h-two" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h3" title="Heading 3">
+          <span class="nicon nicon--text-h-three" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h4" title="Heading 4">
+          <span class="nicon nicon--text-h-four" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h5" title="Heading 5">
+          <span class="nicon nicon--text-h-five" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h6" title="Heading 6">
+          <span class="nicon nicon--text-h-six" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="bullets" title="Bullet list">
+          <span class="nicon nicon--list-bullets" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="numbers" title="Numbered list">
+          <span class="nicon nicon--list-numbers" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="tasks" title="Task list">
+          <span class="nicon nicon--list-checks" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="quote" title="Blockquote">
+          <span class="nicon nicon--quotes" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="code" title="Code block">
+          <span class="nicon nicon--code" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="undo" title="Undo">
+          <span class="nicon nicon--arrow-counter-clockwise" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="redo" title="Redo">
+          <span class="nicon nicon--arrow-clockwise" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__spacer"></div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="download" title="Download .md">
+          <span class="nicon nicon--download-simple" aria-hidden="true"></span>
+        </button>
+        <button
+          class="tool tool--accent"
+          type="button"
+          title="Create share link"
+          popovertarget="share-pop"
+          aria-haspopup="menu"
+        >
+          <span class="nicon nicon--export" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <div id="share-pop" popover class="share-pop">
+      <div id="share-menu">
+        <div class="share-pop__title">Create share link</div>
+
+        <span class="share-pop__label" id="note-expiry-label">Expires after</span>
+        <div class="share-expiry" role="radiogroup" aria-labelledby="note-expiry-label">
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1h"
+              value="1hour"
+            />
+            <label class="share-expiry__label" for="note-expiry-1h">1 hour</label>
+          </div>
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1d"
+              value="1day"
+              checked
+            />
+            <label class="share-expiry__label" for="note-expiry-1d">1 day</label>
+          </div>
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1w"
+              value="1week"
+            />
+            <label class="share-expiry__label" for="note-expiry-1w">1 week</label>
+          </div>
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1mo"
+              value="1month"
+            />
+            <label class="share-expiry__label" for="note-expiry-1mo">1 month</label>
+          </div>
+        </div>
+
+        <button class="share-opt" type="button" id="share-encrypted-btn">
+          <span class="nicon nicon--eye share-opt__icon" aria-hidden="true"></span>
+          <span class="share-opt__text">
+            <span class="share-opt__label">Read-only link</span>
+            <span class="share-opt__desc"
+              >Recipients can view but not edit. End-to-end encrypted.</span
+            >
+          </span>
+        </button>
+
+        <button class="share-opt share-opt--disabled" type="button" disabled title="Coming soon">
+          <span class="nicon nicon--pencil-simple-line share-opt__icon" aria-hidden="true"></span>
+          <span class="share-opt__text">
+            <span class="share-opt__label">Editable link — coming soon</span>
+            <span class="share-opt__desc"
+              >Recipients will be able to edit in real time. End-to-end encrypted.</span
+            >
+          </span>
+        </button>
+
+        <div class="share-pop__divider"></div>
+
+        <button class="share-opt share-opt--warn" type="button" id="share-plain-btn">
+          <span class="nicon nicon--lock-simple-open share-opt__icon" aria-hidden="true"></span>
+          <span class="share-opt__text">
+            <span class="share-opt__label">Plain-text link</span>
+            <span class="share-opt__desc"
+              >No encryption — readable by anyone with the link, and by the server. Use only for
+              non-sensitive notes.</span
+            >
+          </span>
+        </button>
+      </div>
+
+      <div id="share-result" class="share-pop__result hidden">
+        <div class="share-pop__title">Share link created</div>
+        <div class="share-pop__link-row">
+          <input
+            id="share-link"
+            class="share-pop__link"
+            type="text"
+            readonly
+            aria-label="Share link"
+          />
+          <button class="share-pop__copy" type="button" id="copy-link-btn" title="Copy link">
+            <span class="nicon nicon--clipboard" aria-hidden="true"></span>
+          </button>
+        </div>
+        <p class="share-pop__hint">
+          For encrypted notes the key after <code>#</code> never reaches the server — anyone with
+          the full link can read the note until it expires.
+        </p>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <div class="footer__links">
+        <a href="{{ pass_site_url }}/" class="footer__nav-link">Share a Password</a>
+        <a href="{{ note_site_url }}/" class="footer__nav-link">Share a Note</a>
+        <a href="{{ site_url }}/about/" class="footer__nav-link">About</a>
+        <a href="https://github.com/dominicquaiser/proxima-red" class="footer__nav-link"
+          >Source Code</a
+        >
+        <div class="footer__right">
+          <a href="{{ site_url }}/imprint/">Imprint</a>
+          <span class="footer__sep"></span>
+          <a href="{{ site_url }}/privacy/">Privacy Policy</a>
+        </div>
+      </div>
+    </footer>
+
+    {% include "partials/_util_scripts.html" %}
+    <script src="{% static 'shared/js/menu.js' %}" defer></script>
+    <script src="{% static 'shared/js/crypto.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/marked.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/purify.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/highlight.min.js' %}" defer></script>
+    <script src="{% static 'note/js/markdown.js' %}" defer></script>
+    <script src="{% static 'note/js/toolbar.js' %}" defer></script>
+    <script src="{% static 'note/js/editor.js' %}" defer></script>
+  </body>
+</html>

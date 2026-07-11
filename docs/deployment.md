@@ -24,7 +24,7 @@ Production runs six containers behind an nginx reverse proxy with automatic Let'
   - [Viewing logs](#viewing-logs)
   - [Updating to a new release](#updating-to-a-new-release)
   - [Database backups and restore](#database-backups-and-restore)
-  - [Expired share cleanup](#expired-share-cleanup)
+  - [Expired share / note cleanup](#expired-share--note-cleanup)
   - [TLS certificate renewal](#tls-certificate-renewal)
   - [Running tests](#running-tests)
 - [Troubleshooting](#troubleshooting)
@@ -47,6 +47,7 @@ Only nginx publishes ports to the host; the application server and database are 
                           ┌────┴─────┐             │   redis    │             ┌──────┴───────┐
                           │ certbot  │             │(rate-limit)│             │     cron     │
                           └──────────┘             └────────────┘             │delete_expired│
+                                                                              │ ⤷ _notes     │
                                                                               │clearsessions │
                                                                               └──────────────┘
 ```
@@ -58,7 +59,7 @@ Only nginx publishes ports to the host; the application server and database are 
 | `db`      | `postgres:16-alpine`    | PostgreSQL database                                                            |
 | `redis`   | `redis:7-alpine`        | Rate-limit counter cache shared across Gunicorn workers (ephemeral, no volume) |
 | `certbot` | `certbot/certbot`       | Obtains and renews Let's Encrypt certificates (HTTP-01)                        |
-| `cron`    | built from `Dockerfile` | Runs `delete_expired` every minute; `clearsessions` every hour                 |
+| `cron`    | built from `Dockerfile` | Runs `delete_expired` + `delete_expired_notes` every minute; `clearsessions` every hour |
 
 **Persistent volumes**
 
@@ -104,10 +105,11 @@ Docker Compose reads `.env` for two purposes: interpolating `${VAR}` references 
 | ------------------------------- | ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SECRET_KEY`                    | **prod**    | _(50+ random chars)_                           | Django cryptographic key. Generate with the command below.                                                                                                                                                                      |
 | `DEBUG`                         | no          | `False`                                        | Never enable in production. Ignored by the dev settings (always `True`).                                                                                                                                                        |
-| `ALLOWED_HOSTS`                 | **prod**    | `proxima.red,pass.proxima.red`                 | Comma-separated hostnames Django will serve.                                                                                                                                                                                    |
-| `CSRF_TRUSTED_ORIGINS`          | **prod**    | `https://proxima.red,https://pass.proxima.red` | Comma-separated, **scheme-qualified** origins for cross-origin POSTs.                                                                                                                                                           |
+| `ALLOWED_HOSTS`                 | **prod**    | `proxima.red,pass.proxima.red,note.proxima.red` | Comma-separated hostnames Django will serve.                                                                                                                                                                                    |
+| `CSRF_TRUSTED_ORIGINS`          | **prod**    | `https://proxima.red,https://pass.proxima.red,https://note.proxima.red` | Comma-separated, **scheme-qualified** origins for cross-origin POSTs.                                                                                                                                                           |
 | `SITE_URL`                      | **prod**    | `https://proxima.red`                          | Canonical base URL of the main site (no trailing slash); the shared origin that serves the auth flow (sign in/up, account). Used in the `Content-Security-Policy` `form-action` directive.                                      |
 | `PASS_SITE_URL`                 | **prod**    | `https://pass.proxima.red`                     | Base URL of the vault subdomain (no trailing slash). After sign-in on `SITE_URL` the vault key is handed here in the redirect URL fragment. Used in CSP `connect-src` and `form-action`. Equal to `SITE_URL` for single-domain. |
+| `NOTE_SITE_URL`                 | **prod**    | `https://note.proxima.red`                     | Base URL of the note tool's subdomain (no trailing slash). Requests on this host are dispatched to the note editor / note retrieval. Used in CSP `form-action`. Equal to `SITE_URL` for single-domain.                          |
 | `SESSION_COOKIE_DOMAIN`         | no          | `.proxima.red`                                 | Cookie domain shared across subdomains (leading dot). Required when the vault runs on a different subdomain from the main site.                                                                                                 |
 | `DATABASE_URL`                  | **prod**    | `postgres://user:pass@db:5432/proximared`      | Django database DSN. Host is the Compose service name `db`.                                                                                                                                                                     |
 | `POSTGRES_DB`                   | yes         | `proximared`                                   | Database name created by the `db` container.                                                                                                                                                                                    |
@@ -156,7 +158,7 @@ The dev image's `dev` build stage adds `django-extensions` (for `runserver_plus`
 **1. Map the hostnames to loopback** (`.test` is RFC 6761-reserved, so it never collides with real DNS). Add to `/etc/hosts`:
 
 ```
-127.0.0.1   proxima.test pass.proxima.test
+127.0.0.1   proxima.test pass.proxima.test note.proxima.test
 ```
 
 **2. Mint a locally-trusted cert** with [mkcert](https://github.com/FiloSottile/mkcert),
@@ -164,7 +166,7 @@ written to the `certs/` directory the compose file expects (git-ignored):
 
 ```bash
 mkcert -install  # one-time: trust the local CA
-mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test
+mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test note.proxima.test
 ```
 
 > The cert/key are bind-mounted into the container and read by its non-root `app` user (uid 1000). If your host user isn't uid 1000, make them readable: `chmod 644 certs/dev*.pem`.
@@ -172,10 +174,11 @@ mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.pr
 **3. Set the HTTPS origins in `.env`** (override the production-oriented `.env.example` defaults):
 
 ```
-ALLOWED_HOSTS=proxima.test,pass.proxima.test
-CSRF_TRUSTED_ORIGINS=https://proxima.test:8000,https://pass.proxima.test:8000
+ALLOWED_HOSTS=proxima.test,pass.proxima.test,note.proxima.test
+CSRF_TRUSTED_ORIGINS=https://proxima.test:8000,https://pass.proxima.test:8000,https://note.proxima.test:8000
 SITE_URL=https://proxima.test:8000
 PASS_SITE_URL=https://pass.proxima.test:8000
+NOTE_SITE_URL=https://note.proxima.test:8000
 SESSION_COOKIE_DOMAIN=.proxima.test
 ```
 
@@ -185,7 +188,7 @@ SESSION_COOKIE_DOMAIN=.proxima.test
 docker compose up --build
 ```
 
-- Application: <https://proxima.test:8000/> (vault at <https://pass.proxima.test:8000/vault/>)
+- Application: <https://proxima.test:8000/> (vault at <https://pass.proxima.test:8000/vault/>, note editor at <https://note.proxima.test:8000/>)
 - `docker-compose.override.yml` is applied automatically — no extra `-f` flags.
 - Database migrations run on container start (via the entrypoint).
 - Static files are served directly by the dev server; `collectstatic` is skipped in development so the bind-mounted tree stays clean.
@@ -219,7 +222,7 @@ Edit `.env` and set at minimum: `SECRET_KEY`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORI
 
 ### 3. Point DNS at the host
 
-Create an `A` (and optionally `AAAA`) record for `DOMAIN` pointing at the server's public IP. Verify it resolves before continuing:
+Create `A` (and optionally `AAAA`) records for `DOMAIN` **and its `pass.` and `note.` subdomains** pointing at the server's public IP. Verify they resolve before continuing:
 
 ```bash
 dig +short share.example.com
@@ -234,6 +237,8 @@ Run the one-time bootstrap script. It seeds a temporary self-signed certificate 
 ```
 
 > **Tip:** Run it first with `STAGING=1 ./deployment/scripts/init-letsencrypt.sh` to validate the flow against the Let's Encrypt staging environment and avoid the production [rate limits](https://letsencrypt.org/docs/rate-limits/). Once it succeeds, re-run without `STAGING` to obtain a trusted certificate.
+
+> **Existing deployments:** the certificate's SAN list now includes `note.<DOMAIN>`. When upgrading a host whose certificate predates the note tool, add the `note.` DNS record and re-run `./deployment/scripts/init-letsencrypt.sh` — its reset step deletes the old certificate and requests one covering all three hosts. Until then nginx serves the note host with a mismatched certificate.
 
 ### 5. Launch the stack
 
@@ -254,7 +259,12 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec web \
     python manage.py check --deploy
 ```
 
-Then browse to `https://<DOMAIN>/`, confirm the certificate is valid, and that `http://<DOMAIN>/` redirects to HTTPS.
+Then browse to `https://<DOMAIN>/`, confirm the certificate is valid, and that `http://<DOMAIN>/` redirects to HTTPS. Check the tool subdomains too:
+
+```bash
+curl -sI https://pass.<DOMAIN> | head -1
+curl -sI https://note.<DOMAIN> | head -1
+```
 
 ## Deploying behind an existing host nginx
 
@@ -279,7 +289,7 @@ This model uses the **same `make` targets** as the bundled setup — the only di
 
 **Steps:**
 
-1. Configure `.env` as in [step 2](#2-configure-the-environment). For a single domain set `PASS_SITE_URL` equal to `SITE_URL`. Because there are **two** proxy hops (host nginx + `staticproxy`), set `RATELIMIT_TRUSTED_PROXY_COUNT=2`.
+1. Configure `.env` as in [step 2](#2-configure-the-environment). For a single domain set `PASS_SITE_URL` and `NOTE_SITE_URL` equal to `SITE_URL`. Because there are **two** proxy hops (host nginx + `staticproxy`), set `RATELIMIT_TRUSTED_PROXY_COUNT=2`.
 
 2. Enable the host-nginx model for `make` (git-ignored, one-time per host):
 
@@ -293,13 +303,13 @@ cp deploy.mk.example deploy.mk
 make up
 ```
 
-4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with the host's certbot. List **both** the main domain and the vault subdomain in `server_name` — Django dispatches by host, so a single upstream serves both (the vault is canonically `pass.proxima.red`; see `PASS_SITE_URL`). Make sure DNS `A`/`AAAA` records exist for `pass.proxima.red` as well as `proxima.red` before requesting the certificate.
+4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with the host's certbot. List the main domain **and every tool subdomain** in `server_name` — Django dispatches by host, so a single upstream serves them all (the vault is canonically `pass.proxima.red`, the note tool `note.proxima.red`; see `PASS_SITE_URL`/`NOTE_SITE_URL`). Make sure DNS `A`/`AAAA` records exist for the subdomains as well as `proxima.red` before requesting the certificate.
 
    ```nginx
    server {
        listen 80;
        listen [::]:80;
-       server_name proxima.red www.proxima.red pass.proxima.red;
+       server_name proxima.red www.proxima.red pass.proxima.red note.proxima.red;
 
        location / {
            proxy_pass         http://127.0.0.1:8090;
@@ -394,13 +404,14 @@ Schedule regular backups with a host cron entry, for example:
 0 3 * * * cd /path/to/proxima-red && ./deployment/scripts/backup.sh
 ```
 
-### Expired share cleanup
+### Expired share / note cleanup
 
-The `cron` service runs `manage.py delete_expired` every minute and `manage.py clearsessions` every hour. To run cleanup manually or preview what would be removed:
+The `cron` service runs `manage.py delete_expired` (password shares) and `manage.py delete_expired_notes` (notes) every minute, plus `manage.py clearsessions` every hour. To run cleanup manually or preview what would be removed:
 
 ```bash
 dcp run --rm web python manage.py delete_expired --dry-run
 dcp run --rm web python manage.py delete_expired --statistics
+dcp run --rm web python manage.py delete_expired_notes --dry-run
 ```
 
 ### TLS certificate renewal

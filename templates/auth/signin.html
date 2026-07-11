@@ -1,6 +1,6 @@
 {% extends "base.html" %} {% load static %} {% block title %}Sign In{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/components.css' %}" />
-<link rel="stylesheet" href="{% static 'css/auth.css' %}" />
+<link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'auth/css/auth.css' %}" />
 {% endblock %} {% block content %}
 <main id="main-content">
   <div class="card">
@@ -74,7 +74,7 @@
   </div>
 </main>
 {% endblock %} {% block extra_js %}
-<script src="{% static 'js/auth.js' %}" defer></script>
+<script src="{% static 'auth/js/auth.js' %}" defer></script>
 {% include "partials/_auth_scripts.html" %}
-<script src="{% static 'js/signin.js' %}" defer></script>
+<script src="{% static 'auth/js/signin.js' %}" defer></script>
 {% endblock %}

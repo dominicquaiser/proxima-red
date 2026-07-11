@@ -70,10 +70,10 @@ services:
       db:
         condition: service_healthy
     # Bypass the web entrypoint (no migrate/collectstatic); just run cleanup loops.
-    # Expired share ciphertext is pruned every minute; expired DB-backed
-    # sessions are pruned hourly.
+    # Expired share ciphertext and expired notes are pruned every minute;
+    # expired DB-backed sessions are pruned hourly.
     entrypoint: []
-    command: sh -c 'while :; do python manage.py delete_expired --verbosity 0; sleep 60; done & while :; do python manage.py clearsessions; sleep 3600; done & wait'
+    command: sh -c 'while :; do python manage.py delete_expired --verbosity 0; sleep 60; done & while :; do python manage.py delete_expired_notes --verbosity 0; sleep 60; done & while :; do python manage.py clearsessions; sleep 3600; done & wait'
     restart: unless-stopped
 
 volumes:

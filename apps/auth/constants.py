@@ -13,8 +13,8 @@ USER_ID_LENGTH: Final[int] = 8
 
 # Password and salt configuration. These byte lengths are a cross-runtime
 # contract with the browser KDF and must stay in lockstep with the JS:
-#   SALT_LENGTH_BYTES        <-> KDF_SALT_LENGTH_BYTES (static/js/auth-crypto.js)
-#   AUTH_SECRET_LENGTH_BYTES <-> the 256-bit AES_KEY_LENGTH_BITS (static/js/crypto.js)
+#   SALT_LENGTH_BYTES        <-> KDF_SALT_LENGTH_BYTES (static/auth/js/auth-crypto.js)
+#   AUTH_SECRET_LENGTH_BYTES <-> the 256-bit AES_KEY_LENGTH_BITS (static/shared/js/crypto.js)
 SALT_LENGTH_BYTES: Final[int] = 32  # 32 bytes = 256 bits
 AUTH_SECRET_LENGTH_BYTES: Final[int] = 32  # PBKDF2-derived authentication secret size
 

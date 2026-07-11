@@ -136,6 +136,41 @@
   }
 
   /**
+   * Encrypts plaintext with AES-256-GCM under an existing key. A fresh IV is
+   * generated per call, so encrypting several values with the same key is safe.
+   *
+   * This is the size-agnostic primitive: it enforces no length cap, so every
+   * caller must apply its own bound (encryptPassword's MAX_PASSWORD_LENGTH,
+   * the note editor's MAX_NOTE_PLAINTEXT_BYTES).
+   *
+   * @param {string} plaintext The text to encrypt (required, non-empty).
+   * @param {CryptoKey} key The AES-256-GCM key to encrypt with.
+   * @returns {Promise<{encryptedData: string, iv: string}>} Base64-encoded values.
+   */
+  async function encryptWithKey(plaintext, key) {
+    try {
+      if (!plaintext || typeof plaintext !== "string") {
+        throw new Error("Invalid plaintext: must be a non-empty string");
+      }
+      const iv = generateIV();
+
+      const encryptedBuffer = await window.crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, tagLength: GCM_TAG_LENGTH_BITS },
+        key,
+        new TextEncoder().encode(plaintext),
+      );
+
+      return {
+        encryptedData: bufferToBase64(new Uint8Array(encryptedBuffer)),
+        iv: bufferToBase64(iv),
+      };
+    } catch (error) {
+      if (error instanceof CryptoError) throw error;
+      throw new CryptoError("Encryption failed: " + error.message, "ENCRYPTION_FAILED");
+    }
+  }
+
+  /**
    * Encrypts plaintext with AES-256-GCM. A fresh IV is generated per call, so
    * encrypting a secret and its title with the same key is safe.
    * @param {string} password The plaintext to encrypt.
@@ -154,17 +189,11 @@
       }
 
       const encryptionKey = key || (await generateEncryptionKey());
-      const iv = generateIV();
-
-      const encryptedBuffer = await window.crypto.subtle.encrypt(
-        { name: "AES-GCM", iv, tagLength: GCM_TAG_LENGTH_BITS },
-        encryptionKey,
-        new TextEncoder().encode(password),
-      );
+      const { encryptedData, iv } = await encryptWithKey(password, encryptionKey);
 
       return {
-        encryptedData: bufferToBase64(new Uint8Array(encryptedBuffer)),
-        iv: bufferToBase64(iv),
+        encryptedData,
+        iv,
         key: await exportKeyToBase64(encryptionKey),
       };
     } catch (error) {
@@ -261,14 +290,18 @@
     CryptoError,
   };
 
-  // Lower-level primitives shared with auth-crypto.js. Exposed on a dedicated
-  // namespace (rather than leaked as bare globals) so the cross-file contract is
-  // explicit; auth-crypto.js destructures these at load time.
+  // Lower-level primitives shared with auth-crypto.js and the note editor.
+  // Exposed on a dedicated namespace (rather than leaked as bare globals) so
+  // the cross-file contract is explicit; auth-crypto.js destructures these at
+  // load time. encryptWithKey enforces no size cap - callers bring their own
+  // bound (see its doc comment).
   window.CryptoCore = {
     CryptoError,
     bufferToBase64,
     base64ToBuffer,
     generateIV,
+    generateEncryptionKey,
+    encryptWithKey,
     exportKeyToBase64,
     importKeyFromBase64,
     AES_KEY_LENGTH_BITS,

@@ -10,7 +10,7 @@
 
 ---
 
-**[proxima·red](https://proxima.red/)** is a small collection of open-source web tools for secure sharing. The first tool, **[pass·]**, is a zero-knowledge password and secret sharer. No account required. No email. No tracking.
+**[proxima·red](https://proxima.red/)** is a small collection of open-source, text-focused tools designed with privacy and security in mind. The first tool, **[pass·](https://pass.proxima.red/)**, is a zero-knowledge password and secret sharer. No account required. No email. No tracking.
 
 ## How it works
 

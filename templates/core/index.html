@@ -8,8 +8,8 @@
   property="og:description"
   content="Open source, end-to-end encrypted tools for private sharing. Zero-knowledge by design, no telemetry."
 />{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/core.css' %}" />
-<link rel="stylesheet" href="{% static 'css/index.css' %}" />
+<link rel="stylesheet" href="{% static 'core/css/core.css' %}" />
+<link rel="stylesheet" href="{% static 'core/css/index.css' %}" />
 {% endblock %} {% block content %}
 
 <div class="index-hero" id="main-content">
@@ -18,9 +18,14 @@
     <div class="index-hero__content">
       <h1 class="index-hero__wordmark">proxima<span class="index-hero__dot">·</span>red</h1>
       <p class="index-hero__tagline">Private by design. Open by nature.</p>
-      <a href="{{ pass_site_url }}/" class="index-hero__tool-bar">
-        <strong>[pass·]</strong>: End-to-End-Encrypted Password Sharing Tool
-      </a>
+      <div class="index-hero__tools">
+        <a href="{{ pass_site_url }}/" class="index-hero__tool-bar">
+          <strong>[pass·]</strong>: End-to-End-Encrypted Password Sharing Tool
+        </a>
+        <a href="{{ note_site_url }}/" class="index-hero__tool-bar">
+          <strong>[note·]</strong>: End-to-End-Encrypted Note Sharing Tool
+        </a>
+      </div>
     </div>
   </div>
 </div>

@@ -12,4 +12,8 @@ urlpatterns = [
     path("about/", views.about, name="about"),
     path("imprint/", views.imprint, name="imprint"),
     path("privacy/", views.privacy, name="privacy"),
+    # Host dispatcher for the shared /<uuid>/ retrieve URL space (note vs.
+    # passwd); claimed here for the same reason core claims "/" (see
+    # config/urls.py).
+    path("<uuid:pk>/", views.retrieve_dispatch, name="retrieve_dispatch"),
 ]

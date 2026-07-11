@@ -374,7 +374,7 @@ class MainSiteRedirectTests(TestCase):
     Auth is the shared identity origin for every tool, so auth pages reached on a
     service subdomain (pass.proxima.red) bounce to the same path on the main host.
     The vault key derived at sign-in is handed to the vault origin in the redirect
-    URL fragment (see static/js/auth-crypto.js consumeVaultKeyFromFragment).
+    URL fragment (see static/auth/js/auth-crypto.js consumeVaultKeyFromFragment).
     """
 
     def setUp(self):

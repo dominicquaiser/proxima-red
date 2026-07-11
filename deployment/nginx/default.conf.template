@@ -19,7 +19,7 @@ server {
 # HTTP: serve ACME http-01 challenges, redirect everything else to HTTPS.
 server {
     listen 80;
-    server_name ${DOMAIN} pass.${DOMAIN};
+    server_name ${DOMAIN} pass.${DOMAIN} note.${DOMAIN};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -34,7 +34,7 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name ${DOMAIN} pass.${DOMAIN};
+    server_name ${DOMAIN} pass.${DOMAIN} note.${DOMAIN};
 
     ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;

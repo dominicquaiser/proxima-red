@@ -34,6 +34,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1", "0.
 
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 PASS_SITE_URL = env("PASS_SITE_URL", default="http://localhost:8000")
+NOTE_SITE_URL = env("NOTE_SITE_URL", default="http://localhost:8000")
 
 
 # --- Static files ---
@@ -59,6 +60,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "apps.core",
     "apps.passwd",
+    "apps.note",
     "apps.auth",  # Custom authentication app (table: proxima_user)
 ]
 
@@ -202,7 +204,7 @@ CONTENT_SECURITY_POLICY = env(
             "img-src 'self' data:",
             "font-src 'self'",
             f"connect-src 'self' {PASS_SITE_URL}",
-            f"form-action 'self' {SITE_URL} {PASS_SITE_URL}",
+            f"form-action 'self' {SITE_URL} {PASS_SITE_URL} {NOTE_SITE_URL}",
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "object-src 'none'",

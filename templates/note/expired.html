@@ -1,0 +1,32 @@
+{% extends "base.html" %} {% load static %} {% block favicon %}<link
+  rel="icon"
+  type="image/svg+xml"
+  href="{% static 'icons/note-pencil-favicon.svg' %}"
+/>{% endblock %} {% block title %}Link Expired{% endblock %} {% block meta_robots %}<meta
+  name="robots"
+  content="noindex"
+/>{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'core/css/core.css' %}" />
+{% endblock %} {% block content %}
+
+<div class="page-hero">
+  <div class="page-hero__inner">
+    <div class="page-hero__eyebrow">
+      <a href="{% url 'note:create' %}">proxima·red</a> / Expired
+    </div>
+    <h1 class="page-hero__title">Link Expired</h1>
+    <p class="page-hero__meta">This note is no longer available.</p>
+  </div>
+</div>
+
+<main id="main-content" class="page-main">
+  <div class="prose">
+    <p>
+      This link is no longer valid or has expired. The note has been
+      <strong>permanently removed</strong>.
+    </p>
+    <p><a href="{% url 'note:create' %}">Write a new note</a></p>
+  </div>
+</main>
+
+{% endblock %}

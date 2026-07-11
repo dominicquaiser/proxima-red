@@ -1,5 +1,5 @@
 {% extends "base.html" %} {% load static %} {% block title %}Privacy Policy{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+<link rel="stylesheet" href="{% static 'core/css/core.css' %}" />
 {% endblock %} {% block content %}
 <div class="page-hero">
   <div class="page-hero__inner">
@@ -32,13 +32,14 @@
 
   <div class="highlight-box">
     <p>
-      <strong>Overview:</strong> proxima·red is a zero-knowledge password-sharing service. All
-      secrets are encrypted in your browser using AES-256-GCM before any data leaves your device.
-      The server receives and stores only ciphertext — the encryption key is either embedded in the
-      URL fragment (anonymous sharing) or derived entirely client-side and never transmitted
-      (authenticated vault). No analytics tools, tracking pixels, or third-party scripts are
-      embedded. All assets (fonts, scripts, styles) are served from this server. No request is made
-      to any external service.
+      <strong>Overview:</strong> proxima·red provides zero-knowledge sharing tools for passwords
+      and notes. By default, all content is encrypted in your browser using AES-256-GCM before any
+      data leaves your device. The server receives and stores only ciphertext — the encryption key
+      is either embedded in the URL fragment (anonymous sharing) or derived entirely client-side
+      and never transmitted (authenticated vault). The one exception is the note tool's explicit
+      <em>plain-text link</em> option, which stores the note unencrypted (see Section 3.5). No
+      analytics tools, tracking pixels, or third-party scripts are embedded. All assets (fonts,
+      scripts, styles) are served from this server. No request is made to any external service.
     </p>
   </div>
 
@@ -73,8 +74,8 @@
     <div class="prose">
       <p>
         This policy covers all processing carried out in connection with the website proxima·red and
-        its associated services, including anonymous password sharing, registered user accounts, and
-        the authenticated vault.
+        its associated services, including anonymous password sharing, anonymous note sharing,
+        registered user accounts, and the authenticated vault.
       </p>
     </div>
   </section>
@@ -242,7 +243,80 @@
         retention period is 4 weeks.
       </p>
 
-      <h3>3.5 Registered User Accounts</h3>
+      <h3>3.5 Shared Notes</h3>
+      <p>
+        <strong>What:</strong> When a visitor shares a note, the server stores in the database:
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>id</code></td>
+            <td>UUID (randomly generated, not linked to any person)</td>
+          </tr>
+          <tr>
+            <td><code>content</code></td>
+            <td>
+              AES-256-GCM ciphertext of the note (Base64) — or, for a plain-text link, the
+              unencrypted note text
+            </td>
+          </tr>
+          <tr>
+            <td><code>iv</code></td>
+            <td>Initialization vector used for encryption (Base64); empty for plain-text notes</td>
+          </tr>
+          <tr>
+            <td><code>is_encrypted</code></td>
+            <td>Whether the note was encrypted in the browser</td>
+          </tr>
+          <tr>
+            <td><code>created_at</code></td>
+            <td>Timestamp of creation</td>
+          </tr>
+          <tr>
+            <td><code>expires_at</code></td>
+            <td>Expiry timestamp (1 hour · 1 day · 1 week · 4 weeks — chosen by the creator)</td>
+          </tr>
+          <tr>
+            <td><code>access_count</code></td>
+            <td>Number of times the note was retrieved</td>
+          </tr>
+          <tr>
+            <td><code>created_by</code></td>
+            <td>Account reference when signed in; NULL otherwise</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        For encrypted notes (the default) the encryption key is never transmitted to the server; it
+        is embedded solely in the URL fragment (<code>#</code>), which browsers do not include in
+        HTTP requests.
+        <strong
+          >If the creator explicitly chooses the plain-text link option, the note is stored and
+          transmitted unencrypted and is readable by the server</strong
+        >
+        — the note editor states this prominently before such a link is created.
+      </p>
+      <p><strong>Purpose:</strong> Providing the note-sharing service.</p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(f) GDPR — legitimate interests. The legitimate
+        interest is providing the note-sharing service as explicitly requested by the user. No
+        account or contract is required; the user initiates the transaction voluntarily and the
+        server processes only what is technically necessary to fulfil that specific request.
+      </p>
+      <p>
+        <strong>Retention:</strong> Each note is automatically deleted when its expiry timestamp is
+        reached. A background job (<code>delete_expired_notes</code>) runs every minute in
+        production. A note is also deleted immediately when it is accessed after its expiry time.
+        The maximum retention period is 4 weeks.
+      </p>
+
+      <h3>3.6 Registered User Accounts</h3>
       <p><strong>What:</strong> When a visitor creates an account, the server stores:</p>
       <table class="data-table">
         <thead>
@@ -306,7 +380,7 @@
         vault blob are cascade-deleted.
       </p>
 
-      <h3>3.6 Encrypted Vault Blob (ServiceData)</h3>
+      <h3>3.7 Encrypted Vault Blob (ServiceData)</h3>
       <p>
         <strong>What:</strong> Authenticated users who save data to the vault cause the server to
         store a <code>ServiceData</code> record:
@@ -349,7 +423,7 @@
         <strong>Retention:</strong> As long as the account exists. Cascade-deleted with the account.
       </p>
 
-      <h3>3.7 Rate-Limiting Counters</h3>
+      <h3>3.8 Rate-Limiting Counters</h3>
       <p>
         <strong>What:</strong> To prevent abuse, the service enforces per-IP rate limits on
         sensitive endpoints (share creation: 60/h; share retrieval: 120/h; vault access: 100/h;
@@ -492,6 +566,10 @@
           </tr>
           <tr>
             <td>Anonymous password shares</td>
+            <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
+          </tr>
+          <tr>
+            <td>Shared notes</td>
             <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
           </tr>
           <tr>

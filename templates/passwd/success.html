@@ -6,8 +6,8 @@
   name="robots"
   content="noindex"
 />{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/components.css' %}" />
-<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+<link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'passwd/css/passwd.css' %}" />
 {% endblock %} {% block content %}
 <main id="main-content">
   <div class="card">
@@ -65,6 +65,6 @@ the servers — it stores ciphertext and IV, nothing else.</span></span>
   </div>
 </main>
 {% endblock %} {% block extra_js %}
-<script src="{% static 'js/crypto.js' %}" defer></script>
-<script src="{% static 'js/passwd.js' %}" defer></script>
+<script src="{% static 'shared/js/crypto.js' %}" defer></script>
+<script src="{% static 'passwd/js/passwd.js' %}" defer></script>
 {% endblock %}

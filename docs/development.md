@@ -66,7 +66,7 @@ requirements) with a cert minted by [mkcert](https://github.com/FiloSottile/mkce
 **1. Map the hostnames to loopback.** `.test` is RFC 6761-reserved, so it never collides with real DNS. Add to `/etc/hosts` (needs `sudo`):
 
 ```
-127.0.0.1   proxima.test pass.proxima.test
+127.0.0.1   proxima.test pass.proxima.test note.proxima.test
 ```
 
 **2. Mint a locally-trusted certificate** into a `certs/` directory (git-ignored):
@@ -74,7 +74,7 @@ requirements) with a cert minted by [mkcert](https://github.com/FiloSottile/mkce
 ```bash
 mkcert -install  # one-time: trust the local CA
 mkdir -p certs
-mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test
+mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test note.proxima.test
 ```
 
 After `mkcert -install`, **fully restart your browser** so it reloads the trust store and stops warning about the cert.
@@ -82,10 +82,11 @@ After `mkcert -install`, **fully restart your browser** so it reloads the trust 
 **3. Create a `.env`** with the HTTPS origins (these override the base defaults; do **not** set `DATABASE_URL`, so the local SQLite default is kept):
 
 ```
-ALLOWED_HOSTS=proxima.test,pass.proxima.test
-CSRF_TRUSTED_ORIGINS=https://proxima.test:8000,https://pass.proxima.test:8000
+ALLOWED_HOSTS=proxima.test,pass.proxima.test,note.proxima.test
+CSRF_TRUSTED_ORIGINS=https://proxima.test:8000,https://pass.proxima.test:8000,https://note.proxima.test:8000
 SITE_URL=https://proxima.test:8000
 PASS_SITE_URL=https://pass.proxima.test:8000
+NOTE_SITE_URL=https://note.proxima.test:8000
 SESSION_COOKIE_DOMAIN=.proxima.test
 ```
 
@@ -121,13 +122,13 @@ Tests live in per-app `tests/` packages (`test_models`, `test_services`, `test_f
 
 ### Client-side crypto
 
-The browser encryption code has its own suite. It needs **Node.js 20+** and no npm dependencies — the tests load the real `static/js/{crypto,auth-crypto}.js` against Node's built-in WebCrypto:
+The browser encryption code has its own suite. It needs **Node.js 20+** and no npm dependencies — the tests load the real `static/{shared/js/crypto,auth/js/auth-crypto}.js` against Node's built-in WebCrypto:
 
 ```bash
 node --test tests/js/
 ```
 
-Run these whenever you touch `static/js/crypto.js` or `static/js/auth-crypto.js`.
+Run these whenever you touch `static/shared/js/crypto.js` or `static/auth/js/auth-crypto.js`.
 
 ## Code style
 
@@ -141,7 +142,7 @@ ruff check .  # lint
 **JavaScript** — [Prettier](https://prettier.io/) (100-character lines, double quotes, semicolons; configured in `.prettierrc`):
 
 ```bash
-npx prettier --write static/js/
+npx prettier --write "static/**/js/"
 ```
 
 Run both before opening a pull request.

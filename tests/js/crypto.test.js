@@ -1,5 +1,5 @@
 /**
- * Tests for static/js/crypto.js - the anonymous sharing flow
+ * Tests for static/shared/js/crypto.js - the anonymous sharing flow
  * (window.PasswordCrypto) and the shared primitives (window.CryptoCore).
  *
  * Run with: node --test tests/js/
@@ -224,6 +224,45 @@ describe("CryptoCore key import/export", () => {
       CryptoCore.exportKeyToBase64("not-a-key"),
       cryptoError("KEY_EXPORT_FAILED"),
     );
+  });
+});
+
+describe("encryptWithKey (size-agnostic primitive for the note tool)", () => {
+  test("round-trips under a generated key", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptWithKey("# markdown note", key);
+    const exported = await CryptoCore.exportKeyToBase64(key);
+
+    assert.equal(
+      await PasswordCrypto.decryptPassword(payload.encryptedData, payload.iv, exported),
+      "# markdown note",
+    );
+  });
+
+  test("accepts plaintext beyond encryptPassword's cap (callers bring their own bound)", async () => {
+    const large = "A".repeat(120000); // > MAX_PASSWORD_LENGTH (10,000)
+    const key = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptWithKey(large, key);
+    const exported = await CryptoCore.exportKeyToBase64(key);
+
+    assert.equal(
+      await PasswordCrypto.decryptPassword(payload.encryptedData, payload.iv, exported),
+      large,
+    );
+  });
+
+  test("uses a fresh 12-byte IV per call", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const first = await CryptoCore.encryptWithKey("same text", key);
+    const second = await CryptoCore.encryptWithKey("same text", key);
+
+    assert.equal(base64ByteLength(first.iv), 12);
+    assert.notEqual(first.iv, second.iv);
+  });
+
+  test("rejects empty plaintext", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    await assert.rejects(CryptoCore.encryptWithKey("", key), cryptoError("ENCRYPTION_FAILED"));
   });
 });
 

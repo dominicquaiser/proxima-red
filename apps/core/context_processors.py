@@ -3,7 +3,7 @@ from django.core.exceptions import DisallowedHost
 
 
 def site_urls(request):
-    """Expose SITE_URL/PASS_SITE_URL and a host-poisoning-safe canonical base.
+    """Expose the per-tool site URLs and a host-poisoning-safe canonical base.
 
     ``canonical_base`` is the ``scheme://host`` prefix used for canonical and
     Open Graph URLs in the base template. It is computed here, rather than via
@@ -21,5 +21,6 @@ def site_urls(request):
     return {
         "site_url": settings.SITE_URL,
         "pass_site_url": settings.PASS_SITE_URL,
+        "note_site_url": settings.NOTE_SITE_URL,
         "canonical_base": canonical_base,
     }

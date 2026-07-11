@@ -42,7 +42,7 @@ class MainSiteRedirectMixin:
     is derived from the password at sign-in and held in ``sessionStorage`` (a
     single origin, not shareable across subdomains); after sign-in on the main
     site it is handed to the vault origin in the redirect URL fragment (see
-    ``static/js/auth-crypto.js`` ``consumeVaultKeyFromFragment``).
+    ``static/auth/js/auth-crypto.js`` ``consumeVaultKeyFromFragment``).
     """
 
     def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:

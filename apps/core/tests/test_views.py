@@ -8,12 +8,18 @@ error handlers are invoked directly via RequestFactory so the assertions don't
 depend on ``DEBUG`` or on triggering real failures.
 """
 
+from datetime import timedelta
+
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.core import views
 from apps.core.middleware import SecurityHeadersMiddleware
+from apps.note.tests.factories import make_note
+from apps.passwd.models import SharedPassword
 
 
 class StaticPageTests(TestCase):
@@ -44,7 +50,8 @@ class StaticPageTests(TestCase):
 @override_settings(
     SITE_URL="https://proxima.red",
     PASS_SITE_URL="https://pass.proxima.red",
-    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+    NOTE_SITE_URL="https://note.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red", "testserver"],
 )
 class IndexViewTests(TestCase):
     """The root URL dispatches by host: landing page vs. share form."""
@@ -82,11 +89,97 @@ class IndexViewTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/json")
         self.assertFalse(response.json()["success"])
 
+    def test_note_subdomain_renders_editor(self):
+        """GET / on the note subdomain renders the note editor."""
+        response = self.client.get("/", HTTP_HOST="note.proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "note/editor.html")
+
+    def test_note_subdomain_post_reaches_note_create(self):
+        """POST / on the note subdomain reaches the note-create view."""
+        response = self.client.post(
+            "/",
+            {"content": ""},
+            HTTP_HOST="note.proxima.red",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
+        self.assertIn("note content", response.json()["error"].lower())
+
+    @override_settings(NOTE_SITE_URL="https://pass.proxima.red")
+    def test_pass_wins_note_tie(self):
+        """When NOTE and PASS resolve to the same host, pass wins - the
+        all-hosts-equal environments (bare dev, test suite) must keep
+        resolving to the passwd tool exactly as before the note tool."""
+        response = self.client.get("/", HTTP_HOST="pass.proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/create.html")
+
 
 @override_settings(
     SITE_URL="https://proxima.red",
     PASS_SITE_URL="https://pass.proxima.red",
-    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+    NOTE_SITE_URL="https://note.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red", "testserver"],
+)
+class RetrieveDispatchTests(TestCase):
+    """/<uuid>/ dispatches by host: a note on the note subdomain, a password
+    share everywhere else. A UUID opened on the wrong host 404s, because the
+    two tools' share spaces are separate."""
+
+    def setUp(self):
+        self.client = Client()
+        cache.clear()  # reset rate-limit counters between tests
+        self.note = make_note()
+        self.share = SharedPassword.objects.create(
+            encrypted_data="ZW5jcnlwdGVk",
+            iv="AAAAAAAAAAAAAAAA",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+
+    def test_note_host_serves_note(self):
+        """A note UUID on the note subdomain renders the note view."""
+        response = self.client.get(
+            f"/{self.note.id}/", HTTP_HOST="note.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "note/retrieve.html")
+
+    def test_pass_host_serves_share(self):
+        """A share UUID on the pass subdomain renders the passwd view."""
+        response = self.client.get(
+            f"/{self.share.id}/", HTTP_HOST="pass.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/retrieve.html")
+
+    def test_note_uuid_on_pass_host_404s(self):
+        """A note UUID opened on the pass subdomain is not found."""
+        response = self.client.get(
+            f"/{self.note.id}/", HTTP_HOST="pass.proxima.red"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_share_uuid_on_note_host_404s(self):
+        """A share UUID opened on the note subdomain is not found."""
+        response = self.client.get(
+            f"/{self.share.id}/", HTTP_HOST="note.proxima.red"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_unrelated_host_falls_back_to_passwd(self):
+        """Any other host resolves the UUID space to the passwd tool."""
+        response = self.client.get(f"/{self.share.id}/", HTTP_HOST="testserver")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/retrieve.html")
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    NOTE_SITE_URL="https://note.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red", "testserver"],
 )
 class RobotsTxtTests(TestCase):
     """robots.txt serves a host-specific policy for the two sites."""
@@ -124,15 +217,27 @@ class RobotsTxtTests(TestCase):
         self.assertIn("Disallow: /vault/", response.content.decode())
 
     def test_unrelated_host_gets_main_site_policy(self):
-        """Any host other than the pass subdomain falls back to the main policy."""
+        """Any host other than the tool subdomains falls back to the main policy."""
         response = self.client.get(reverse("core:robots_txt"), HTTP_HOST="testserver")
         self.assertIn("Disallow: /auth/account/", response.content.decode())
+
+    def test_note_subdomain_has_no_disallows(self):
+        """The note subdomain's robots.txt only links its sitemap: retrieve
+        pages are unguessable UUIDs and carry their own noindex meta tag."""
+        response = self.client.get(
+            reverse("core:robots_txt"), HTTP_HOST="note.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertNotIn("Disallow:", body)
+        self.assertIn("Sitemap: https://note.proxima.red/sitemap.xml", body)
 
 
 @override_settings(
     SITE_URL="https://proxima.red",
     PASS_SITE_URL="https://pass.proxima.red",
-    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "testserver"],
+    NOTE_SITE_URL="https://note.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red", "testserver"],
 )
 class SitemapTests(TestCase):
     """sitemap.xml renders the host-specific sitemap template."""
@@ -163,6 +268,19 @@ class SitemapTests(TestCase):
         body = response.content.decode()
         self.assertIn("https://pass.proxima.red/", body)
         # Auth moved to the main site; the pass sitemap must not list it.
+        self.assertNotIn("/auth/", body)
+
+    def test_note_subdomain_renders_note_sitemap(self):
+        """The note subdomain serves sitemap_note.xml with NOTE_SITE_URL locations."""
+        response = self.client.get(
+            reverse("core:sitemap"), HTTP_HOST="note.proxima.red"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/xml")
+        self.assertTemplateUsed(response, "core/sitemap_note.xml")
+        body = response.content.decode()
+        self.assertIn("https://note.proxima.red/", body)
+        # Auth is canonical on the main site; the note sitemap must not list it.
         self.assertNotIn("/auth/", body)
 
 

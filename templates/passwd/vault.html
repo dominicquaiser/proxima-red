@@ -7,11 +7,11 @@
     <title>Vault · pass · proxima·red</title>
     <meta name="robots" content="noindex" />
     <link rel="icon" type="image/svg+xml" href="{% static 'icons/vault-favicon.svg' %}" />
-    <link rel="stylesheet" href="{% static 'css/main.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/notifications.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/components.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/vault.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+    <link rel="stylesheet" href="{% static 'passwd/css/passwd.css' %}" />
+    <link rel="stylesheet" href="{% static 'passwd/css/vault.css' %}" />
   </head>
   <body>
     <div id="notification-container"></div>
@@ -195,7 +195,7 @@
     {% include "partials/_unlock_modal.html" with user_id=user_id %}
 
     {% include "partials/_util_scripts.html" %} {% include "partials/_auth_scripts.html" %}
-    <script src="{% static 'js/unlock.js' %}" defer></script>
-    <script src="{% static 'js/vault.js' %}" defer></script>
+    <script src="{% static 'auth/js/unlock.js' %}" defer></script>
+    <script src="{% static 'passwd/js/vault.js' %}" defer></script>
   </body>
 </html>

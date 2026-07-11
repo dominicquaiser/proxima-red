@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`[note·]` — encrypted note sharing** on the new `note.` subdomain: a full-bleed markdown editor with live preview, a formatting tool rail, and `.md` download. Notes are encrypted client-side with AES-256-GCM by default (the key rides in the URL fragment, exactly like password shares); a **plain-text link** option is also offered for non-sensitive notes and is clearly flagged as server-readable. The retrieve page decrypts and renders markdown entirely in the browser. Editable/real-time links are reserved for a later CRDT-based milestone.
+- **`NOTE_SITE_URL`** environment variable for the note tool's origin, mirroring `PASS_SITE_URL` (host-based dispatch, robots/sitemap, CSP `form-action`).
+- **`delete_expired_notes`** management command, run every minute by the `cron` service alongside `delete_expired`.
+
+### Changed
+
+- **Static assets reorganized into per-tool folders** (`static/{shared,core,auth,passwd,note}/{css,js}/`) so each tool owns its CSS/JS. Site-wide assets (`icons`, `fonts`, `images`) are unchanged.
+
 ## [1.1.0] — 2026-06-21
 
 ### Added

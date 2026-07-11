@@ -66,6 +66,12 @@
   animation: about-fade-right 1s cubic-bezier(0.22, 1, 0.36, 1) 0.4s both;
 }
 
+.index-hero__tools {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .index-hero__tool-bar {
   display: inline-block;
   border-left: 2px solid var(--color-stony-gray);
@@ -81,6 +87,10 @@
     border-color 0.2s,
     color 0.2s;
   animation: about-fade-right 1s cubic-bezier(0.22, 1, 0.36, 1) 0.6s both;
+}
+/* Stagger each tool bar in after the previous one. */
+.index-hero__tools .index-hero__tool-bar:nth-child(2) {
+  animation-delay: 0.75s;
 }
 .index-hero__tool-bar:hover {
   border-left-color: var(--color-burnt-orange);

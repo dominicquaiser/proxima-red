@@ -13,9 +13,12 @@ handler500 = "apps.core.views.error_500"
 
 urlpatterns = [
     # core comes first so its root (the landing page / host-aware dispatcher)
-    # claims "/" ahead of passwd's create view; passwd keeps "/" reversible as
-    # ``passwd:create`` and owns all other share routes.
+    # and its "<uuid:pk>/" retrieve dispatcher claim those paths ahead of the
+    # tools' own identical patterns; passwd and note keep them reversible as
+    # ``passwd:create``/``passwd:retrieve`` and ``note:create``/``note:retrieve``
+    # and own all their other routes.
     path("", include("apps.core.urls")),
     path("", include("apps.passwd.urls")),
+    path("", include("apps.note.urls")),
     path("auth/", include("apps.auth.urls")),
 ]

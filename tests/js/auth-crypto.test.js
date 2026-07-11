@@ -1,5 +1,5 @@
 /**
- * Tests for static/js/auth-crypto.js - the zero-knowledge vault flow
+ * Tests for static/auth/js/auth-crypto.js - the zero-knowledge vault flow
  * (window.AuthCrypto): PBKDF2 derivation, the auth-secret/vault-key domain
  * separation, account-data encryption, and the secure-session storage.
  *

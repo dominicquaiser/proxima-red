@@ -345,12 +345,12 @@ class VaultDataView(View):
     """
     Return the authenticated user's encrypted vault blob as JSON.
 
-    The vault page (``static/js/vault.js``) fetches the blob from here after the
+    The vault page (``static/passwd/js/vault.js``) fetches the blob from here after the
     browser establishes its vault key, so ciphertext is never embedded in the
     vault page HTML (a logged-in-but-locked tab receives none). The account page
     also uses it to migrate the vault when the password changes: a new password
     derives a new vault key, so the stored blob must be read, re-encrypted under
-    the new key, and saved again (see ``static/js/account.js``).
+    the new key, and saved again (see ``static/auth/js/account.js``).
     Like ``UpdateEncryptedDataView`` this is a JSON API, so it gates with
     ``require_session_auth_api`` (JSON 401) rather than the redirect mixin. The
     returned ``encrypted_data``/``iv`` are ciphertext the server cannot read; an

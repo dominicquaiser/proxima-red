@@ -251,7 +251,7 @@ class ReauthView(RatelimitGateMixin, View):
     """
     Re-verify the *current session's* password and return its public salts.
 
-    Backs the in-place "unlock" prompt (``static/js/unlock.js``): a tab with a
+    Backs the in-place "unlock" prompt (``static/auth/js/unlock.js``): a tab with a
     valid login but no derived vault key - the key lives in per-tab
     ``sessionStorage`` and can't be shared across tabs/subdomains - re-derives it
     without a full sign-out. Unlike ``SigninView`` this neither creates nor
