@@ -26,7 +26,8 @@
     <link rel="icon" type="image/svg+xml" href="{% static 'icons/note-pencil-favicon.svg' %}" />
     <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
     <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
-    <link rel="stylesheet" href="{% static 'note/css/note.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/shared.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/public.css' %}" />
 
     <!-- With JavaScript off the fixed editor shell cannot work; let the page
          flow, hide the JS-only chrome (rail, counter, preview), and reveal the
@@ -151,12 +152,12 @@
             <a href="https://github.com/dominicquaiser" class="mobile-menu__link">Source Code</a>
             <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
             <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
-            <a href="{{ site_url }}/auth/signin/" class="mobile-menu__link">Sign In</a>
-            <a href="{{ site_url }}/auth/signup/" class="mobile-menu__link">Sign Up</a>
+            <a href="{{ site_url }}/auth/signin/?tool=note" class="mobile-menu__link">Sign In</a>
+            <a href="{{ site_url }}/auth/signup/?tool=note" class="mobile-menu__link">Sign Up</a>
           </nav>
         </details>
-        <a href="{{ site_url }}/auth/signin/" class="header__btn header__btn--outline">Sign In</a>
-        <a href="{{ site_url }}/auth/signup/" class="header__btn header__btn--solid">Sign Up</a>
+        <a href="{{ site_url }}/auth/signin/?tool=note" class="header__btn header__btn--outline">Sign In</a>
+        <a href="{{ site_url }}/auth/signup/?tool=note" class="header__btn header__btn--solid">Sign Up</a>
       </div>
     </header>
 
@@ -165,6 +166,8 @@
       class="editor"
       data-create-url="{% url 'note:create' %}"
       data-retrieve-url-base="{{ retrieval_url_base }}"
+      data-live-create-url="{% url 'note:live_create' %}"
+      data-live-url-base="{{ live_url_base }}"
       data-dummy-note-id="{{ dummy_note_id }}"
     >
       {% if error %}
@@ -395,12 +398,13 @@
           </span>
         </button>
 
-        <button class="share-opt share-opt--disabled" type="button" disabled title="Coming soon">
+        <button class="share-opt" type="button" id="share-editable-btn">
           <span class="nicon nicon--pencil-simple-line share-opt__icon" aria-hidden="true"></span>
           <span class="share-opt__text">
-            <span class="share-opt__label">Editable link — coming soon</span>
+            <span class="share-opt__label">Editable link</span>
             <span class="share-opt__desc"
-              >Recipients will be able to edit in real time. End-to-end encrypted.</span
+              >Anyone with the link can edit — changes sync automatically. End-to-end
+              encrypted.</span
             >
           </span>
         </button>
@@ -435,7 +439,8 @@
         </div>
         <p class="share-pop__hint">
           For encrypted notes the key after <code>#</code> never reaches the server — anyone with
-          the full link can read the note until it expires.
+          the full link can read the note until it expires. Read-only links are a snapshot;
+          editable links stay live until expiry.
         </p>
       </div>
     </div>
@@ -459,11 +464,14 @@
     {% include "partials/_util_scripts.html" %}
     <script src="{% static 'shared/js/menu.js' %}" defer></script>
     <script src="{% static 'shared/js/crypto.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/yjs.min.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/marked.min.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/purify.min.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/highlight.min.js' %}" defer></script>
     <script src="{% static 'note/js/markdown.js' %}" defer></script>
     <script src="{% static 'note/js/toolbar.js' %}" defer></script>
+    <script src="{% static 'note/js/editor-core.js' %}" defer></script>
+    <script src="{% static 'note/js/share.js' %}" defer></script>
     <script src="{% static 'note/js/editor.js' %}" defer></script>
   </body>
 </html>

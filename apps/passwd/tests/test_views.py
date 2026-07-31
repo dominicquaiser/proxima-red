@@ -705,6 +705,28 @@ class DataExportViewTests(TestCase):
         self.assertEqual(payload["vault"]["encrypted_data"], "ZW5jcnlwdGVk")
         self.assertEqual(payload["vault"]["iv"], "AAAAAAAAAAAAAAAA")
 
+    def test_export_includes_note_vault(self):
+        """The export carries the note vault (encrypted index + note rows)."""
+        from apps.note.tests.factories import make_vault_index, make_vault_note
+
+        note = make_vault_note(self.user)
+        make_vault_index(self.user)
+        self._authenticate()
+        response = self.client.get(self.url)
+
+        payload = json.loads(response.content)
+        note_vault = payload["note_vault"]
+        self.assertEqual(note_vault["index"]["encrypted_data"], "ZW5jcnlwdGVk")
+        self.assertEqual(len(note_vault["notes"]), 1)
+        self.assertEqual(note_vault["notes"][0]["id"], str(note.id))
+        self.assertEqual(note_vault["notes"][0]["content"], "ZW5jcnlwdGVk")
+
+    def test_export_without_note_vault_is_empty_section(self):
+        """No note vault yet: the section is present but empty."""
+        self._authenticate()
+        payload = json.loads(self.client.get(self.url).content)
+        self.assertEqual(payload["note_vault"], {"index": None, "notes": []})
+
     def test_session_for_deleted_user_redirects_to_signin(self):
         """A session whose user was deleted mid-session is flushed and redirected."""
         self._authenticate()

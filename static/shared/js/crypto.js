@@ -171,6 +171,43 @@
   }
 
   /**
+   * Encrypts raw bytes with AES-256-GCM under an existing key - the binary
+   * sibling of encryptWithKey for payloads that are not text (the live-note
+   * sync flow encrypts Yjs updates, which are byte arrays). A fresh IV is
+   * generated per call, so encrypting many updates with one key is safe.
+   *
+   * Like encryptWithKey this enforces no length cap - callers bring their own
+   * bound (the live sync client stays under the server's
+   * MAX_LIVE_UPDATE_LENGTH / MAX_LIVE_SNAPSHOT_LENGTH).
+   *
+   * @param {Uint8Array} bytes The bytes to encrypt (required, non-empty).
+   * @param {CryptoKey} key The AES-256-GCM key to encrypt with.
+   * @returns {Promise<{encryptedData: string, iv: string}>} Base64-encoded values.
+   */
+  async function encryptBytesWithKey(bytes, key) {
+    try {
+      if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+        throw new Error("Invalid payload: must be a non-empty Uint8Array");
+      }
+      const iv = generateIV();
+
+      const encryptedBuffer = await window.crypto.subtle.encrypt(
+        { name: "AES-GCM", iv, tagLength: GCM_TAG_LENGTH_BITS },
+        key,
+        bytes,
+      );
+
+      return {
+        encryptedData: bufferToBase64(new Uint8Array(encryptedBuffer)),
+        iv: bufferToBase64(iv),
+      };
+    } catch (error) {
+      if (error instanceof CryptoError) throw error;
+      throw new CryptoError("Encryption failed: " + error.message, "ENCRYPTION_FAILED");
+    }
+  }
+
+  /**
    * Encrypts plaintext with AES-256-GCM. A fresh IV is generated per call, so
    * encrypting a secret and its title with the same key is safe.
    * @param {string} password The plaintext to encrypt.
@@ -270,6 +307,47 @@
     }
   }
 
+  /**
+   * Decrypts AES-256-GCM ciphertext to raw bytes - the binary sibling of
+   * decryptPassword. An `OperationError` from the Web Crypto API means the
+   * key is wrong or the ciphertext was tampered with.
+   * @param {string} encryptedData Base64-encoded ciphertext.
+   * @param {string} iv Base64-encoded IV.
+   * @param {string|CryptoKey} key Base64 key string or a CryptoKey object.
+   * @returns {Promise<Uint8Array>} Decrypted bytes.
+   */
+  async function decryptBytes(encryptedData, iv, key) {
+    try {
+      if (!encryptedData || !iv || !key) {
+        throw new Error("Invalid input: encryptedData, IV, and key are all required.");
+      }
+
+      const cryptoKey = typeof key === "string" ? await importKeyFromBase64(key) : key;
+      const ivBytes = base64ToBuffer(iv);
+
+      if (ivBytes.length !== GCM_IV_LENGTH_BYTES) {
+        throw new Error(`Invalid IV length: expected ${GCM_IV_LENGTH_BYTES} bytes for AES-GCM`);
+      }
+
+      const decryptedBuffer = await window.crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: ivBytes, tagLength: GCM_TAG_LENGTH_BITS },
+        cryptoKey,
+        base64ToBuffer(encryptedData),
+      );
+
+      return new Uint8Array(decryptedBuffer);
+    } catch (error) {
+      if (error instanceof CryptoError) throw error;
+      if (error.name === "OperationError") {
+        throw new CryptoError(
+          "Authentication failed: the data may have been tampered with, or the key is incorrect.",
+          "AUTHENTICATION_FAILED",
+        );
+      }
+      throw new CryptoError("Decryption failed: " + error.message, "DECRYPTION_FAILED");
+    }
+  }
+
   // --- Utility ---
 
   /**
@@ -302,6 +380,8 @@
     generateIV,
     generateEncryptionKey,
     encryptWithKey,
+    encryptBytesWithKey,
+    decryptBytes,
     exportKeyToBase64,
     importKeyFromBase64,
     AES_KEY_LENGTH_BITS,

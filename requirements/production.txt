@@ -1,8 +1,17 @@
 # Production dependencies.
 -r base.txt
 
-# WSGI application server
+# Application server: gunicorn process manager running uvicorn ASGI workers
+# (worker_class in deployment/gunicorn.conf.py). One server handles both HTTP
+# and the /ws/ WebSocket paths; config.asgi routes between them.
 gunicorn>=23.0,<24.0
+uvicorn[standard]>=0.32,<1.0
+uvicorn-worker>=0.3,<1.0
+
+# Redis-backed channel layer for cross-worker WebSocket group fan-out
+# (live-note update/awareness broadcast). Points at the dedicated
+# redis-channels service (CHANNEL_REDIS_URL), not the rate-limit cache.
+channels-redis>=4.2,<5.0
 
 # PostgreSQL driver (psycopg 3, natively supported by Django 5.2).
 # The [binary] extra ships prebuilt wheels, so no system libpq build is needed.

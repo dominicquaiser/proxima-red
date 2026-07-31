@@ -14,6 +14,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      redis-channels:
+        condition: service_healthy
     restart: unless-stopped
     # No published ports
     # nginx proxies to web:8000 over the internal network.
@@ -25,6 +27,22 @@ services:
     # rate-limit counters simply reset, which is acceptable. Sessions live in
     # Postgres, so nothing durable depends on Redis.
     command: redis-server --save "" --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis-channels:
+    image: redis:7-alpine
+    # Channel layer for WebSocket group fan-out (live-note sync). A separate
+    # instance from the rate-limit cache above because eviction policy is
+    # per-instance: allkeys-lru there could silently drop in-flight channel
+    # messages and group registrations, so this one runs noeviction. Still
+    # ephemeral (no persistence): after a restart, live-note clients gap-heal
+    # via their sync cursor.
+    command: redis-server --save "" --appendonly no --maxmemory 64mb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

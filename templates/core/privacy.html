@@ -316,7 +316,98 @@
         The maximum retention period is 4 weeks.
       </p>
 
-      <h3>3.6 Registered User Accounts</h3>
+      <h3>3.6 Live Notes (Editable Share Links)</h3>
+      <p>
+        <strong>What:</strong> An editable link turns a note into a collaboratively editable
+        document. The document is always encrypted in the browser; the server stores an encrypted
+        snapshot plus a log of encrypted updates it relays between participants:
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>id</code></td>
+            <td>UUID (randomly generated, not linked to any person)</td>
+          </tr>
+          <tr>
+            <td><code>snapshot</code> / <code>snapshot_iv</code></td>
+            <td>AES-256-GCM ciphertext of the document state and its initialization vector</td>
+          </tr>
+          <tr>
+            <td>update log</td>
+            <td>
+              AES-256-GCM ciphertext of each batch of edits (with its initialization vector and a
+              timestamp), kept until participants consolidate them into a new snapshot
+            </td>
+          </tr>
+          <tr>
+            <td><code>created_at</code> / <code>expires_at</code></td>
+            <td>Creation and expiry timestamps (1 hour · 1 day · 1 week · 4 weeks)</td>
+          </tr>
+          <tr>
+            <td><code>access_count</code></td>
+            <td>Number of times the live page was opened</td>
+          </tr>
+          <tr>
+            <td><code>created_by</code></td>
+            <td>Account reference when signed in; NULL otherwise</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The decryption key is embedded solely in the URL fragment (<code>#</code>) and never
+        transmitted to the server: the server cannot read the document and cannot merge edits —
+        merging happens in participants' browsers. There is no plain-text variant of editable
+        links.
+      </p>
+      <p>
+        <strong>Restricted (named-collaborator) live notes.</strong> The owner of a live note may
+        optionally restrict it to named accounts instead of anyone-with-the-link. The document key is
+        then wrapped to each collaborator's account key (see §3.7) rather than carried in the link,
+        and the server stores, per collaborator, a row linking the note to that account together with
+        the wrapped key. As a necessary consequence the server learns <em>which accounts collaborate
+        on which restricted note</em> — a relationship it does not learn for anonymous link notes. It
+        still never learns the note's content. Revoking a collaborator rotates the document key and
+        re-wraps it to the remaining collaborators, so the revoked account cannot read edits made
+        afterwards; edits it had already seen are, of course, already seen.
+      </p>
+      <p>
+        While a live note is open, each participant's browser holds a persistent connection
+        (WebSocket) to the server over which encrypted edits and encrypted <em>presence</em>
+        updates — cursor positions and a randomly generated per-session display name and colour —
+        are relayed between participants. Presence data is encrypted under the same document key,
+        is never stored, and disappears when the tab closes. If the connection cannot be
+        established, the browser falls back to periodic polling over HTTPS (without presence).
+      </p>
+      <p>
+        <strong>Honest limitation:</strong> collaboration makes more <em>metadata</em> visible
+        than a one-shot share. While a live note is open, the server necessarily observes when,
+        how often, for how long, and from which IP address a document is read or edited, how large
+        its ciphertext is, and — because relaying requires it — how many participants are
+        connected to the same document at the same time. The content, cursor positions, and
+        display names remain encrypted end-to-end at all times.
+      </p>
+      <p><strong>Purpose:</strong> Providing the collaborative note-editing service.</p>
+      <p>
+        <strong>Legal basis:</strong> Art. 6(1)(f) GDPR — legitimate interests, as for shared
+        notes: the user initiates the interaction voluntarily and the server processes only what
+        is technically necessary to relay the encrypted document.
+      </p>
+      <p>
+        <strong>Retention:</strong> Each live note — including its update log — is automatically
+        deleted when its expiry timestamp is reached (background job
+        <code>delete_expired_notes</code>, every minute in production), or immediately when it is
+        opened after its expiry time. The maximum retention period is 4 weeks. Update-log entries
+        are additionally pruned earlier whenever participants consolidate them into a new
+        encrypted snapshot.
+      </p>
+
+      <h3>3.7 Registered User Accounts</h3>
       <p><strong>What:</strong> When a visitor creates an account, the server stores:</p>
       <table class="data-table">
         <thead>
@@ -343,6 +434,21 @@
             <td>Public KDF salt for the client-side vault key derivation (Base64)</td>
           </tr>
           <tr>
+            <td><code>public_key</code> (optional)</td>
+            <td>
+              Public half of a collaboration keypair (ECDH P-256), used to invite the account to
+              restricted live notes. Created client-side; generated at signup or on first
+              collaboration.
+            </td>
+          </tr>
+          <tr>
+            <td><code>encrypted_private_key</code> (optional)</td>
+            <td>
+              Private half of the collaboration keypair, encrypted in the browser under the account's
+              vault key (AES-256-GCM). The server stores the ciphertext but can never decrypt it.
+            </td>
+          </tr>
+          <tr>
             <td><code>created_at</code></td>
             <td>Account creation timestamp</td>
           </tr>
@@ -366,6 +472,17 @@
         returned so that the endpoint is not an account-existence oracle.
       </p>
       <p>
+        <strong>Collaboration keys (optional).</strong> When you invite named collaborators to a
+        restricted live note, the document's encryption key is wrapped to each collaborator's public
+        key so that only they can unwrap it — the server relays the wrapped keys but never holds the
+        document key. Because public keys are distributed by the server, this model trusts the server
+        not to substitute a key of its own when you look up a collaborator by User ID (a limitation
+        inherent to any server-distributed public-key directory; out-of-band key-fingerprint
+        verification is not yet offered). Looking up another account's public key requires you to be
+        signed in and is rate limited; it reveals only that a given User ID exists and has enabled
+        collaboration.
+      </p>
+      <p>
         <strong>Purpose:</strong> Providing authenticated access to the vault and associating
         password shares with an account for management purposes.
       </p>
@@ -380,7 +497,7 @@
         vault blob are cascade-deleted.
       </p>
 
-      <h3>3.7 Encrypted Vault Blob (ServiceData)</h3>
+      <h3>3.8 Encrypted Vault Blob (ServiceData)</h3>
       <p>
         <strong>What:</strong> Authenticated users who save data to the vault cause the server to
         store a <code>ServiceData</code> record:
@@ -423,7 +540,7 @@
         <strong>Retention:</strong> As long as the account exists. Cascade-deleted with the account.
       </p>
 
-      <h3>3.8 Rate-Limiting Counters</h3>
+      <h3>3.9 Rate-Limiting Counters</h3>
       <p>
         <strong>What:</strong> To prevent abuse, the service enforces per-IP rate limits on
         sensitive endpoints (share creation: 60/h; share retrieval: 120/h; vault access: 100/h;
@@ -573,7 +690,11 @@
             <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
           </tr>
           <tr>
-            <td>User account data</td>
+            <td>Live notes (editable links) incl. update log and collaborator grants</td>
+            <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
+          </tr>
+          <tr>
+            <td>User account data (incl. collaboration keypair)</td>
             <td>Until account deletion</td>
           </tr>
           <tr>

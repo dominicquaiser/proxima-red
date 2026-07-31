@@ -2,7 +2,7 @@
 
 This guide describes how to run **proxima·red** in both local development and production using Docker Compose.
 
-Production runs six containers behind an nginx reverse proxy with automatic Let's Encrypt TLS, a PostgreSQL database, a Redis cache, a Gunicorn application server, and a scheduled cleanup worker. Everything is configured through a single `.env` file.
+Production runs seven containers behind an nginx reverse proxy with automatic Let's Encrypt TLS, a PostgreSQL database, two Redis instances (rate-limit cache + WebSocket channel layer), an ASGI application server (gunicorn managing uvicorn workers), and a scheduled cleanup worker. Everything is configured through a single `.env` file.
 
 ## Table of contents
 
@@ -34,32 +34,34 @@ Production runs six containers behind an nginx reverse proxy with automatic Let'
 
 ## Architecture
 
-In production the stack is composed of five services on a private Docker network.
+In production the stack is composed of seven services on a private Docker network.
 Only nginx publishes ports to the host; the application server and database are never exposed directly.
 
 ```
                           :80 / :443
-   ┌──────────┐   HTTPS   ┌─────────┐   :8000    ┌───────────────┐   :5432   ┌───────────────┐
-   │ Internet │ ────────► │  nginx  │ ─────────► │ web (gunicorn)│ ─────────►│ db (postgres) │
-   └──────────┘           └────┬────┘            └───────┬───────┘           └───────┬───────┘
-                               │  serves /static         │ :6379                     │
-                               │                   ┌─────▼──────┐                    ▲
-                          ┌────┴─────┐             │   redis    │             ┌──────┴───────┐
-                          │ certbot  │             │(rate-limit)│             │     cron     │
-                          └──────────┘             └────────────┘             │delete_expired│
-                                                                              │ ⤷ _notes     │
-                                                                              │clearsessions │
-                                                                              └──────────────┘
+   ┌──────────┐  HTTPS/WSS ┌─────────┐   :8000    ┌───────────────┐   :5432   ┌───────────────┐
+   │ Internet │ ─────────► │  nginx  │ ─────────► │  web (ASGI)   │ ─────────►│ db (postgres) │
+   └──────────┘            └────┬────┘  HTTP+WS   └───────┬───────┘           └───────┬───────┘
+                                │  serves /static         │ :6379                     │
+                                │                   ┌─────▼──────┐                    ▲
+                           ┌────┴─────┐             │   redis    │             ┌──────┴───────┐
+                           │ certbot  │             │(rate-limit)│             │     cron     │
+                           └──────────┘             ├────────────┤             │delete_expired│
+                                                    │   redis-   │             │ ⤷ _notes     │
+                                                    │  channels  │             │clearsessions │
+                                                    │(chan layer)│             └──────────────┘
+                                                    └────────────┘
 ```
 
-| Service   | Image                   | Responsibility                                                                 |
-| --------- | ----------------------- | ------------------------------------------------------------------------------ |
-| `nginx`   | `nginx:1.27-alpine`     | TLS termination, HTTP→HTTPS redirect, serves `/static/`, reverse proxy         |
-| `web`     | built from `Dockerfile` | Gunicorn serving the Django app (WSGI)                                         |
-| `db`      | `postgres:16-alpine`    | PostgreSQL database                                                            |
-| `redis`   | `redis:7-alpine`        | Rate-limit counter cache shared across Gunicorn workers (ephemeral, no volume) |
-| `certbot` | `certbot/certbot`       | Obtains and renews Let's Encrypt certificates (HTTP-01)                        |
-| `cron`    | built from `Dockerfile` | Runs `delete_expired` + `delete_expired_notes` every minute; `clearsessions` every hour |
+| Service          | Image                   | Responsibility                                                                 |
+| ---------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `nginx`          | `nginx:1.27-alpine`     | TLS termination, HTTP→HTTPS redirect, WebSocket upgrade for `/ws/`, serves `/static/`, reverse proxy |
+| `web`            | built from `Dockerfile` | Gunicorn managing uvicorn ASGI workers serving the Django app (HTTP + WebSockets, `config.asgi`) |
+| `db`             | `postgres:16-alpine`    | PostgreSQL database                                                            |
+| `redis`          | `redis:7-alpine`        | Rate-limit counter cache shared across workers (ephemeral, no volume, `allkeys-lru`) |
+| `redis-channels` | `redis:7-alpine`        | Channel layer for WebSocket group fan-out across workers (ephemeral, `noeviction` — a separate instance so cache eviction can never drop channel messages) |
+| `certbot`        | `certbot/certbot`       | Obtains and renews Let's Encrypt certificates (HTTP-01)                        |
+| `cron`           | built from `Dockerfile` | Runs `delete_expired` + `delete_expired_notes` every minute; `clearsessions` every hour |
 
 **Persistent volumes**
 
@@ -119,7 +121,9 @@ Docker Compose reads `.env` for two purposes: interpolating `${VAR}` references 
 | `DOMAIN`                        | **prod**    | `proxima.red`                                  | Primary domain; used by nginx for the certificate and default vhost.                                                                                                                                                            |
 | `CERTBOT_EMAIL`                 | **prod**    | `admin@example.com`                            | Contact address for Let's Encrypt expiry notices.                                                                                                                                                                               |
 | `RATELIMIT_TRUSTED_PROXY_COUNT` | no          | `1`                                            | Trusted reverse-proxy hops for reading the real client IP from `X-Forwarded-For`. Production defaults to `1` (nginx); raise for each additional proxy layer (e.g. a CDN).                                                       |
-| `GUNICORN_WORKERS`              | no          | `3`                                            | Worker process count. Defaults to `(2 × CPU cores) + 1`.                                                                                                                                                                        |
+| `REDIS_URL`                     | no          | `redis://redis:6379/0`                         | Rate-limit counter cache. Defaults to the bundled `redis` service.                                                                                                                                                              |
+| `CHANNEL_REDIS_URL`             | no          | `redis://redis-channels:6379/0`                | Channel layer for WebSocket fan-out (live-note sync). Defaults to the bundled `redis-channels` service; keep it on a `noeviction` instance.                                                                                     |
+| `GUNICORN_WORKERS`              | no          | `3`                                            | Worker process count (uvicorn ASGI workers under gunicorn). Defaults to `(2 × CPU cores) + 1`.                                                                                                                                  |
 | `GUNICORN_TIMEOUT`              | no          | `60`                                           | Worker timeout in seconds. Defaults to `60`.                                                                                                                                                                                    |
 | `STAGING`                       | no (script) | `1`                                            | When set for `init-letsencrypt.sh`, uses the Let's Encrypt staging CA.                                                                                                                                                          |
 
@@ -139,21 +143,21 @@ Settings are a split package under `config/settings/`:
 | ----------------------------- | -------------------------------- | ------------------------------------------------ |
 | `config.settings.base`        | (imported by the others)         | Shared config, env-driven with dev-safe defaults |
 | `config.settings.development` | dev container, local `runserver` | `DEBUG=True`, plain HTTP, SQLite by default      |
-| `config.settings.production`  | `web`/`cron` containers, WSGI    | `DEBUG=False`, HTTPS hardening, secrets required |
+| `config.settings.production`  | `web`/`cron` containers (ASGI)   | `DEBUG=False`, HTTPS hardening, secrets required |
 | `config.settings.testing`     | test suite                       | In-memory SQLite, fast password hasher           |
 
-The default `DJANGO_SETTINGS_MODULE` is `config.settings.development` in `manage.py` and `config.settings.production` in `wsgi.py`/`asgi.py`.
+The default `DJANGO_SETTINGS_MODULE` is `config.settings.development` in `manage.py` and `config.settings.production` in `wsgi.py`/`asgi.py`. The served application is `config.asgi:application` (HTTP + WebSockets); `config.wsgi` remains for WSGI-only runners, which simply have no WebSocket support (the live-note client falls back to polling).
 
 ## Development
 
-The development overrides run Django's autoreloading server over **HTTPS** with the source tree bind-mounted for live edits, alongside a PostgreSQL container for parity with production.
+The development overrides run **uvicorn** (autoreloading, ASGI) over **HTTPS** with the source tree bind-mounted for live edits, alongside a PostgreSQL container for parity with production. uvicorn — not `runserver`/`runserver_plus` — because only an ASGI server carries the live-note WebSockets; the WSGI dev servers still work for page-only development, but WebSocket connections fail there and the live-note client silently degrades to HTTP polling.
 
 HTTPS in development is not optional cosmetics. It's required to exercise the real auth/vault topology:
 
 - **Shared session cookie.** Auth is canonical on the main site (`SITE_URL`) and the vault lives on the `pass.*` subdomain (`PASS_SITE_URL`). The signed-in session must be readable on both hosts via `SESSION_COOKIE_DOMAIN`, which only works across a real registrable parent domain — `localhost` doesn't qualify, so sign-in loops endlessly between the two hosts.
 - **Web Crypto API.** Client-side key derivation needs `window.crypto.subtle`, which browsers expose only in a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts). `http://localhost` is special-cased as secure; a custom hostname over plain HTTP is not.
 
-The dev image's `dev` build stage adds `django-extensions` (for `runserver_plus`) and `pyOpenSSL`; the override runs the HTTPS dev server automatically.
+The dev image's `dev` build stage adds the development requirements (uvicorn for the ASGI dev server, plus `django-extensions`/`pyOpenSSL` for the optional `runserver_plus` fallback); the override runs the HTTPS uvicorn server automatically. In development static files are served by the `ASGIStaticFilesHandler` branch in `config/asgi.py`, and the channel layer is in-memory — no dev Redis is needed.
 
 **1. Map the hostnames to loopback** (`.test` is RFC 6761-reserved, so it never collides with real DNS). Add to `/etc/hosts`:
 
@@ -193,7 +197,7 @@ docker compose up --build
 - Database migrations run on container start (via the entrypoint).
 - Static files are served directly by the dev server; `collectstatic` is skipped in development so the bind-mounted tree stays clean.
 
-> Single-domain shortcut: to skip the cross-subdomain handoff entirely, set `SITE_URL` and `PASS_SITE_URL` to the same origin and drop `SESSION_COOKIE_DOMAIN`. The vault key then stays in `sessionStorage`; you can revert the override's `command:` to plain `runserver` over `http://localhost:8000` and skip the cert.
+> Single-domain shortcut: to skip the cross-subdomain handoff entirely, set `SITE_URL` and `PASS_SITE_URL` to the same origin and drop `SESSION_COOKIE_DOMAIN`. The vault key then stays in `sessionStorage`; you can revert the override's `command:` to plain `runserver` over `http://localhost:8000` and skip the cert. Note that `runserver` is WSGI-only: live-note WebSockets won't connect and the client falls back to polling (a useful way to exercise that path on purpose). For WebSockets without TLS use `uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload`.
 
 Stop the stack:
 
@@ -246,7 +250,7 @@ Run the one-time bootstrap script. It seeds a temporary self-signed certificate 
 make up
 ```
 
-On startup the `web` container applies migrations and runs `collectstatic` into the shared `static_volume`. nginx then serves those assets and proxies all other requests to Gunicorn.
+On startup the `web` container applies migrations and runs `collectstatic` into the shared `static_volume`. nginx then serves those assets and proxies all other requests — including the `/ws/` WebSocket upgrades — to the app server.
 
 ### 6. Verify the deployment
 
@@ -273,8 +277,8 @@ The standard setup above assumes the project's bundled `nginx` and `certbot` own
 > **Do not run `init-letsencrypt.sh` in this model.** It starts the bundled nginx, which collides with the host nginx on ports 80/443.
 
 ```
-Internet ─HTTPS─► host nginx (:443, system) ─► staticproxy (127.0.0.1:8090) ─► web (gunicorn :8000) ─► db / redis
-                  TLS via the host certbot     serves /static/, proxies                                + cron
+Internet ─HTTPS/WSS─► host nginx (:443, system) ─► staticproxy (127.0.0.1:8090) ─► web (ASGI :8000) ─► db / redis / redis-channels
+                      TLS via the host certbot     serves /static/, proxies                            + cron
 ```
 
 **Extra files (alongside the standard compose files):**
@@ -285,7 +289,7 @@ Internet ─HTTPS─► host nginx (:443, system) ─► staticproxy (127.0.0.1:
 | `deployment/nginx/host.conf`           | Plain-HTTP nginx config for `staticproxy` (no TLS; passes `X-Forwarded-Proto` **through** from host) |
 | `deploy.mk` (from `deploy.mk.example`) | Per-host Makefile include that points the standard `make` targets at the host-nginx model            |
 
-This model uses the **same `make` targets** as the bundled setup — the only difference is the local `deploy.mk` include, which appends `docker-compose.host.yml` and limits the started services to `db redis web cron staticproxy`.
+This model uses the **same `make` targets** as the bundled setup — the only difference is the local `deploy.mk` include, which appends `docker-compose.host.yml` and limits the started services to `db redis redis-channels web cron staticproxy`.
 
 **Steps:**
 
@@ -306,10 +310,30 @@ make up
 4. Add a host nginx vhost that proxies to `127.0.0.1:8090`, then issue TLS with the host's certbot. List the main domain **and every tool subdomain** in `server_name` — Django dispatches by host, so a single upstream serves them all (the vault is canonically `pass.proxima.red`, the note tool `note.proxima.red`; see `PASS_SITE_URL`/`NOTE_SITE_URL`). Make sure DNS `A`/`AAAA` records exist for the subdomains as well as `proxima.red` before requesting the certificate.
 
    ```nginx
+   # WebSocket upgrade handling for the live-note sync socket (/ws/). Both
+   # proxy hops need it; staticproxy's host.conf already has its half.
+   map $http_upgrade $connection_upgrade {
+       default upgrade;
+       ""      close;
+   }
+
    server {
        listen 80;
        listen [::]:80;
        server_name proxima.red www.proxima.red pass.proxima.red note.proxima.red;
+
+       location /ws/ {
+           proxy_pass         http://127.0.0.1:8090;
+           proxy_http_version 1.1;
+           proxy_set_header   Upgrade $http_upgrade;
+           proxy_set_header   Connection $connection_upgrade;
+           proxy_set_header   Host $host;
+           proxy_set_header   X-Real-IP $remote_addr;
+           proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header   X-Forwarded-Proto $scheme;
+           proxy_read_timeout 90s;
+           proxy_send_timeout 90s;
+       }
 
        location / {
            proxy_pass         http://127.0.0.1:8090;
@@ -447,7 +471,7 @@ The requested host is not in `ALLOWED_HOSTS`. Ensure `ALLOWED_HOSTS` and `DOMAIN
 
 - **Secrets:** never commit `.env`. It is git-ignored; keep it `chmod 600`. Use a unique, high-entropy `SECRET_KEY` and a strong `POSTGRES_PASSWORD`.
 - **Transport security:** production enables `SECURE_SSL_REDIRECT`, secure session and CSRF cookies, and HSTS (`max-age` of one year, including subdomains). nginx terminates TLS and forwards `X-Forwarded-Proto`, which Django trusts via `SECURE_PROXY_SSL_HEADER`.
-- **Network exposure:** only nginx publishes ports. PostgreSQL and Gunicorn are reachable only on the internal Docker network.
+- **Network exposure:** only nginx publishes ports. PostgreSQL, both Redis instances, and the app server are reachable only on the internal Docker network.
 - **Least privilege:** the application image runs as a non-root user.
 - **Rate limiting:** authentication-sensitive endpoints are rate limited via `django-ratelimit`.
 - **Zero-knowledge design:** encryption keys are derived/generated client-side and never sent to the server. Compromise of the database does not reveal shared secrets. See the project architecture notes for details.

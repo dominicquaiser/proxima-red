@@ -266,6 +266,106 @@ describe("encryptWithKey (size-agnostic primitive for the note tool)", () => {
   });
 });
 
+describe("encryptBytesWithKey / decryptBytes (binary primitives for live notes)", () => {
+  const sampleBytes = () => Uint8Array.from([0, 1, 2, 128, 255, 42, 7]);
+
+  test("round-trips raw bytes under a generated key", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+
+    const decrypted = await CryptoCore.decryptBytes(payload.encryptedData, payload.iv, key);
+    assert.deepEqual(decrypted, sampleBytes());
+  });
+
+  test("decryptBytes accepts a Base64 key string as well as a CryptoKey", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const exported = await CryptoCore.exportKeyToBase64(key);
+    const payload = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+
+    const decrypted = await CryptoCore.decryptBytes(payload.encryptedData, payload.iv, exported);
+    assert.deepEqual(decrypted, sampleBytes());
+  });
+
+  test("large payloads round-trip (callers bring their own bound)", async () => {
+    const large = new Uint8Array(200000);
+    for (let i = 0; i < large.length; i++) large[i] = i % 251;
+    const key = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptBytesWithKey(large, key);
+
+    assert.deepEqual(await CryptoCore.decryptBytes(payload.encryptedData, payload.iv, key), large);
+  });
+
+  test("uses a fresh 12-byte IV per call", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const first = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+    const second = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+
+    assert.equal(base64ByteLength(first.iv), 12);
+    assert.notEqual(first.iv, second.iv);
+    assert.notEqual(first.encryptedData, second.encryptedData);
+  });
+
+  test("rejects empty or non-Uint8Array payloads", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+
+    await assert.rejects(
+      CryptoCore.encryptBytesWithKey(new Uint8Array(0), key),
+      cryptoError("ENCRYPTION_FAILED"),
+    );
+    await assert.rejects(
+      CryptoCore.encryptBytesWithKey("not bytes", key),
+      cryptoError("ENCRYPTION_FAILED"),
+    );
+    await assert.rejects(
+      CryptoCore.encryptBytesWithKey([1, 2, 3], key),
+      cryptoError("ENCRYPTION_FAILED"),
+    );
+  });
+
+  test("tampered ciphertext or IV fails authentication", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+
+    await assert.rejects(
+      CryptoCore.decryptBytes(flipFirstByte(payload.encryptedData), payload.iv, key),
+      cryptoError("AUTHENTICATION_FAILED"),
+    );
+    await assert.rejects(
+      CryptoCore.decryptBytes(payload.encryptedData, flipFirstByte(payload.iv), key),
+      cryptoError("AUTHENTICATION_FAILED"),
+    );
+  });
+
+  test("wrong key fails authentication", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const otherKey = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+
+    await assert.rejects(
+      CryptoCore.decryptBytes(payload.encryptedData, payload.iv, otherKey),
+      cryptoError("AUTHENTICATION_FAILED"),
+    );
+  });
+
+  test("missing arguments are rejected", async () => {
+    const key = await CryptoCore.generateEncryptionKey();
+    const payload = await CryptoCore.encryptBytesWithKey(sampleBytes(), key);
+
+    await assert.rejects(
+      CryptoCore.decryptBytes("", payload.iv, key),
+      cryptoError("DECRYPTION_FAILED"),
+    );
+    await assert.rejects(
+      CryptoCore.decryptBytes(payload.encryptedData, "", key),
+      cryptoError("DECRYPTION_FAILED"),
+    );
+    await assert.rejects(
+      CryptoCore.decryptBytes(payload.encryptedData, payload.iv, ""),
+      cryptoError("DECRYPTION_FAILED"),
+    );
+  });
+});
+
 describe("isCryptoSupported", () => {
   test("reports true when WebCrypto is available", () => {
     assert.equal(PasswordCrypto.isCryptoSupported(), true);

@@ -182,3 +182,71 @@
 .btn-create:active {
   transform: scale(0.99);
 }
+
+/* Modal shell + the shared unlock overlay (partials/_unlock_modal.html).
+   Lives here rather than in a tool's stylesheet because the unlock modal is
+   included by every tool's vault page. */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(29, 32, 33, 0.8);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 80px 24px 40px;
+  overflow-y: auto;
+  animation: modal-fade 0.15s ease;
+}
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  animation: modal-rise 0.18s ease;
+}
+@keyframes modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Inside the modal the card stretches to the modal width. */
+.modal .card {
+  max-width: none;
+}
+.unlock-signout {
+  margin-top: 14px;
+  text-align: center;
+}
+.unlock-signout__btn {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  color: var(--color-warm-sand);
+  font-family: var(--font-primary);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+.unlock-signout__btn:hover {
+  opacity: 1;
+}

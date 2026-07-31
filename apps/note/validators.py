@@ -16,7 +16,15 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.core.encoding import decode_base64
 
-from .constants import GCM_IV_LENGTH_BYTES, MAX_IV_LENGTH, MAX_NOTE_CONTENT_LENGTH
+from .constants import (
+    GCM_IV_LENGTH_BYTES,
+    MAX_IV_LENGTH,
+    MAX_LIVE_SNAPSHOT_LENGTH,
+    MAX_LIVE_UPDATE_LENGTH,
+    MAX_NOTE_CONTENT_LENGTH,
+    MAX_VAULT_INDEX_LENGTH,
+    MAX_VAULT_NOTE_CONTENT_LENGTH,
+)
 
 
 def _check_max_length(value: str, max_length: int, label: str, code: str) -> None:
@@ -103,6 +111,28 @@ def validate_base64_content(value: str) -> None:
     _decode_base64(value, "Encrypted note content")
 
 
+def _check_iv_shape(value: str) -> None:
+    """Validate a non-empty Base64 IV's length cap, encoding, and byte size.
+
+    Args:
+        value (str): Base64-encoded IV.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value exceeds ``MAX_IV_LENGTH``, is not strict
+            Base64, or does not decode to ``GCM_IV_LENGTH_BYTES`` bytes.
+    """
+    _check_max_length(value, MAX_IV_LENGTH, "IV", "iv_too_long")
+    if len(_decode_base64(value, "IV")) != GCM_IV_LENGTH_BYTES:
+        raise ValidationError(
+            _("Initialization vector must be exactly %(length)d bytes.")
+            % {"length": GCM_IV_LENGTH_BYTES},
+            code="invalid_iv_length",
+        )
+
+
 def validate_optional_iv(value: str) -> None:
     """Validate a Base64-encoded AES-GCM IV; an empty value is permitted.
 
@@ -122,10 +152,126 @@ def validate_optional_iv(value: str) -> None:
     """
     if not value:
         return
-    _check_max_length(value, MAX_IV_LENGTH, "IV", "iv_too_long")
-    if len(_decode_base64(value, "IV")) != GCM_IV_LENGTH_BYTES:
+    _check_iv_shape(value)
+
+
+def validate_required_iv(value: str) -> None:
+    """Validate a Base64-encoded AES-GCM IV that must be present.
+
+    Vault notes and the vault index are always encrypted, so unlike shared
+    notes their IV is a plain required field with no cross-field logic.
+
+    Args:
+        value (str): Base64-encoded IV.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value is empty, exceeds ``MAX_IV_LENGTH``, is
+            not strict Base64, or does not decode to ``GCM_IV_LENGTH_BYTES``
+            bytes.
+    """
+    if not value:
         raise ValidationError(
-            _("Initialization vector must be exactly %(length)d bytes.")
-            % {"length": GCM_IV_LENGTH_BYTES},
-            code="invalid_iv_length",
+            _("An initialization vector is required."), code="missing_iv"
         )
+    _check_iv_shape(value)
+
+
+def validate_vault_note_content(value: str) -> None:
+    """Validate a vault note body: non-empty, capped, strict Base64.
+
+    Vault notes are always encrypted client-side, so the Base64 requirement is
+    a plain field validator here, with no ``clean()`` cross-field rule like the
+    shared note's encrypted/plain split.
+
+    Args:
+        value (str): Encrypted note ciphertext to validate.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value is empty, longer than
+            ``MAX_VAULT_NOTE_CONTENT_LENGTH``, or not strict Base64.
+    """
+    if not value or not value.strip():
+        raise ValidationError(_("Note content cannot be empty."), code="empty_content")
+    _check_max_length(
+        value, MAX_VAULT_NOTE_CONTENT_LENGTH, "Note content", "content_too_long"
+    )
+    _decode_base64(value, "Encrypted note content")
+
+
+def validate_live_snapshot(value: str) -> None:
+    """Validate a live note's encrypted snapshot: non-empty, capped, strict Base64.
+
+    The snapshot is the AES-GCM ciphertext of the full encoded Yjs state, so
+    like the vault fields it is always Base64: a plain field rule with no
+    ``clean()`` cross-field logic.
+
+    Args:
+        value (str): Encrypted snapshot ciphertext to validate.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value is empty, longer than
+            ``MAX_LIVE_SNAPSHOT_LENGTH``, or not strict Base64.
+    """
+    if not value or not value.strip():
+        raise ValidationError(
+            _("Live note snapshot cannot be empty."), code="empty_content"
+        )
+    _check_max_length(
+        value, MAX_LIVE_SNAPSHOT_LENGTH, "Live note snapshot", "content_too_long"
+    )
+    _decode_base64(value, "Encrypted live note snapshot")
+
+
+def validate_live_update_payload(value: str) -> None:
+    """Validate one encrypted Yjs update: non-empty, capped, strict Base64.
+
+    Args:
+        value (str): Encrypted update ciphertext to validate.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value is empty, longer than
+            ``MAX_LIVE_UPDATE_LENGTH``, or not strict Base64.
+    """
+    if not value or not value.strip():
+        raise ValidationError(
+            _("Live note update cannot be empty."), code="empty_content"
+        )
+    _check_max_length(
+        value, MAX_LIVE_UPDATE_LENGTH, "Live note update", "content_too_long"
+    )
+    _decode_base64(value, "Encrypted live note update")
+
+
+def validate_vault_index_data(value: str) -> None:
+    """Validate the encrypted vault index blob: non-empty, capped, strict Base64.
+
+    Args:
+        value (str): Encrypted index ciphertext to validate.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value is empty, longer than
+            ``MAX_VAULT_INDEX_LENGTH``, or not strict Base64.
+    """
+    if not value or not value.strip():
+        raise ValidationError(
+            _("Vault index data cannot be empty."), code="empty_content"
+        )
+    _check_max_length(
+        value, MAX_VAULT_INDEX_LENGTH, "Vault index data", "content_too_long"
+    )
+    _decode_base64(value, "Encrypted vault index data")

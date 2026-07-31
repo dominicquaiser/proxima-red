@@ -181,6 +181,50 @@ class RetrieveDispatchTests(TestCase):
     NOTE_SITE_URL="https://note.proxima.red",
     ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red", "testserver"],
 )
+class VaultDispatchTests(TestCase):
+    """/vault/ dispatches by host: the note vault on the note subdomain, the
+    passwd vault everywhere else (same arrangement as "/" and "/<uuid>/")."""
+
+    def setUp(self):
+        self.client = Client()
+        cache.clear()  # reset rate-limit counters between tests
+        from apps.auth.tests.factories import create_user_with_password
+
+        user = create_user_with_password("correct horse battery staple")
+        session = self.client.session
+        session["authenticated"] = True
+        session["user_id"] = user.user_id
+        session.save()
+
+    def test_note_host_serves_note_vault(self):
+        response = self.client.get("/vault/", HTTP_HOST="note.proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "note/vault.html")
+
+    def test_pass_host_serves_passwd_vault(self):
+        response = self.client.get("/vault/", HTTP_HOST="pass.proxima.red")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/vault.html")
+
+    def test_unrelated_host_falls_back_to_passwd_vault(self):
+        response = self.client.get("/vault/", HTTP_HOST="testserver")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "passwd/vault.html")
+
+    def test_unauthenticated_note_host_redirects_to_signin(self):
+        self.client.session.flush()
+        client = Client()
+        response = client.get("/vault/", HTTP_HOST="note.proxima.red")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("auth:signin"), response.url)
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    NOTE_SITE_URL="https://note.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red", "testserver"],
+)
 class RobotsTxtTests(TestCase):
     """robots.txt serves a host-specific policy for the two sites."""
 
@@ -221,15 +265,17 @@ class RobotsTxtTests(TestCase):
         response = self.client.get(reverse("core:robots_txt"), HTTP_HOST="testserver")
         self.assertIn("Disallow: /auth/account/", response.content.decode())
 
-    def test_note_subdomain_has_no_disallows(self):
-        """The note subdomain's robots.txt only links its sitemap: retrieve
-        pages are unguessable UUIDs and carry their own noindex meta tag."""
+    def test_note_subdomain_disallows_only_the_vault(self):
+        """The note subdomain's robots.txt hides the vault (which prefixes
+        every vault JSON API) and nothing else: retrieve pages are
+        unguessable UUIDs and carry their own noindex meta tag."""
         response = self.client.get(
             reverse("core:robots_txt"), HTTP_HOST="note.proxima.red"
         )
         self.assertEqual(response.status_code, 200)
         body = response.content.decode()
-        self.assertNotIn("Disallow:", body)
+        self.assertIn("Disallow: /vault/", body)
+        self.assertEqual(body.count("Disallow:"), 1)
         self.assertIn("Sitemap: https://note.proxima.red/sitemap.xml", body)
 
 

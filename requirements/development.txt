@@ -1,9 +1,15 @@
 # Development dependencies.
 -r base.txt
 
-# Local HTTPS dev server: `manage.py runserver_plus --cert-file ...`.
+# Local HTTPS dev server: uvicorn serving config.asgi over TLS (the only dev
+# server that carries the live-note WebSockets; see docs/deployment.md).
 # Web Crypto (and shared cookies across the pass.* subdomain) need a secure
-# context, which plain-HTTP custom hostnames don't provide. See development.md.
+# context, which plain-HTTP custom hostnames don't provide.
+uvicorn[standard]>=0.32,<1.0
+
+# runserver_plus (django-extensions) is kept as an HTTPS fallback for pure
+# page work; it is WSGI-only, so WebSockets never work through it and the
+# live-note client degrades to polling.
 django-extensions>=3.2
 Werkzeug>=3.0
 pyOpenSSL>=24.0

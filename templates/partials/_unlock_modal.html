@@ -19,7 +19,10 @@ include "partials/_unlock_modal.html" with user_id=user_id {% templatetag closeb
     <div class="card">
       <div class="card__header">
         <div class="card__eyebrow">Locked Tab</div>
-        <div class="card__title" id="unlock-title">[pass·]<span> /unlock</span></div>
+        {# Tool branding: pass unlock_title="[note·]" etc.; defaults to [pass·]. #}
+        <div class="card__title" id="unlock-title">
+          {% firstof unlock_title "[pass·]" %}<span> /unlock</span>
+        </div>
         <div class="card__subtitle">
           Your encryption key lives only in the tab you signed in on.<br />
           Re-enter your password to unlock this tab.

@@ -305,6 +305,52 @@ class SigninViewTests(TestCase):
         self.assertIsNone(self.client.session.get("sentinel"))
         self.assertFalse(self.client.session.get("authenticated", False))
 
+    def test_signin_tool_note_redirects_to_note_vault(self):
+        """tool=note lands the signin on the note vault (AJAX redirect_url)."""
+        response = self.client.post(
+            self.signin_url,
+            {
+                "user_id": self.user.user_id,
+                "auth_secret": self.auth_secret,
+                "tool": "note",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["redirect_url"], vault_url("note"))
+        self.assertTrue(
+            response.json()["redirect_url"].endswith(reverse("note:vault"))
+        )
+
+    def test_signin_unknown_tool_falls_back_to_pass(self):
+        """A tool value outside the allowlist must not steer the redirect."""
+        response = self.client.post(
+            self.signin_url,
+            {
+                "user_id": self.user.user_id,
+                "auth_secret": self.auth_secret,
+                "tool": "https://evil.example",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(response.json()["redirect_url"], vault_url())
+
+    def test_signin_get_with_tool_redirects_authenticated_to_note_vault(self):
+        """An authenticated GET of signin?tool=note goes to the note vault."""
+        self.client.post(
+            self.signin_url,
+            {"user_id": self.user.user_id, "auth_secret": self.auth_secret},
+        )
+        response = self.client.get(self.signin_url, {"tool": "note"})
+        self.assertRedirects(
+            response, vault_url("note"), fetch_redirect_response=False
+        )
+
+    def test_signin_form_carries_tool_through_render(self):
+        """The rendered signin form embeds the vetted tool as a hidden field."""
+        response = self.client.get(self.signin_url, {"tool": "note"})
+        self.assertContains(response, 'name="tool" value="note"')
+
     def test_signin_authenticate_errors_are_logged_without_raw_details(self):
         """An authentication-service failure returns a generic sanitized error."""
         raw_detail = "connection to server at proxima_user failed"

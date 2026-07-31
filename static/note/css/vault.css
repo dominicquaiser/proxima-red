@@ -1,0 +1,551 @@
+/*
+ * Note vault stylesheet.
+ *
+ * This file owns authenticated file-manager layout, vault-only icon masks,
+ * sidebar tree states, row context menus, and vault-specific editor geometry.
+ */
+
+/* Vault-only icon masks. */
+.nicon--plus {
+  mask-image: url("/static/icons/phosphor/plus.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/plus.svg");
+}
+
+.nicon--magnifying-glass {
+  mask-image: url("/static/icons/phosphor/magnifying-glass.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/magnifying-glass.svg");
+}
+
+.nicon--caret-right {
+  mask-image: url("/static/icons/phosphor/caret-right.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/caret-right.svg");
+}
+
+.nicon--folder {
+  mask-image: url("/static/icons/phosphor/folder-simple-plus.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/folder-simple-plus.svg");
+}
+
+.nicon--folder-open {
+  mask-image: url("/static/icons/phosphor/folder-open.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/folder-open.svg");
+}
+
+.nicon--file {
+  mask-image: url("/static/icons/phosphor/file-text.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/file-text.svg");
+}
+
+.nicon--trash {
+  mask-image: url("/static/icons/phosphor/trash.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/trash.svg");
+}
+
+.nicon--sidebar-simple {
+  mask-image: url("/static/icons/phosphor/sidebar-simple.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/sidebar-simple.svg");
+}
+
+.nicon--floppy-disk {
+  mask-image: url("/static/icons/phosphor/floppy-disk.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/floppy-disk.svg");
+}
+
+.nicon--sign-out {
+  mask-image: url("/static/icons/phosphor/sign-out.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/sign-out.svg");
+}
+
+.nicon--dots-three {
+  mask-image: url("/static/icons/phosphor/dots-three.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/dots-three.svg");
+}
+
+.nicon--x {
+  mask-image: url("/static/icons/phosphor/x.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/x.svg");
+}
+
+/*
+ * Vault layout shell.
+ *
+ * The page keeps body.note-editor for the shared editor shell and adds
+ * body.note-vault for the sidebar/topbar layout: sidebar on the left, topbar
+ * between sidebar and rail, rail at full height, and no footer.
+ */
+
+body.note-vault {
+  --sidebar-width: 300px;
+}
+
+/* Sidebar. */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-pitch-black);
+  border-right: 1px solid var(--color-oil-slick);
+  transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+body.note-vault.sidebar-collapsed .sidebar {
+  transform: translateX(-100%);
+}
+
+.sidebar__top {
+  flex-shrink: 0;
+  height: var(--bar-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 20px;
+  border-bottom: 1px solid var(--color-oil-slick);
+}
+
+.sidebar__top .header__logo {
+  height: calc(var(--bar-height) - 1px);
+}
+
+.sidebar__top-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar__search {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 20px 16px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-oil-slick);
+  border-radius: 3px;
+  color: var(--color-warm-slate);
+  transition: border-color 0.16s;
+}
+
+.sidebar__search:focus-within {
+  border-color: var(--color-warm-slate);
+}
+
+.sidebar__search .nicon {
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar__search input {
+  font-family: var(--font-primary);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--color-wheat);
+  background: none;
+  border: none;
+  outline: none;
+  width: 100%;
+}
+
+.sidebar__search input::placeholder {
+  color: var(--color-warm-slate);
+}
+
+.sidebar__label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--color-muddy-brown);
+  padding: 0 12px 6px 20px;
+}
+
+.sidebar__label .tool {
+  width: 26px;
+  height: 26px;
+}
+
+.sidebar__label .nicon {
+  width: 15px;
+  height: 15px;
+}
+
+.sidebar__account {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 12px 20px;
+  border-top: 1px solid var(--color-oil-slick);
+}
+
+.sidebar__account form {
+  display: flex;
+}
+
+/* Folder tree. */
+
+.tree {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-stony-gray) transparent;
+  padding-bottom: 12px;
+}
+
+.tree::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tree::-webkit-scrollbar-thumb {
+  background: var(--color-stony-gray);
+  border-radius: 6px;
+  border: 2px solid var(--color-pitch-black);
+}
+
+.tree__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px 7px 14px;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--color-driftwood);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  list-style: none;
+  transition: background 0.14s;
+  position: relative;
+}
+
+.tree__row::-webkit-details-marker {
+  display: none;
+}
+
+.tree__row:hover {
+  background: var(--color-charcoal);
+}
+
+.tree__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree__chev {
+  width: 12px;
+  height: 12px;
+  color: var(--color-warm-slate);
+  flex-shrink: 0;
+  transition: transform 0.16s ease;
+}
+
+details[open] > .tree__row .tree__chev {
+  transform: rotate(90deg);
+}
+
+.tree__icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+.tree__icon--folder {
+  color: var(--color-coral-red);
+}
+
+.tree__icon--trash {
+  color: var(--color-warm-slate);
+}
+
+.nicon--folder.tree__icon--folder.tree__icon--closed {
+  mask-image: url("/static/icons/phosphor/folder.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/folder.svg");
+}
+
+/* Closed folders show the folder glyph, open ones folder-open. */
+details[open] > .tree__row .tree__icon--closed,
+details:not([open]) > .tree__row .tree__icon--open {
+  display: none;
+}
+
+.tree__file {
+  padding-left: 44px;
+  color: var(--color-clay);
+}
+
+.tree > .tree__file {
+  padding-left: 34px;
+}
+
+.tree__file .tree__icon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-putty);
+}
+
+.tree__file--active {
+  background: var(--color-dark-asphalt);
+  color: var(--color-wheat);
+}
+
+.tree__file--active:hover {
+  background: var(--color-dark-asphalt);
+}
+
+.tree__file--active::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-brick-red);
+}
+
+.tree__file--unreadable {
+  color: var(--color-coral-red);
+  opacity: 0.75;
+}
+
+.tree__row-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  color: var(--color-warm-slate);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.14s,
+    color 0.14s,
+    background 0.14s;
+}
+
+.tree__row:hover .tree__row-actions,
+.tree__row-actions:focus-visible,
+.tree__row-actions[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.tree__row-actions:hover {
+  color: var(--color-wheat);
+  background: var(--color-oil-slick);
+}
+
+.tree__row-actions .nicon {
+  width: 15px;
+  height: 15px;
+}
+
+.tree__rename-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--color-wheat);
+  background: var(--color-charcoal);
+  border: 1px solid var(--color-stony-gray);
+  border-radius: 2px;
+  outline: none;
+  padding: 1px 6px;
+}
+
+.tree__empty {
+  font-size: 12px;
+  color: var(--color-muddy-brown);
+  padding: 8px 20px;
+  letter-spacing: 0.02em;
+}
+
+.ctx-menu {
+  position: fixed;
+  inset: auto;
+  z-index: 220;
+  min-width: 180px;
+  margin: 0;
+  padding: 6px;
+  background: var(--color-pitch-black);
+  border: 1px solid var(--color-oil-slick);
+  border-radius: 6px;
+}
+
+.ctx-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--color-driftwood);
+  transition: background 0.14s;
+}
+
+.ctx-menu__item:hover {
+  background: var(--color-oil-slick);
+  color: var(--color-wheat);
+}
+
+.ctx-menu__item .nicon {
+  width: 15px;
+  height: 15px;
+  color: var(--color-clay);
+}
+
+.ctx-menu__item--danger,
+.ctx-menu__item--danger .nicon {
+  color: var(--color-coral-red);
+}
+
+.ctx-menu__item--danger:hover {
+  background: rgba(251, 73, 52, 0.1);
+  color: var(--color-coral-red);
+}
+
+/* Two-click delete confirmation, like the passwd vault's remove button. */
+.ctx-menu__item--armed {
+  background: rgba(251, 73, 52, 0.14);
+}
+
+.ctx-menu__divider {
+  height: 1px;
+  background: var(--color-oil-slick);
+  margin: 6px 8px;
+}
+
+.ctx-menu__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-warm-slate);
+  padding: 6px 10px 4px;
+}
+
+.topbar {
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-width);
+  right: calc(var(--rail-width) - 1px);
+  z-index: 100;
+  height: var(--bar-height);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 16px;
+  background: var(--color-pitch-black-soft);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--color-oil-slick);
+  border-right: 1px solid var(--color-oil-slick);
+  transition: left 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+body.note-vault.sidebar-collapsed .topbar {
+  left: 0;
+}
+
+.topbar__sidebar-toggle {
+  position: absolute;
+  left: 10px;
+  top: calc((var(--bar-height) - 30px) / 2);
+  display: none;
+}
+
+body.note-vault.sidebar-collapsed .topbar__sidebar-toggle {
+  display: flex;
+}
+
+.topbar__crumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--color-wheat);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.topbar__crumb-dir {
+  color: var(--color-warm-slate);
+}
+
+body.note-vault .editor-tabs {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+}
+
+/* Editor and rail geometry inside the vault shell. */
+
+body.note-vault .editor {
+  left: var(--sidebar-width);
+  bottom: 0;
+  padding-left: 0;
+  transition: left 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+body.note-vault.sidebar-collapsed .editor {
+  left: 0;
+}
+
+/*
+ * The vault has no footer, so the rail runs to the bottom edge. It starts just
+ * below the topbar, with -1px keeping this border-top in the same pixel row as
+ * the topbar's border-bottom so the horizontal line stays unbroken.
+ */
+body.note-vault .rail {
+  top: calc(var(--bar-height) - 1px);
+  bottom: 0;
+  border-top: 1px solid var(--color-oil-slick);
+}
+
+body.note-vault .meta {
+  bottom: 10px;
+}
+
+/* Dirty-state accent on the rail's save tool. */
+body.note-vault.note-dirty .tool[data-action="save"] {
+  color: var(--color-coral-red);
+}
+
+/* Small screens: sidebar overlays the editor and starts collapsed. */
+
+@media (max-width: 900px) {
+  body.note-vault .topbar,
+  body.note-vault .editor {
+    left: 0;
+  }
+}

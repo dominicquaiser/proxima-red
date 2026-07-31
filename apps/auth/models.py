@@ -12,7 +12,11 @@ import string
 
 from django.db import models
 
-from .constants import USER_ID_LENGTH
+from .constants import (
+    MAX_KEYPAIR_IV_LENGTH,
+    MAX_PRIVATE_KEY_BLOB_LENGTH,
+    USER_ID_LENGTH,
+)
 
 
 def generate_user_id() -> str:
@@ -103,3 +107,60 @@ class User(models.Model):
             f"<User user_id={self.user_id} "
             f"created={self.created_at.isoformat() if self.created_at else 'N/A'}>"
         )
+
+
+class UserKeyPair(models.Model):
+    """
+    Per-account asymmetric keypair for named-collaborator key wrapping.
+
+    A separate model rather than columns on ``proxima_user`` on purpose: that
+    table's documented contract is authentication-only, and keypairs are
+    created lazily (at signup, or at an existing account's first
+    collaboration action), so a nullable-column sprawl is avoided.
+
+    Zero-knowledge split: the public key is plaintext (it is public); the
+    private key is stored as AES-256-GCM ciphertext under the account's
+    VAULT key — the server holds the blob but can never open it. The public
+    key never rotates on password change; only the blob is re-encrypted
+    (through the transactional ``/vault/migrate/`` batch, so it can never
+    end up under a different key than the vault index).
+
+    Attributes:
+        user: Owning account (one keypair per account).
+        public_key: Base64 SPKI ECDH P-256 public key (91 bytes decoded).
+        encrypted_private_key: Base64 AES-GCM ciphertext of the PKCS8 key.
+        private_key_iv: Base64 initialization vector for the blob.
+    """
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="keypair",
+    )
+    public_key = models.CharField(
+        max_length=256,
+        help_text="Base64 SPKI ECDH P-256 public key (server-distributed)",
+    )
+    encrypted_private_key = models.CharField(
+        max_length=MAX_PRIVATE_KEY_BLOB_LENGTH,
+        help_text="Base64 AES-GCM ciphertext of the PKCS8 private key (vault key)",
+    )
+    private_key_iv = models.CharField(
+        max_length=MAX_KEYPAIR_IV_LENGTH,
+        help_text="Base64 IV for the encrypted private key blob",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "proxima_user_keypair"
+        verbose_name = "User keypair"
+        verbose_name_plural = "User keypairs"
+
+    def __str__(self) -> str:
+        """Return a non-sensitive string representation."""
+        return f"KeyPair for User {self.user.user_id}"
+
+    def __repr__(self) -> str:
+        """Return a non-sensitive detailed representation."""
+        return f"<UserKeyPair user_id={self.user.user_id}>"

@@ -47,7 +47,9 @@ USER app
 EXPOSE 8000
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["gunicorn", "config.wsgi:application", "-c", "deployment/gunicorn.conf.py"]
+# ASGI entrypoint: gunicorn manages uvicorn workers (worker_class in
+# gunicorn.conf.py) so one server carries both HTTP and the /ws/ WebSockets.
+CMD ["gunicorn", "config.asgi:application", "-c", "deployment/gunicorn.conf.py"]
 
 
 # --- Dev stage: production image plus local-only tooling ---

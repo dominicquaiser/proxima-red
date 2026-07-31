@@ -25,6 +25,11 @@ AUTH_SALT = base64.b64encode(b"d" * 32).decode()
 VAULT_SALT = base64.b64encode(b"e" * 32).decode()
 NEW_AUTH_SALT = base64.b64encode(b"f" * 32).decode()
 NEW_VAULT_SALT = base64.b64encode(b"g" * 32).decode()
+# Collaboration keypair fixtures (ECDH P-256 SPKI is 91 bytes; the server
+# only checks the decoded length, so a fixed-length blob suffices).
+PUBLIC_KEY = base64.b64encode(b"\x01" * 91).decode()
+PRIVATE_KEY_BLOB = base64.b64encode(b"encryptedpkcs8").decode()
+KEYPAIR_IV = base64.b64encode(b"i" * 12).decode()
 
 
 class Base64FieldValidatorTests(TestCase):
@@ -67,6 +72,59 @@ class SignupFormTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("auth_secret", form.errors)
+
+    def test_signup_form_accepts_valid_keypair(self):
+        """A full, well-formed keypair triple is accepted and surfaced."""
+        form = SignupForm(
+            data={
+                "auth_secret": AUTH_SECRET,
+                "auth_salt": AUTH_SALT,
+                "vault_salt": VAULT_SALT,
+                "public_key": PUBLIC_KEY,
+                "encrypted_private_key": PRIVATE_KEY_BLOB,
+                "private_key_iv": KEYPAIR_IV,
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        payload = form.keypair_payload()
+        self.assertEqual(payload["public_key"], PUBLIC_KEY)
+
+    def test_signup_form_without_keypair_yields_none(self):
+        """The keypair is optional; absent fields mean no keypair payload."""
+        form = SignupForm(
+            data={
+                "auth_secret": AUTH_SECRET,
+                "auth_salt": AUTH_SALT,
+                "vault_salt": VAULT_SALT,
+            }
+        )
+        self.assertTrue(form.is_valid())
+        self.assertIsNone(form.keypair_payload())
+
+    def test_signup_form_rejects_partial_keypair(self):
+        """A partial triple is a buggy client, not a no-keypair signup."""
+        form = SignupForm(
+            data={
+                "auth_secret": AUTH_SECRET,
+                "auth_salt": AUTH_SALT,
+                "vault_salt": VAULT_SALT,
+                "public_key": PUBLIC_KEY,  # blob + iv missing
+            }
+        )
+        self.assertFalse(form.is_valid())
+
+    def test_signup_form_rejects_wrong_public_key_length(self):
+        form = SignupForm(
+            data={
+                "auth_secret": AUTH_SECRET,
+                "auth_salt": AUTH_SALT,
+                "vault_salt": VAULT_SALT,
+                "public_key": base64.b64encode(b"short").decode(),
+                "encrypted_private_key": PRIVATE_KEY_BLOB,
+                "private_key_iv": KEYPAIR_IV,
+            }
+        )
+        self.assertFalse(form.is_valid())
 
 
 class SigninFormTests(TestCase):

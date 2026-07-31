@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING
 from django import forms
 from django.contrib.auth.hashers import check_password
 
-from apps.core.encoding import Base64LengthError, decode_base64_exact_length
+from apps.core.encoding import (
+    Base64LengthError,
+    decode_base64,
+    decode_base64_exact_length,
+)
 
 from .models import is_valid_user_id
 from .constants import (
@@ -17,6 +21,9 @@ from .constants import (
     ERROR_INCORRECT_PASSWORD_DELETION,
     ERROR_INVALID_USER_ID,
     ERROR_CONFIRMATION_TEXT,
+    MAX_KEYPAIR_IV_LENGTH,
+    MAX_PRIVATE_KEY_BLOB_LENGTH,
+    PUBLIC_KEY_LENGTH_BYTES,
     SALT_LENGTH_BYTES,
     USER_ID_LENGTH,
 )
@@ -50,6 +57,62 @@ def validate_auth_secret(value: str) -> str:
 def validate_kdf_salt(value: str, *, label: str = "Salt") -> str:
     """Validate a client-generated PBKDF2 salt."""
     return validate_base64_bytes(value, expected_length=SALT_LENGTH_BYTES, label=label)
+
+
+def validate_base64_blob(value: str, *, max_chars: int, label: str) -> str:
+    """Validate a strict Base64 blob of bounded (not exact) size."""
+    if not value:
+        raise forms.ValidationError(f"{label} is required.")
+    if len(value) > max_chars:
+        raise forms.ValidationError(f"{label} has an invalid length.")
+    try:
+        decode_base64(value)
+    except ValueError:
+        raise forms.ValidationError(f"{label} must be a valid Base64 value.")
+    return value
+
+
+class KeypairFieldsMixin:
+    """Shared validation for the collaboration-keypair triple.
+
+    Cross-runtime contract with static/shared/js/keywrap.js: the SPKI public
+    key is exactly ``PUBLIC_KEY_LENGTH_BYTES`` (ECDH P-256); the private-key
+    blob is a bounded AES-GCM ciphertext under the vault key; the IV is the
+    app-wide 12 GCM bytes.
+    """
+
+    def clean_public_key(self) -> str:
+        return validate_base64_bytes(
+            self.cleaned_data.get("public_key"),
+            expected_length=PUBLIC_KEY_LENGTH_BYTES,
+            label="Public key",
+        )
+
+    def clean_encrypted_private_key(self) -> str:
+        return validate_base64_blob(
+            self.cleaned_data.get("encrypted_private_key"),
+            max_chars=MAX_PRIVATE_KEY_BLOB_LENGTH,
+            label="Encrypted private key",
+        )
+
+    def clean_private_key_iv(self) -> str:
+        return validate_base64_bytes(
+            self.cleaned_data.get("private_key_iv"),
+            expected_length=12,  # 12 GCM bytes, the app-wide IV shape
+            label="Private key IV",
+        )
+
+
+class KeypairForm(KeypairFieldsMixin, forms.Form):
+    """Form for creating the account's collaboration keypair."""
+
+    public_key = forms.CharField(widget=forms.HiddenInput())
+    encrypted_private_key = forms.CharField(
+        max_length=MAX_PRIVATE_KEY_BLOB_LENGTH, widget=forms.HiddenInput()
+    )
+    private_key_iv = forms.CharField(
+        max_length=MAX_KEYPAIR_IV_LENGTH, widget=forms.HiddenInput()
+    )
 
 
 class PasswordVerificationMixin:
@@ -127,11 +190,24 @@ class AccountDeletionForm(PasswordVerificationMixin, forms.Form):
 
 
 class SignupForm(forms.Form):
-    """Form for creating a new user account."""
+    """Form for creating a new user account.
+
+    The collaboration-keypair triple is optional (a noscript-adjacent or older
+    client simply doesn't send it; the keypair is then created lazily at the
+    account's first collaboration action) but all-or-nothing: a partial triple
+    means a buggy client and is rejected rather than half-stored.
+    """
 
     auth_secret = forms.CharField(widget=forms.HiddenInput())
     auth_salt = forms.CharField(widget=forms.HiddenInput())
     vault_salt = forms.CharField(widget=forms.HiddenInput())
+    public_key = forms.CharField(required=False, widget=forms.HiddenInput())
+    encrypted_private_key = forms.CharField(
+        required=False, max_length=MAX_PRIVATE_KEY_BLOB_LENGTH, widget=forms.HiddenInput()
+    )
+    private_key_iv = forms.CharField(
+        required=False, max_length=MAX_KEYPAIR_IV_LENGTH, widget=forms.HiddenInput()
+    )
 
     def clean_auth_secret(self) -> str:
         return validate_auth_secret(self.cleaned_data.get("auth_secret"))
@@ -143,6 +219,43 @@ class SignupForm(forms.Form):
         return validate_kdf_salt(
             self.cleaned_data.get("vault_salt"), label="Vault salt"
         )
+
+    def clean(self) -> dict:
+        cleaned = super().clean()
+        triple = (
+            cleaned.get("public_key"),
+            cleaned.get("encrypted_private_key"),
+            cleaned.get("private_key_iv"),
+        )
+        if not any(triple):
+            return cleaned
+        if not all(triple):
+            raise forms.ValidationError(
+                "Keypair fields must be provided together."
+            )
+        # Reuse the strict keypair shape checks on the optional fields.
+        cleaned["public_key"] = validate_base64_bytes(
+            triple[0], expected_length=PUBLIC_KEY_LENGTH_BYTES, label="Public key"
+        )
+        cleaned["encrypted_private_key"] = validate_base64_blob(
+            triple[1],
+            max_chars=MAX_PRIVATE_KEY_BLOB_LENGTH,
+            label="Encrypted private key",
+        )
+        cleaned["private_key_iv"] = validate_base64_bytes(
+            triple[2], expected_length=12, label="Private key IV"
+        )
+        return cleaned
+
+    def keypair_payload(self) -> dict | None:
+        """Return the validated keypair triple, or None when not supplied."""
+        if not self.cleaned_data.get("public_key"):
+            return None
+        return {
+            "public_key": self.cleaned_data["public_key"],
+            "encrypted_private_key": self.cleaned_data["encrypted_private_key"],
+            "private_key_iv": self.cleaned_data["private_key_iv"],
+        }
 
 
 class SigninForm(forms.Form):

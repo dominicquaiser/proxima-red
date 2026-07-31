@@ -48,6 +48,25 @@ CACHES = {
     }
 }
 
+# Channel layer on its own Redis instance (redis-channels service), NOT the
+# rate-limit cache above: that instance runs allkeys-lru, which could silently
+# evict in-flight channel messages and group registrations (lost WebSocket
+# broadcasts, half-dead groups). redis-channels runs noeviction instead; both
+# are ephemeral on purpose - after a restart, live-note clients gap-heal via
+# their sync cursor (`prev_seq` chaining + HTTP ?since= refetch).
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [
+                env(  # noqa: F405
+                    "CHANNEL_REDIS_URL", default="redis://redis-channels:6379/0"
+                )
+            ],
+        },
+    }
+}
+
 # e.g. ["https://share.example.com"] - required by Django for cross-origin POSTs.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")  # noqa: F405
 

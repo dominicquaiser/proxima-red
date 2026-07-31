@@ -2,54 +2,82 @@
  * @fileoverview Pure text-manipulation functions behind the note editor's
  * tool rail, exposed as window.NoteToolbar.
  *
- * Every function takes (value, selStart, selEnd) - the textarea's content and
- * selection - and returns {value, selStart, selEnd} describing the edited
- * text and the selection afterwards. Deliberately DOM-free so Node can test
- * them directly (tests/js/toolbar.test.js); editor.js owns applying the
- * result to the real textarea.
+ * Public functions take textarea content plus selection offsets and return the
+ * edited text plus post-edit selection. Kept DOM-free for Node tests.
  */
 (function () {
   "use strict";
 
-  /** Bounds of the full lines covered by the selection. */
+  const HEADING_RE = /^(#{1,6})\s+/;
+  const NUMBERED_PREFIX_RE = /^\d+\.\s+/;
+  const CODE_FENCE_OPEN_RE = /^```/;
+  const CODE_FENCE_CLOSE_RE = /^```\s*$/;
+
+  /**
+   * @typedef {Object} LineSpan
+   * @property {number} start
+   * @property {number} end
+   */
+
+  /**
+   * @typedef {Object} ToolbarEdit
+   * @property {string} value
+   * @property {number} selStart
+   * @property {number} selEnd
+   */
+
+  /**
+   * Return bounds for full lines touched by the selection.
+   *
+   * @param {string} value
+   * @param {number} selStart
+   * @param {number} selEnd
+   * @returns {LineSpan}
+   */
   function lineSpan(value, selStart, selEnd) {
     const start = value.lastIndexOf("\n", selStart - 1) + 1;
-    const newlineAfter = value.indexOf("\n", selEnd);
-    const end = newlineAfter === -1 ? value.length : newlineAfter;
+    const newlineAfterSelection = value.indexOf("\n", selEnd);
+    const end = newlineAfterSelection === -1 ? value.length : newlineAfterSelection;
+
     return { start, end };
   }
 
-  function splice(value, start, end, replacement) {
+  /** @returns {string} value with [start, end) replaced. */
+  function replaceRange(value, start, end, replacement) {
     return value.slice(0, start) + replacement + value.slice(end);
   }
 
   /**
-   * Toggle an inline marker (e.g. "**", "_", "~~") around the selection.
-   * With no selection, insert a marker pair and place the caret inside it.
+   * Toggle an inline Markdown marker around the selection.
+   *
+   * @param {string} value
+   * @param {number} selStart
+   * @param {number} selEnd
+   * @param {string} marker
+   * @returns {ToolbarEdit}
    */
   function wrapInline(value, selStart, selEnd, marker) {
     const selected = value.slice(selStart, selEnd);
 
-    // Unwrap when the selection is already wrapped ("**bold**" selected as a
-    // whole, or "bold" selected inside its markers).
-    if (
+    const selectionIncludesMarkers =
       selected.length >= 2 * marker.length &&
       selected.startsWith(marker) &&
-      selected.endsWith(marker)
-    ) {
+      selected.endsWith(marker);
+
+    if (selectionIncludesMarkers) {
       const inner = selected.slice(marker.length, selected.length - marker.length);
       return {
-        value: splice(value, selStart, selEnd, inner),
+        value: replaceRange(value, selStart, selEnd, inner),
         selStart: selStart,
         selEnd: selStart + inner.length,
       };
     }
-    if (
-      value.slice(selStart - marker.length, selStart) === marker &&
-      value.slice(selEnd, selEnd + marker.length) === marker
-    ) {
+
+    const markerBeforeSelection = value.slice(selStart - marker.length, selStart);
+    const markerAfterSelection = value.slice(selEnd, selEnd + marker.length);
+    if (markerBeforeSelection === marker && markerAfterSelection === marker) {
       return {
-        value: splice(value, selStart - marker.length, selEnd + marker.length, selected),
+        value: replaceRange(value, selStart - marker.length, selEnd + marker.length, selected),
         selStart: selStart - marker.length,
         selEnd: selEnd - marker.length,
       };
@@ -57,88 +85,109 @@
 
     const wrapped = marker + selected + marker;
     return {
-      value: splice(value, selStart, selEnd, wrapped),
+      value: replaceRange(value, selStart, selEnd, wrapped),
       selStart: selStart + marker.length,
       selEnd: selStart + marker.length + selected.length,
     };
   }
 
   /**
-   * Set (or toggle off) the heading level of every line in the selection.
-   * A line already at exactly `level` loses its heading; other lines are
-   * rewritten to the requested level.
+   * Set or toggle off a Markdown heading level on selected lines.
+   *
+   * @param {string} value
+   * @param {number} selStart
+   * @param {number} selEnd
+   * @param {number} level
+   * @returns {ToolbarEdit}
    */
   function setHeading(value, selStart, selEnd, level) {
     const span = lineSpan(value, selStart, selEnd);
-    const prefix = "#".repeat(level) + " ";
+    const headingPrefix = "#".repeat(level) + " ";
+    const selectedLines = value.slice(span.start, span.end).split("\n");
 
-    const rewritten = value
-      .slice(span.start, span.end)
-      .split("\n")
+    const rewritten = selectedLines
       .map(function (line) {
-        const current = line.match(/^(#{1,6})\s+/);
-        const body = current ? line.slice(current[0].length) : line;
-        if (current && current[1].length === level) {
-          return body; // toggle off
+        const currentHeading = line.match(HEADING_RE);
+        const body = currentHeading ? line.slice(currentHeading[0].length) : line;
+
+        if (currentHeading && currentHeading[1].length === level) {
+          return body;
         }
-        return prefix + body;
+        return headingPrefix + body;
       })
       .join("\n");
 
     return {
-      value: splice(value, span.start, span.end, rewritten),
+      value: replaceRange(value, span.start, span.end, rewritten),
       selStart: span.start,
       selEnd: span.start + rewritten.length,
     };
   }
 
   /**
-   * Toggle a line prefix over the selection: "- " (bullets), "> " (quote),
-   * "- [ ] " (tasks), or numbered items when `numbered` is true. If every
-   * selected line already carries the prefix it is removed, otherwise added.
+   * Toggle a line prefix or numbered-list marker on selected non-blank lines.
+   *
+   * @param {string} value
+   * @param {number} selStart
+   * @param {number} selEnd
+   * @param {string} prefix
+   * @param {boolean} numbered
+   * @returns {ToolbarEdit}
    */
   function prefixLines(value, selStart, selEnd, prefix, numbered) {
     const span = lineSpan(value, selStart, selEnd);
-    const lines = value.slice(span.start, span.end).split("\n");
+    const selectedLines = value.slice(span.start, span.end).split("\n");
 
-    const matcher = numbered ? /^\d+\.\s+/ : null;
-    const hasPrefix = function (line) {
-      return numbered ? matcher.test(line) : line.startsWith(prefix);
-    };
-    const allPrefixed = lines.every(function (line) {
-      return !line.trim() || hasPrefix(line);
+    function lineHasPrefix(line) {
+      return numbered ? NUMBERED_PREFIX_RE.test(line) : line.startsWith(prefix);
+    }
+
+    const everyNonBlankLinePrefixed = selectedLines.every(function (line) {
+      return !line.trim() || lineHasPrefix(line);
     });
 
-    const rewritten = lines
-      .map(function (line, i) {
+    const rewritten = selectedLines
+      .map(function (line, index) {
         if (!line.trim()) return line;
-        if (allPrefixed) {
-          return numbered ? line.replace(matcher, "") : line.slice(prefix.length);
+
+        if (everyNonBlankLinePrefixed) {
+          return numbered ? line.replace(NUMBERED_PREFIX_RE, "") : line.slice(prefix.length);
         }
-        return numbered ? i + 1 + ". " + line : prefix + line;
+
+        return numbered ? index + 1 + ". " + line : prefix + line;
       })
       .join("\n");
 
     return {
-      value: splice(value, span.start, span.end, rewritten),
+      value: replaceRange(value, span.start, span.end, rewritten),
       selStart: span.start,
       selEnd: span.start + rewritten.length,
     };
   }
 
   /**
-   * Wrap the selected lines in a fenced code block (or remove the fences when
-   * the selection is already exactly fenced).
+   * Toggle fenced-code-block markers around selected lines.
+   *
+   * @param {string} value
+   * @param {number} selStart
+   * @param {number} selEnd
+   * @returns {ToolbarEdit}
    */
   function fenceCodeBlock(value, selStart, selEnd) {
     const span = lineSpan(value, selStart, selEnd);
     const block = value.slice(span.start, span.end);
     const lines = block.split("\n");
+    const firstLine = lines[0];
+    const lastLine = lines[lines.length - 1];
 
-    if (lines.length >= 2 && /^```/.test(lines[0]) && /^```\s*$/.test(lines[lines.length - 1])) {
+    if (
+      lines.length >= 2 &&
+      CODE_FENCE_OPEN_RE.test(firstLine) &&
+      CODE_FENCE_CLOSE_RE.test(lastLine)
+    ) {
       const inner = lines.slice(1, -1).join("\n");
       return {
-        value: splice(value, span.start, span.end, inner),
+        value: replaceRange(value, span.start, span.end, inner),
         selStart: span.start,
         selEnd: span.start + inner.length,
       };
@@ -146,7 +195,7 @@
 
     const fenced = "```\n" + block + "\n```";
     return {
-      value: splice(value, span.start, span.end, fenced),
+      value: replaceRange(value, span.start, span.end, fenced),
       selStart: span.start,
       selEnd: span.start + fenced.length,
     };

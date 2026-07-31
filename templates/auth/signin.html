@@ -28,6 +28,9 @@
         </div>
         {% endif %}
         <input type="hidden" id="id_auth_secret" name="auth_secret" />
+        {# Vetted vault destination (see AuthFormView.requested_tool); #}
+        {# carried through the POST so signin lands on the right tool. #}
+        <input type="hidden" name="tool" value="{{ tool }}" />
 
         <div class="field">
           <label class="field__label" for="id_user_id">User ID</label>
@@ -69,7 +72,7 @@
 
     <div class="auth-footer">
       Don't have an account?
-      <a href="{% url 'auth:signup' %}" class="auth-link">Sign Up</a>
+      <a href="{% url 'auth:signup' %}?tool={{ tool }}" class="auth-link">Sign Up</a>
     </div>
   </div>
 </main>

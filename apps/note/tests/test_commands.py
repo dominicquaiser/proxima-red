@@ -7,9 +7,9 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.note.models import SharedNote
+from apps.note.models import LiveNote, LiveNoteUpdate, SharedNote
 
-from .factories import make_note, make_plain_note
+from .factories import make_live_note, make_live_update, make_note, make_plain_note
 
 
 def run_command(*args, **kwargs):
@@ -70,3 +70,48 @@ class DeleteExpiredNotesCommandTests(TestCase):
 
         self.assertNotIn(secret, output)
         self.assertIn("plain-text", output)
+
+
+class DeleteExpiredLiveNotesCommandTests(TestCase):
+    """The live-note sweep: same command, second pass."""
+
+    def setUp(self):
+        self.expired = make_live_note(expires_at=timezone.now() - timedelta(minutes=1))
+        self.active = make_live_note(expires_at=timezone.now() + timedelta(days=1))
+
+    def test_deletes_only_expired_live_notes_with_their_updates(self):
+        make_live_update(self.expired)
+        make_live_update(self.expired)
+        kept = make_live_update(self.active)
+
+        output = run_command()
+
+        self.assertFalse(LiveNote.objects.filter(pk=self.expired.pk).exists())
+        self.assertTrue(LiveNote.objects.filter(pk=self.active.pk).exists())
+        self.assertEqual(
+            list(LiveNoteUpdate.objects.values_list("pk", flat=True)), [kept.pk]
+        )
+        self.assertIn("Successfully deleted 1 expired live note(s).", output)
+
+    def test_both_sweeps_report_independently(self):
+        make_note(expires_at=timezone.now() - timedelta(minutes=1))
+
+        output = run_command()
+
+        self.assertIn("Successfully deleted 1 expired note(s).", output)
+        self.assertIn("Successfully deleted 1 expired live note(s).", output)
+
+    def test_dry_run_previews_live_notes_without_deleting(self):
+        make_live_update(self.expired)
+
+        output = run_command("--dry-run", verbosity=2)
+
+        self.assertTrue(LiveNote.objects.filter(pk=self.expired.pk).exists())
+        self.assertIn("DRY RUN: Would delete 1 expired live note(s).", output)
+        self.assertIn("| live |", output)
+        self.assertNotIn(self.expired.snapshot, output)
+
+    def test_noop_message_when_no_live_notes_expired(self):
+        self.expired.delete()
+        output = run_command()
+        self.assertIn("No expired live notes to delete.", output)

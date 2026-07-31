@@ -58,6 +58,11 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # WebSocket routing/consumers for live-note sync (apps.note.consumers).
+    # Deliberately without daphne: `manage.py runserver` stays the plain WSGI
+    # dev server (no WS - the live client falls back to polling); WebSockets
+    # need an ASGI server (uvicorn) serving config.asgi.
+    "channels",
     "apps.core",
     "apps.passwd",
     "apps.note",
@@ -101,6 +106,20 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+
+# ASGI entrypoint (HTTP + WebSocket ProtocolTypeRouter). Production and the
+# uvicorn dev server serve this; config.wsgi remains for WSGI-only runners.
+ASGI_APPLICATION = "config.asgi.application"
+
+# --- Channel layer (WebSocket group fan-out) ---
+# In-memory: correct for the single-process dev server and for tests. It does
+# NOT fan out across processes, so production.py swaps in the Redis-backed
+# layer (dedicated redis-channels service) for multi-worker gunicorn/uvicorn.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
 
 
 # --- Database ---
@@ -194,6 +213,24 @@ SECURE_REFERRER_POLICY = "same-origin"
 # far lower risk than script injection). No third-party origins are loaded, so
 # every fetch directive stays same-origin, which also makes Subresource
 # Integrity moot here: there are no cross-origin scripts to pin.
+
+
+def _ws_origin(url):
+    """http(s):// origin -> its ws(s):// twin, for the CSP connect-src.
+
+    The live-note WebSocket is same-origin on the note host, which CSP3
+    `'self'` already covers in current browsers, but older Safari matched
+    `'self'` by scheme too - listing the wss: origin explicitly is cheap
+    insurance. (development.py overrides NOTE_SITE_URL after this string is
+    built; that staleness is harmless because the dev WS stays same-origin
+    and is covered by 'self'.)
+    """
+    for scheme, ws_scheme in (("https://", "wss://"), ("http://", "ws://")):
+        if url.startswith(scheme):
+            return ws_scheme + url[len(scheme) :]
+    return url
+
+
 CONTENT_SECURITY_POLICY = env(
     "CONTENT_SECURITY_POLICY",
     default="; ".join(
@@ -203,7 +240,7 @@ CONTENT_SECURITY_POLICY = env(
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "font-src 'self'",
-            f"connect-src 'self' {PASS_SITE_URL}",
+            f"connect-src 'self' {PASS_SITE_URL} {_ws_origin(NOTE_SITE_URL)}",
             f"form-action 'self' {SITE_URL} {PASS_SITE_URL} {NOTE_SITE_URL}",
             "frame-ancestors 'none'",
             "base-uri 'none'",

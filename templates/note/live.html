@@ -1,0 +1,314 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live Note – proxima·red</title>
+    <meta
+      name="description"
+      content="A collaboratively editable, end-to-end encrypted note. The decryption key never reaches the server."
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#1D2021" />
+    <link rel="icon" type="image/svg+xml" href="{% static 'icons/note-pencil-favicon.svg' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/shared.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/public.css' %}" />
+  </head>
+  <body class="note-editor note-live">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <noscript>
+      <div class="noscript-warning" role="alert">
+        <strong>JavaScript is required.</strong> Live notes are decrypted and merged in your
+        browser — the server only relays ciphertext it cannot read, so nothing can be shown
+        without JavaScript.
+      </div>
+    </noscript>
+
+    <div id="notification-container"></div>
+
+    <header class="header">
+      <a href="{{ site_url }}/" class="header__logo">
+        proxima<span class="header__logo-dot">·</span>red
+      </a>
+
+      <div class="editor-tabs" role="tablist" aria-label="Editor mode">
+        <button
+          class="editor-tabs__item editor-tabs__item--active"
+          id="tab-edit"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="note-content"
+        >
+          Edit
+        </button>
+        <button
+          class="editor-tabs__item"
+          id="tab-preview"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="note-preview"
+        >
+          Preview
+        </button>
+      </div>
+
+      <div class="header__auth">
+        <details class="mobile-menu" id="mobile-menu">
+          <summary class="header__menu-toggle" aria-label="Menu">
+            <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
+              <line x1="40" y1="64" x2="216" y2="64" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+              <line x1="40" y1="128" x2="216" y2="128" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+              <line x1="40" y1="192" x2="216" y2="192" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16" />
+            </svg>
+          </summary>
+          <nav class="mobile-menu__panel" aria-label="Site menu">
+            <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
+            <a href="{{ note_site_url }}/" class="mobile-menu__link">Share a Note</a>
+            <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
+            <a href="https://github.com/dominicquaiser" class="mobile-menu__link">Source Code</a>
+            <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
+            <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
+            {% if is_authenticated %}
+            <a href="{{ site_url }}/vault/" class="mobile-menu__link">Vault</a>
+            {% else %}
+            <a href="{{ site_url }}/auth/signin/" class="mobile-menu__link">Sign In</a>
+            <a href="{{ site_url }}/auth/signup/" class="mobile-menu__link">Sign Up</a>
+            {% endif %}
+          </nav>
+        </details>
+        {% if is_authenticated %}
+        <a href="{{ site_url }}/vault/" class="header__btn header__btn--outline">Vault</a>
+        {% else %}
+        <a href="{{ site_url }}/auth/signin/" class="header__btn header__btn--outline">Sign In</a>
+        <a href="{{ site_url }}/auth/signup/" class="header__btn header__btn--solid">Sign Up</a>
+        {% endif %}
+      </div>
+    </header>
+
+    {% comment %} Http.getCsrfToken() prefers this hidden field; in production
+    the csrftoken cookie is HttpOnly, so the field is the only source the sync
+    client can read. {% endcomment %}
+    <form hidden aria-hidden="true">{% csrf_token %}</form>
+
+    <main
+      id="main-content"
+      class="editor"
+      data-note-id="{{ live_note_id }}"
+      data-state-url="{{ state_url }}"
+      data-updates-url="{{ updates_url }}"
+      data-snapshot-url="{{ snapshot_url }}"
+      data-ws-path="{{ ws_path }}"
+      data-key-url="{{ key_url }}"
+      data-access-url="{{ access_url }}"
+      data-collaborators-url="{{ collaborators_url }}"
+      data-rekey-url="{{ rekey_url }}"
+      data-keypair-url="{{ keypair_url }}"
+      data-pubkey-url="{{ pubkey_url }}"
+      data-access-mode="{{ access_mode }}"
+      data-is-owner="{{ is_owner|yesno:'1,' }}"
+      data-is-authenticated="{{ is_authenticated|yesno:'1,' }}"
+      data-user-id="{{ user_id }}"
+      data-expires-at="{{ expires_at }}"
+    >
+      <div class="editor__doc">
+        <textarea
+          id="note-content"
+          class="editor__text"
+          placeholder="Connecting to the live note…"
+          spellcheck="false"
+          aria-label="Note content"
+          readonly
+        ></textarea>
+        <span id="note-caret" class="editor__caret" aria-hidden="true"></span>
+        <div
+          id="note-preview"
+          class="md-render hidden"
+          role="tabpanel"
+          aria-label="Preview"
+        ></div>
+        
+        <div class="note-view__footer">
+          <span id="expiry-notice">
+            Expires and is permanently deleted in
+            <strong id="live-countdown" title="Time until this note expires">...</strong>
+          </span>
+        </div>
+      </div>
+    </main>
+
+    <div class="meta meta-stack">
+      <span class="live-status live-status--loading" id="live-status" role="status">loading</span>
+      <span class="meta__sep" aria-hidden="true">/</span>
+      <span id="note-meta" aria-hidden="true"></span>
+    </div>
+
+    <nav class="rail" aria-label="Formatting toolbar">
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="bold" title="Bold">
+          <span class="nicon nicon--text-b" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="italic" title="Italic">
+          <span class="nicon nicon--text-italic" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="strikethrough" title="Strikethrough">
+          <span class="nicon nicon--text-strikethrough" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="h1" title="Heading 1">
+          <span class="nicon nicon--text-h-one" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h2" title="Heading 2">
+          <span class="nicon nicon--text-h-two" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h3" title="Heading 3">
+          <span class="nicon nicon--text-h-three" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h4" title="Heading 4">
+          <span class="nicon nicon--text-h-four" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h5" title="Heading 5">
+          <span class="nicon nicon--text-h-five" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h6" title="Heading 6">
+          <span class="nicon nicon--text-h-six" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="bullets" title="Bullet list">
+          <span class="nicon nicon--list-bullets" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="numbers" title="Numbered list">
+          <span class="nicon nicon--list-numbers" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="tasks" title="Task list">
+          <span class="nicon nicon--list-checks" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="quote" title="Blockquote">
+          <span class="nicon nicon--quotes" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="code" title="Code block">
+          <span class="nicon nicon--code" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="undo" title="Undo">
+          <span class="nicon nicon--arrow-counter-clockwise" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="redo" title="Redo">
+          <span class="nicon nicon--arrow-clockwise" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__spacer"></div>
+
+      <div class="rail__group">
+        {% if is_authenticated %}
+        <button
+          class="tool{% if not is_owner %} hidden{% endif %}"
+          id="collab-btn"
+          type="button"
+          popovertarget="collab-panel"
+          title="Manage collaborators"
+        >
+          <span class="nicon nicon--key" aria-hidden="true"></span>
+        </button>
+        {% endif %}
+        <button class="tool" type="button" data-action="download" title="Download .md">
+          <span class="nicon nicon--download-simple" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    {% if is_authenticated %}
+    {% comment %} Owner-only collaborator management. Hidden until the rail
+    button (also owner-gated) opens it; the server re-checks ownership on
+    every endpoint regardless of this UI. {% endcomment %}
+    <div id="collab-panel" class="collab-panel" popover>
+      <div class="collab-panel__title">Collaborators</div>
+
+      <div class="collab-panel__section" data-collab-restrict>
+        <p class="collab-panel__hint">
+          Anyone with the link can currently edit. Restrict to named
+          collaborators only — they open the note with their account, no key
+          in the link.
+        </p>
+        <button class="btn-create" id="collab-restrict-btn" type="button">
+          Restrict to collaborators
+        </button>
+      </div>
+
+      <div class="collab-panel__section hidden" data-collab-manage>
+        <div class="collab-invite">
+          <input
+            id="collab-invite-input"
+            class="field__input"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]{8}"
+            maxlength="8"
+            placeholder="8-digit User ID"
+            aria-label="Collaborator User ID"
+          />
+          <button class="btn-create" id="collab-invite-btn" type="button">Invite</button>
+        </div>
+        <ul id="collab-list" class="collab-list"></ul>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if is_authenticated %}
+    {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" %}
+    {% endif %}
+
+    <footer class="footer">
+      <div class="footer__links">
+        <a href="{{ pass_site_url }}/" class="footer__nav-link">Share a Password</a>
+        <a href="{{ note_site_url }}/" class="footer__nav-link">Share a Note</a>
+        <a href="{{ site_url }}/about/" class="footer__nav-link">About</a>
+        <a href="https://github.com/dominicquaiser/proxima-red" class="footer__nav-link"
+          >Source Code</a
+        >
+        <div class="footer__right">
+          <a href="{{ site_url }}/imprint/">Imprint</a>
+          <span class="footer__sep"></span>
+          <a href="{{ site_url }}/privacy/">Privacy Policy</a>
+        </div>
+      </div>
+    </footer>
+
+    {% include "partials/_util_scripts.html" %}
+    <script src="{% static 'shared/js/crypto.js' %}" defer></script>
+    {% comment %} Collaboration (M4) only matters for signed-in users: the
+    account keypair unwraps document keys and the vault-key/unlock chain gates
+    it. Anonymous link visitors skip this whole stack. {% endcomment %}
+    {% if is_authenticated %}
+    <script src="{% static 'auth/js/auth-crypto.js' %}" defer></script>
+    <script src="{% static 'shared/js/keywrap.js' %}" defer></script>
+    <script src="{% static 'auth/js/unlock.js' %}" defer></script>
+    {% endif %}
+    <script src="{% static 'note/js/vendor/yjs.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/marked.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/purify.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/highlight.min.js' %}" defer></script>
+    <script src="{% static 'note/js/markdown.js' %}" defer></script>
+    <script src="{% static 'note/js/toolbar.js' %}" defer></script>
+    <script src="{% static 'note/js/editor-core.js' %}" defer></script>
+    <script src="{% static 'note/js/live-binding.js' %}" defer></script>
+    <script src="{% static 'note/js/live-sync.js' %}" defer></script>
+    <script src="{% static 'note/js/live-presence.js' %}" defer></script>
+    {% if is_authenticated %}
+    <script src="{% static 'note/js/live-collab.js' %}" defer></script>
+    {% endif %}
+    <script src="{% static 'note/js/live.js' %}" defer></script>
+  </body>
+</html>

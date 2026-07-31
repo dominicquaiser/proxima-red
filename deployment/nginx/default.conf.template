@@ -2,6 +2,13 @@
 # substituting only ${DOMAIN} (NGINX_ENVSUBST_FILTER=DOMAIN keeps nginx's own
 # $variables intact).
 
+# WebSocket upgrade handling for the live-note sync socket (/ws/): forward the
+# client's Upgrade intent, close the connection when there is none.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ""      close;
+}
+
 # Default servers: reject any request whose Host/SNI isn't one we serve before
 # it reaches Django.
 server {
@@ -61,7 +68,24 @@ server {
     # container restarts where the web service gets a new IP).
     resolver 127.0.0.11 valid=10s ipv6=off;
 
-    # Everything else is proxied to gunicorn.
+    # WebSockets (live-note sync). proxy_read/send_timeout must exceed the
+    # client's 20s awareness keepalive so idle-but-healthy sockets stay open.
+    location /ws/ {
+        set $upstream http://web:8000;
+        proxy_pass $upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+        proxy_redirect off;
+    }
+
+    # Everything else is proxied to the app server.
     location / {
         set $upstream http://web:8000;
         proxy_pass $upstream;

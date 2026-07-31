@@ -363,6 +363,42 @@
   }
 
   /**
+   * Resolve this origin's Base64 vault key, prompting for it only as a last
+   * resort. Tried in order: this tab's sessionStorage (the canonical slot);
+   * then, when a cross-tab `localStorageKey` is given, a key another tab on
+   * this origin mirrored there; then the in-place unlock modal
+   * (`window.SecureSessionUnlock`), which writes the derived key back to
+   * sessionStorage. Whenever a key is resolved and a `localStorageKey` was
+   * given, it is mirrored back so sibling tabs can reuse it.
+   *
+   * The localStorage step is the note vault's deliberate cross-tab softening
+   * of the strictly-per-tab passwd vault (see CLAUDE.md); callers that must
+   * stay per-tab (the passwd vault) pass no `localStorageKey`. This resolves
+   * the key only - callers still import it (and handle a null result as
+   * "locked"). No-op-safe when `SecureSessionUnlock` is absent (returns null).
+   * @param {Object} [options]
+   * @param {?string} [options.localStorageKey=null] Cross-tab mirror key, or
+   *   null/omitted to skip localStorage entirely (per-tab behaviour).
+   * @returns {Promise<string|null>} Base64 vault key, or null if still locked.
+   */
+  async function resolveVaultKeyBase64({ localStorageKey = null } = {}) {
+    let stored = sessionStorage.getItem(SECURE_SESSION_STORAGE_KEYS.masterKey);
+    if (!stored && localStorageKey) {
+      stored = localStorage.getItem(localStorageKey);
+    }
+    if (!stored && window.SecureSessionUnlock) {
+      const unlocked = await window.SecureSessionUnlock.ensureSecureSession();
+      if (unlocked) {
+        stored = sessionStorage.getItem(SECURE_SESSION_STORAGE_KEYS.masterKey);
+      }
+    }
+    if (stored && localStorageKey) {
+      localStorage.setItem(localStorageKey, stored);
+    }
+    return stored || null;
+  }
+
+  /**
    * Remove all secure-session material from sessionStorage (sign out, account
    * deletion, or clearing stale state before a fresh sign in).
    */
@@ -381,6 +417,7 @@
     storeVaultKey,
     establishSecureSession,
     consumeVaultKeyFromFragment,
+    resolveVaultKeyBase64,
     clearSecureSession,
     STORAGE_KEYS: SECURE_SESSION_STORAGE_KEYS,
     exportKeyToBase64,

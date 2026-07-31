@@ -2,13 +2,19 @@
 #
 # Merged automatically by `docker compose up`.
 #
-# Serves the dev stack over HTTPS with `runserver_plus` (autoreloading), bind-mounts
-# the source for live edits, and publishes port 8000. HTTPS is required to test the
-# real auth/vault topology: the session cookie is shared across the `pass.*`
-# subdomain (SESSION_COOKIE_DOMAIN) and the client-side Web Crypto API only runs in
-# a secure context. Create the local cert first (see docs/deployment.md under Development):
+# Serves the dev stack over HTTPS with uvicorn (autoreloading, ASGI - the only
+# dev server that carries the live-note WebSockets), bind-mounts the source for
+# live edits, and publishes port 8000. HTTPS is required to test the real
+# auth/vault topology: the session cookie is shared across the `pass.*`
+# subdomain (SESSION_COOKIE_DOMAIN) and the client-side Web Crypto API only runs
+# in a secure context. Create the local cert first (see docs/deployment.md under
+# Development):
 #
 #   mkcert -cert-file certs/dev.pem -key-file certs/dev-key.pem proxima.test pass.proxima.test note.proxima.test
+#
+# Static files are served by the ASGIStaticFilesHandler branch in config/asgi.py
+# (DEBUG only). The channel layer is in-memory (base.py) - fine for the
+# single-process dev server, no dev redis needed.
 #
 # The db service (from `docker-compose.yml`) provides Postgres parity with
 # production; DATABASE_URL in .env points web at it.
@@ -24,8 +30,8 @@ services:
       # so the bind-mounted source tree stays clean.
       SKIP_COLLECTSTATIC: "1"
     command: >
-      python manage.py runserver_plus 0.0.0.0:8000
-      --cert-file certs/dev.pem --key-file certs/dev-key.pem
+      uvicorn config.asgi:application --host 0.0.0.0 --port 8000
+      --ssl-certfile certs/dev.pem --ssl-keyfile certs/dev-key.pem --reload
     volumes:
       - .:/app
     ports:

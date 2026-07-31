@@ -5,46 +5,19 @@ error handlers (wired up as ``handler400``/``403``/``404``/``500`` in
 """
 
 from datetime import date
-from urllib.parse import urlparse
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
+# Host classification lives in apps.core.hosts (a leaf module) so tool apps
+# can host-gate their own views without importing this dispatcher module.
+from .hosts import is_main_site, is_note_site, is_pass_subdomain
+
 
 def pgp_key(request: HttpRequest) -> HttpResponse:
     key = (settings.BASE_DIR / "static" / "pgp-key.asc").read_text()
     return HttpResponse(key, content_type="application/pgp-keys")
-
-
-def _is_pass_subdomain(request: HttpRequest) -> bool:
-    """Return True when the request arrives on the pass.proxima.red subdomain."""
-    host = request.get_host().split(":")[0]
-    return host == (urlparse(settings.PASS_SITE_URL).hostname or "")
-
-
-def _is_note_site(request: HttpRequest) -> bool:
-    """Return True when the request arrives on the note.proxima.red subdomain.
-
-    The pass subdomain wins ties: in environments where all site URLs share a
-    host (local dev without env vars, the test suite), requests keep resolving
-    to the passwd tool exactly as they did before the note tool existed.
-    """
-    host = request.get_host().split(":")[0]
-    note_host = urlparse(settings.NOTE_SITE_URL).hostname or ""
-    return host == note_host and not _is_pass_subdomain(request)
-
-
-def _is_main_site(request: HttpRequest) -> bool:
-    """Return True when the request arrives on the main proxima.red host.
-
-    Excludes the pass subdomain so that, in environments where both sites share
-    a host (local dev, the test suite), the request resolves to the share form
-    rather than the landing page.
-    """
-    host = request.get_host().split(":")[0]
-    main_host = urlparse(settings.SITE_URL).hostname or ""
-    return host == main_host and not _is_pass_subdomain(request)
 
 
 def index(request: HttpRequest) -> HttpResponse:
@@ -61,9 +34,9 @@ def index(request: HttpRequest) -> HttpResponse:
     which reverses to ``passwd:create`` (``/``) and must reach the JSON
     endpoint regardless of which host the vault was opened on.
     """
-    if request.method in ("GET", "HEAD") and _is_main_site(request):
+    if request.method in ("GET", "HEAD") and is_main_site(request):
         return render(request, "core/index.html")
-    if _is_note_site(request):
+    if is_note_site(request):
         # Imported here to avoid a core -> note import at module load.
         from apps.note.views import CreateNoteView
 
@@ -82,7 +55,7 @@ def retrieve_dispatch(request: HttpRequest, pk) -> HttpResponse:
     reversible. A UUID opened on the wrong host 404s in the dispatched view,
     which is correct - the two tools' share spaces are separate.
     """
-    if _is_note_site(request):
+    if is_note_site(request):
         # Imported here to avoid a core -> note import at module load.
         from apps.note.views import RetrieveNoteView
 
@@ -93,8 +66,28 @@ def retrieve_dispatch(request: HttpRequest, pk) -> HttpResponse:
     return RetrieveShareView.as_view()(request, pk=pk)
 
 
+def vault_dispatch(request: HttpRequest) -> HttpResponse:
+    """``/vault/``: the note vault on the note subdomain, the passwd vault
+    elsewhere.
+
+    Same host-dispatch arrangement as ``index``/``retrieve_dispatch``: core
+    claims the path first (see config/urls.py) while both tools keep their own
+    ``vault/`` route reversible. The vaults' JSON APIs need no dispatch — their
+    literal paths (``/vault-data/`` vs ``/vault/index/`` etc.) don't collide.
+    """
+    if is_note_site(request):
+        # Imported here to avoid a core -> note import at module load.
+        from apps.note.views import NoteVaultView
+
+        return NoteVaultView.as_view()(request)
+    # Imported here to avoid a core -> passwd import at module load.
+    from apps.passwd.views import VaultView
+
+    return VaultView.as_view()(request)
+
+
 def robots_txt(request: HttpRequest) -> HttpResponse:
-    if _is_pass_subdomain(request):
+    if is_pass_subdomain(request):
         lines = [
             "User-agent: *",
             "Disallow: /vault/",
@@ -104,11 +97,13 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
             "",
             f"Sitemap: {settings.PASS_SITE_URL}/sitemap.xml",
         ]
-    elif _is_note_site(request):
-        # No Disallow lines: retrieve pages are unguessable UUIDs and carry a
-        # noindex meta tag themselves.
+    elif is_note_site(request):
+        # Retrieve pages need no Disallow: they are unguessable UUIDs and
+        # carry a noindex meta tag themselves. /vault/ covers the vault page
+        # and every vault JSON API beneath it.
         lines = [
             "User-agent: *",
+            "Disallow: /vault/",
             "",
             f"Sitemap: {settings.NOTE_SITE_URL}/sitemap.xml",
         ]
@@ -126,14 +121,14 @@ def robots_txt(request: HttpRequest) -> HttpResponse:
 
 def sitemap(request: HttpRequest) -> HttpResponse:
     lastmod = date.today().isoformat()
-    if _is_pass_subdomain(request):
+    if is_pass_subdomain(request):
         return render(
             request,
             "core/sitemap_pass.xml",
             {"site_url": settings.PASS_SITE_URL, "lastmod": lastmod},
             content_type="application/xml",
         )
-    if _is_note_site(request):
+    if is_note_site(request):
         return render(
             request,
             "core/sitemap_note.xml",

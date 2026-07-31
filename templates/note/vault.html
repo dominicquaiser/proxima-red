@@ -1,0 +1,351 @@
+{% load static %}
+<!doctype html>
+{% comment %}
+The note vault: an authenticated file manager + editor. Standalone document
+like passwd/vault.html and note/editor.html — the fixed full-bleed shell
+can't extend base.html. The page renders no ciphertext: vault.js fetches the
+encrypted index and notes only after the vault key is established (fragment
+handoff from sign-in, sessionStorage, or the unlock modal).
+{% endcomment %}
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vault · note · proxima·red</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" type="image/svg+xml" href="{% static 'icons/note-pencil-favicon.svg' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/shared.css' %}" />
+    <link rel="stylesheet" href="{% static 'note/css/vault.css' %}" />
+  </head>
+  <body class="note-editor note-vault">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <noscript>
+      <div class="noscript-warning" role="alert">
+        <strong>JavaScript is required.</strong> Vault notes are decrypted in your browser — the
+        server only holds ciphertext it cannot read, so nothing can be shown without JavaScript.
+      </div>
+    </noscript>
+
+    <div id="notification-container"></div>
+
+    <!-- ════ Sidebar: file manager ════ -->
+    <aside class="sidebar" id="vault-sidebar">
+      <div class="sidebar__top">
+        <a href="{{ note_site_url }}/" class="header__logo">
+          proxima<span class="header__logo-dot">·</span>red
+        </a>
+        <div class="sidebar__top-actions">
+          <button class="tool" type="button" id="new-note-btn" title="New note">
+            <span class="nicon nicon--plus" aria-hidden="true"></span>
+          </button>
+          <button class="tool" type="button" id="sidebar-collapse-btn" title="Collapse sidebar">
+            <span class="nicon nicon--sidebar-simple" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar__search">
+        <span class="nicon nicon--magnifying-glass" aria-hidden="true"></span>
+        <input type="text" id="vault-search" placeholder="Search notes..." aria-label="Search notes" />
+      </div>
+
+      <div class="sidebar__label">
+        <span>// Folders</span>
+        <button class="tool" type="button" id="new-folder-btn" title="New folder">
+          <span class="nicon nicon--folder" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <nav class="tree" id="vault-tree" aria-label="Note folders"></nav>
+
+      <div class="sidebar__account">
+        <a href="{{ site_url }}/auth/account/" class="header__btn header__btn--outline">Account</a>
+        <form method="post" action="{% url 'auth:signout' %}">
+          {% csrf_token %}
+          <button class="tool" type="submit" title="Sign out">
+            <span class="nicon nicon--sign-out" aria-hidden="true"></span>
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <!-- ════ Topbar: breadcrumb + EDIT/PREVIEW tabs ════ -->
+    <header class="topbar">
+      <button class="tool topbar__sidebar-toggle" type="button" id="sidebar-open-btn" title="Open sidebar">
+        <span class="nicon nicon--sidebar-simple" aria-hidden="true"></span>
+      </button>
+
+      <div class="topbar__crumb" id="vault-crumb" aria-live="polite"></div>
+
+      <div class="editor-tabs" role="tablist" aria-label="Editor mode">
+        <button
+          class="editor-tabs__item editor-tabs__item--active"
+          id="tab-edit"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="note-content"
+        >
+          Edit
+        </button>
+        <button
+          class="editor-tabs__item"
+          id="tab-preview"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="note-preview"
+        >
+          Preview
+        </button>
+      </div>
+    </header>
+
+    <!-- ════ Editor surface ════ -->
+    <main
+      id="main-content"
+      class="editor"
+      data-index-url="{% url 'note:vault_index' %}"
+      data-notes-url="{% url 'note:vault_notes' %}"
+      data-note-url-base="{% url 'note:vault_note' dummy_note_id %}"
+      data-note-delete-url-base="{% url 'note:vault_note_delete' dummy_note_id %}"
+      data-create-url="{% url 'note:create' %}"
+      data-retrieve-url-base="{{ retrieval_url_base }}"
+      data-live-create-url="{% url 'note:live_create' %}"
+      data-live-url-base="{{ live_url_base }}"
+      data-dummy-note-id="{{ dummy_note_id }}"
+    >
+      <div class="editor__doc">
+        <textarea
+          id="note-content"
+          class="editor__text"
+          placeholder="# Write your markdown here"
+          spellcheck="false"
+          aria-label="Note content"
+        ></textarea>
+        <span id="note-caret" class="editor__caret" aria-hidden="true"></span>
+        <div
+          id="note-preview"
+          class="md-render hidden"
+          role="tabpanel"
+          aria-label="Preview"
+        ></div>
+      </div>
+    </main>
+
+    <div class="meta" id="note-meta" aria-hidden="true"></div>
+
+    <!-- ════ Tool rail ════ -->
+    <nav class="rail" aria-label="Formatting toolbar">
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="bold" title="Bold">
+          <span class="nicon nicon--text-b" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="italic" title="Italic">
+          <span class="nicon nicon--text-italic" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="strikethrough" title="Strikethrough">
+          <span class="nicon nicon--text-strikethrough" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="h1" title="Heading 1">
+          <span class="nicon nicon--text-h-one" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h2" title="Heading 2">
+          <span class="nicon nicon--text-h-two" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h3" title="Heading 3">
+          <span class="nicon nicon--text-h-three" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h4" title="Heading 4">
+          <span class="nicon nicon--text-h-four" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h5" title="Heading 5">
+          <span class="nicon nicon--text-h-five" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="h6" title="Heading 6">
+          <span class="nicon nicon--text-h-six" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="bullets" title="Bullet list">
+          <span class="nicon nicon--list-bullets" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="numbers" title="Numbered list">
+          <span class="nicon nicon--list-numbers" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="tasks" title="Task list">
+          <span class="nicon nicon--list-checks" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="quote" title="Blockquote">
+          <span class="nicon nicon--quotes" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="code" title="Code block">
+          <span class="nicon nicon--code" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="undo" title="Undo">
+          <span class="nicon nicon--arrow-counter-clockwise" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="redo" title="Redo">
+          <span class="nicon nicon--arrow-clockwise" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="rail__spacer"></div>
+
+      <div class="rail__group">
+        <button class="tool" type="button" data-action="save" id="save-note-btn" title="Save to vault (Ctrl+S)">
+          <span class="nicon nicon--floppy-disk" aria-hidden="true"></span>
+        </button>
+        <button class="tool" type="button" data-action="download" title="Download .md">
+          <span class="nicon nicon--download-simple" aria-hidden="true"></span>
+        </button>
+        <button
+          class="tool tool--accent"
+          type="button"
+          title="Create share link"
+          popovertarget="share-pop"
+          aria-haspopup="menu"
+        >
+          <span class="nicon nicon--export" aria-hidden="true"></span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ════ Share popover (creates a regular SharedNote snapshot) ════ -->
+    <div id="share-pop" popover class="share-pop">
+      <div id="share-menu">
+        <div class="share-pop__title">Create share link</div>
+
+        <span class="share-pop__label" id="note-expiry-label">Expires after</span>
+        <div class="share-expiry" role="radiogroup" aria-labelledby="note-expiry-label">
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1h"
+              value="1hour"
+            />
+            <label class="share-expiry__label" for="note-expiry-1h">1 hour</label>
+          </div>
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1d"
+              value="1day"
+              checked
+            />
+            <label class="share-expiry__label" for="note-expiry-1d">1 day</label>
+          </div>
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1w"
+              value="1week"
+            />
+            <label class="share-expiry__label" for="note-expiry-1w">1 week</label>
+          </div>
+          <div>
+            <input
+              class="share-expiry__option"
+              type="radio"
+              name="note-expiry"
+              id="note-expiry-1mo"
+              value="1month"
+            />
+            <label class="share-expiry__label" for="note-expiry-1mo">1 month</label>
+          </div>
+        </div>
+
+        <button class="share-opt" type="button" id="share-encrypted-btn">
+          <span class="nicon nicon--eye share-opt__icon" aria-hidden="true"></span>
+          <span class="share-opt__text">
+            <span class="share-opt__label">Read-only link</span>
+            <span class="share-opt__desc"
+              >Recipients can view but not edit. End-to-end encrypted.</span
+            >
+          </span>
+        </button>
+
+        <button class="share-opt" type="button" id="share-editable-btn">
+          <span class="nicon nicon--pencil-simple-line share-opt__icon" aria-hidden="true"></span>
+          <span class="share-opt__text">
+            <span class="share-opt__label">Editable link</span>
+            <span class="share-opt__desc"
+              >Anyone with the link can edit — changes sync automatically. End-to-end
+              encrypted.</span
+            >
+          </span>
+        </button>
+
+        <div class="share-pop__divider"></div>
+
+        <button class="share-opt share-opt--warn" type="button" id="share-plain-btn">
+          <span class="nicon nicon--lock-simple-open share-opt__icon" aria-hidden="true"></span>
+          <span class="share-opt__text">
+            <span class="share-opt__label">Plain-text link</span>
+            <span class="share-opt__desc"
+              >No encryption — readable by anyone with the link, and by the server. Use only for
+              non-sensitive notes.</span
+            >
+          </span>
+        </button>
+      </div>
+
+      <div id="share-result" class="share-pop__result hidden">
+        <div class="share-pop__title">Share link created</div>
+        <div class="share-pop__link-row">
+          <input
+            id="share-link"
+            class="share-pop__link"
+            type="text"
+            readonly
+            aria-label="Share link"
+          />
+          <button class="share-pop__copy" type="button" id="copy-link-btn" title="Copy link">
+            <span class="nicon nicon--clipboard" aria-hidden="true"></span>
+          </button>
+        </div>
+        <p class="share-pop__hint">
+          Read-only and plain-text links are a snapshot of this note; editable links start from
+          it and then live their own life. For encrypted links the key after <code>#</code>
+          never reaches the server — anyone with the full link can access the note until it
+          expires.
+        </p>
+      </div>
+    </div>
+
+    <!-- ════ Tree row context menu (filled by vault.js) ════ -->
+    <div id="ctx-menu" class="ctx-menu hidden" role="menu"></div>
+
+    {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" %}
+
+    {% include "partials/_util_scripts.html" %} {% include "partials/_auth_scripts.html" %}
+    <script src="{% static 'auth/js/unlock.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/yjs.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/marked.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/purify.min.js' %}" defer></script>
+    <script src="{% static 'note/js/vendor/highlight.min.js' %}" defer></script>
+    <script src="{% static 'note/js/markdown.js' %}" defer></script>
+    <script src="{% static 'note/js/toolbar.js' %}" defer></script>
+    <script src="{% static 'note/js/editor-core.js' %}" defer></script>
+    <script src="{% static 'note/js/share.js' %}" defer></script>
+    <script src="{% static 'note/js/vault-index.js' %}" defer></script>
+    <script src="{% static 'note/js/vault.js' %}" defer></script>
+  </body>
+</html>

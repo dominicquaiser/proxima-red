@@ -917,19 +917,14 @@
       // scrub it from the URL before anything else reads location.
       window.AuthCrypto.consumeVaultKeyFromFragment();
 
-      let storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
+      // Resolve the vault key from this tab's session, falling back to the
+      // in-place unlock modal. No localStorage mirror: the passwd vault is
+      // strictly per-tab, so a second tab (or one opened after the sign-in tab
+      // closed) always re-prompts rather than forcing a full sign-in.
+      const storedKeyBase64 = await window.AuthCrypto.resolveVaultKeyBase64();
       if (!storedKeyBase64) {
-        // This tab has no derived key (e.g. a second tab, or one opened after the
-        // sign-in tab closed): the key lives in per-tab sessionStorage and can't
-        // be shared. Offer an in-place unlock instead of forcing a full sign-in.
-        const unlocked = window.SecureSessionUnlock
-          ? await window.SecureSessionUnlock.ensureSecureSession()
-          : false;
-        if (!unlocked) {
-          disableVault("This tab is locked. Reload the page to unlock your vault.");
-          return;
-        }
-        storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
+        disableVault("This tab is locked. Reload the page to unlock your vault.");
+        return;
       }
 
       try {

@@ -10,4 +10,4 @@ COMPOSE_EXTRA = -f docker-compose.host.yml
 
 # Start only these services. The bundled nginx/certbot are intentionally omitted
 # (the host's nginx owns ports 80/443 and terminates TLS).
-SERVICES = db redis web cron staticproxy
+SERVICES = db redis redis-channels web cron staticproxy

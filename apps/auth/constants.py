@@ -21,14 +21,37 @@ AUTH_SECRET_LENGTH_BYTES: Final[int] = 32  # PBKDF2-derived authentication secre
 # Form validation
 ACCOUNT_DELETION_CONFIRMATION_TEXT: Final[str] = "DELETE"
 
+# ── Collaboration keypair (named collaborators on live notes) ───────────────
+# Cross-runtime contract with static/shared/js/keywrap.js: the account keypair
+# is ECDH P-256, whose SPKI public key is exactly 91 bytes. The PKCS8 private
+# key (~138 bytes) is stored AES-GCM-encrypted under the VAULT key (so the
+# server holds it but can never use it); the cap leaves headroom without
+# accepting absurd blobs. The IV cap matches the note app's MAX_IV_LENGTH
+# convention (12 GCM bytes -> 16 Base64 chars; 24 allows headroom).
+PUBLIC_KEY_LENGTH_BYTES: Final[int] = 91
+MAX_PRIVATE_KEY_BLOB_LENGTH: Final[int] = 512
+MAX_KEYPAIR_IV_LENGTH: Final[int] = 24
+
 # Rate limiting configuration
 RATE_LIMIT_SIGNUP: Final[str] = "5/m"  # 5 signups per minute per IP
 RATE_LIMIT_SIGNIN: Final[str] = "10/m"  # 10 signin attempts per minute per IP
 RATE_LIMIT_ACCOUNT: Final[str] = "20/m"  # 20 account operations per minute per IP
+RATE_LIMIT_KEYPAIR: Final[str] = "20/m"  # keypair reads/creates per minute per IP
+RATE_LIMIT_PUBKEY_LOOKUP: Final[str] = "30/m"  # invite-flow lookups per minute per IP
 
 # Session keys
 SESSION_KEY_USER_ID: Final[str] = "user_id"
 SESSION_KEY_AUTHENTICATED: Final[str] = "authenticated"
+
+# Vault destinations the signin flow may redirect to, selected by the vetted
+# ``tool`` request parameter (see ``views.vault_url``). Auth is canonical on
+# the main site, so each tool's signin links carry its own tool key; anything
+# not in this allowlist falls back to the default (fail closed — the
+# parameter is user input and must never be interpolated into a redirect).
+VAULT_TOOL_PASS: Final[str] = "pass"
+VAULT_TOOL_NOTE: Final[str] = "note"
+VAULT_TOOLS: Final[tuple[str, ...]] = (VAULT_TOOL_PASS, VAULT_TOOL_NOTE)
+DEFAULT_VAULT_TOOL: Final[str] = VAULT_TOOL_PASS
 
 # Template paths
 TEMPLATE_SIGNUP: Final[str] = "auth/signup.html"
@@ -58,6 +81,14 @@ ERROR_ACCOUNT_DELETION_FAILED: Final[str] = (
 )
 ERROR_NOT_AUTHENTICATED: Final[str] = "Not authenticated"
 ERROR_INVALID_SESSION: Final[str] = "Invalid session"
+ERROR_KEYPAIR_EXISTS: Final[str] = (
+    "A collaboration keypair already exists for this account."
+)
+ERROR_KEYPAIR_INVALID: Final[str] = "Invalid keypair data."
+ERROR_PUBKEY_NOT_FOUND: Final[str] = (
+    "No collaboration key was found for that User ID. The user may not have "
+    "an account, or has not enabled collaboration yet."
+)
 
 # Success messages
 SUCCESS_ACCOUNT_CREATED: Final[str] = "Account created! Your User ID is: {user_id}"

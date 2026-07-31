@@ -45,6 +45,14 @@ class CreateNoteViewTests(TestCase):
         self.assertContains(response, "data-retrieve-url-base")
         self.assertContains(response, "00000000-0000-0000-0000-000000000000")
 
+    def test_editor_context_contains_live_share_data(self):
+        """The editable-link flow needs the live create URL and URL base."""
+        response = self.client.get("/", **NOTE_HOST)
+        self.assertContains(response, "data-live-create-url")
+        self.assertContains(response, "data-live-url-base")
+        self.assertContains(response, "/live/00000000-0000-0000-0000-000000000000/")
+        self.assertContains(response, 'id="share-editable-btn"')
+
     def test_editor_renders_noscript_plain_text_form(self):
         """The no-JS fallback form (plain-text default + expiry select) is in
         the editor markup so the page degrades without JavaScript."""

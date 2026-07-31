@@ -3,11 +3,22 @@
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
-from apps.note.constants import MAX_NOTE_CONTENT_LENGTH
+from apps.note.constants import (
+    MAX_LIVE_SNAPSHOT_LENGTH,
+    MAX_LIVE_UPDATE_LENGTH,
+    MAX_NOTE_CONTENT_LENGTH,
+    MAX_VAULT_INDEX_LENGTH,
+    MAX_VAULT_NOTE_CONTENT_LENGTH,
+)
 from apps.note.validators import (
     validate_base64_content,
+    validate_live_snapshot,
+    validate_live_update_payload,
     validate_note_content,
     validate_optional_iv,
+    validate_required_iv,
+    validate_vault_index_data,
+    validate_vault_note_content,
 )
 
 
@@ -67,3 +78,108 @@ class ValidateOptionalIvTests(SimpleTestCase):
     def test_rejects_over_length(self):
         with self.assertRaises(ValidationError):
             validate_optional_iv("A" * 32)
+
+
+class ValidateRequiredIvTests(SimpleTestCase):
+    """validate_required_iv: like the optional rule but empty is rejected."""
+
+    def test_accepts_valid_12_byte_iv(self):
+        validate_required_iv("AAAAAAAAAAAAAAAA")
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValidationError) as ctx:
+            validate_required_iv("")
+        self.assertEqual(ctx.exception.code, "missing_iv")
+
+    def test_rejects_wrong_byte_length(self):
+        with self.assertRaises(ValidationError):
+            validate_required_iv("AAAA")
+
+    def test_rejects_non_base64(self):
+        with self.assertRaises(ValidationError):
+            validate_required_iv("!!!!not-base64!!")
+
+
+class ValidateVaultNoteContentTests(SimpleTestCase):
+    """validate_vault_note_content: presence, cap, and strict Base64."""
+
+    def test_accepts_base64(self):
+        validate_vault_note_content("ZW5jcnlwdGVk")
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValidationError):
+            validate_vault_note_content("")
+
+    def test_rejects_raw_markdown(self):
+        """Vault notes are always ciphertext; raw markdown must not pass."""
+        with self.assertRaises(ValidationError):
+            validate_vault_note_content("# Heading, not base64!")
+
+    def test_rejects_over_cap(self):
+        with self.assertRaises(ValidationError):
+            validate_vault_note_content(
+                "AAAA" * (MAX_VAULT_NOTE_CONTENT_LENGTH // 4 + 1)
+            )
+
+    def test_accepts_base64_at_cap(self):
+        validate_vault_note_content("AAAA" * (MAX_VAULT_NOTE_CONTENT_LENGTH // 4))
+
+
+class ValidateVaultIndexDataTests(SimpleTestCase):
+    """validate_vault_index_data: presence, cap, and strict Base64."""
+
+    def test_accepts_base64(self):
+        validate_vault_index_data("ZW5jcnlwdGVk")
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValidationError):
+            validate_vault_index_data("")
+
+    def test_rejects_non_base64(self):
+        with self.assertRaises(ValidationError):
+            validate_vault_index_data("{json: not encrypted}")
+
+    def test_rejects_over_cap(self):
+        with self.assertRaises(ValidationError):
+            validate_vault_index_data("AAAA" * (MAX_VAULT_INDEX_LENGTH // 4 + 1))
+
+
+class ValidateLiveSnapshotTests(SimpleTestCase):
+    """validate_live_snapshot: presence, cap, and strict Base64."""
+
+    def test_accepts_base64(self):
+        validate_live_snapshot("ZW5jcnlwdGVk")
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValidationError):
+            validate_live_snapshot("")
+
+    def test_rejects_non_base64(self):
+        with self.assertRaises(ValidationError):
+            validate_live_snapshot("not a yjs snapshot!")
+
+    def test_rejects_over_cap(self):
+        with self.assertRaises(ValidationError):
+            validate_live_snapshot("AAAA" * (MAX_LIVE_SNAPSHOT_LENGTH // 4 + 1))
+
+    def test_accepts_base64_at_cap(self):
+        validate_live_snapshot("AAAA" * (MAX_LIVE_SNAPSHOT_LENGTH // 4))
+
+
+class ValidateLiveUpdatePayloadTests(SimpleTestCase):
+    """validate_live_update_payload: presence, cap, and strict Base64."""
+
+    def test_accepts_base64(self):
+        validate_live_update_payload("ZW5jcnlwdGVk")
+
+    def test_rejects_empty(self):
+        with self.assertRaises(ValidationError):
+            validate_live_update_payload("")
+
+    def test_rejects_non_base64(self):
+        with self.assertRaises(ValidationError):
+            validate_live_update_payload("not a yjs update!")
+
+    def test_rejects_over_cap(self):
+        with self.assertRaises(ValidationError):
+            validate_live_update_payload("AAAA" * (MAX_LIVE_UPDATE_LENGTH // 4 + 1))

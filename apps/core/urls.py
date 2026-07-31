@@ -12,6 +12,10 @@ urlpatterns = [
     path("about/", views.about, name="about"),
     path("imprint/", views.imprint, name="imprint"),
     path("privacy/", views.privacy, name="privacy"),
+    # Host dispatcher for the shared /vault/ page (note vault vs. passwd
+    # vault); claimed here for the same reason core claims "/". The vault
+    # JSON APIs have distinct paths and need no dispatch.
+    path("vault/", views.vault_dispatch, name="vault_dispatch"),
     # Host dispatcher for the shared /<uuid>/ retrieve URL space (note vs.
     # passwd); claimed here for the same reason core claims "/" (see
     # config/urls.py).

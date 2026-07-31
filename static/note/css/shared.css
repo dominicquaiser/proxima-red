@@ -1,3 +1,12 @@
+/*
+ * Shared note stylesheet.
+ *
+ * Loaded by the standalone editor, live editor, retrieve view, and vault.
+ * Keep page-specific layout overrides in public.css or vault.css; this file
+ * owns the reusable editor shell, toolbar primitives, icon masks, share
+ * popover, markdown renderer, and utility classes.
+ */
+
 body.note-editor {
   --rail-width: 42px;
   --bar-height: 48px;
@@ -5,27 +14,7 @@ body.note-editor {
   overflow: hidden;
 }
 
-/* The standalone editor pins the shared footer to the viewport bottom (the
-   site-wide .footer participates in normal flow). Scoped to the editor page
-   so the retrieve page keeps the default layout. */
-body.note-editor .footer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 100;
-  height: var(--bar-height);
-  display: flex;
-  align-items: center;
-  background: var(--color-pitch-black);
-  padding: 0 28px;
-}
-
-/* The footer is a flex container here, so stretch the links row to full width
-   or .footer__right's margin-left:auto has no free space to push into. */
-body.note-editor .footer__links {
-  flex: 1;
-}
+/* Edit / preview segmented control. */
 
 .editor-tabs {
   position: absolute;
@@ -82,6 +71,8 @@ body.note-editor .footer__links {
 .editor-tabs__item:not(.editor-tabs__item--active):hover {
   color: var(--color-driftwood);
 }
+
+/* Formatting rail and shared icon buttons. */
 
 .rail {
   position: fixed;
@@ -152,7 +143,13 @@ body.note-editor .footer__links {
   background: var(--color-brick-red);
 }
 
-/* Phosphor icons use currentColor through CSS masks. */
+/*
+ * Phosphor icons use currentColor through CSS masks.
+ *
+ * These classes only define glyph sources; size and color should come from
+ * the component that uses .nicon.
+ */
+
 .nicon {
   display: inline-block;
   width: 18px;
@@ -267,6 +264,11 @@ body.note-editor .footer__links {
   -webkit-mask-image: url("/static/icons/phosphor/pencil-simple-line.svg");
 }
 
+.nicon--key {
+  mask-image: url("/static/icons/phosphor/key.svg");
+  -webkit-mask-image: url("/static/icons/phosphor/key.svg");
+}
+
 .nicon--lock-simple-open {
   mask-image: url("/static/icons/phosphor/lock-simple-open.svg");
   -webkit-mask-image: url("/static/icons/phosphor/lock-simple-open.svg");
@@ -326,7 +328,6 @@ body.note-editor .footer__links {
   word-break: break-word;
   tab-size: 2;
   caret-color: var(--color-coral-red);
-  /* editor.js grows the textarea; the outer editor owns scrolling. */
 }
 
 .editor__text--custom-caret {
@@ -359,6 +360,7 @@ body.note-editor .footer__links {
 }
 
 @keyframes editor-caret-blink {
+
   0%,
   45% {
     opacity: 1;
@@ -395,74 +397,14 @@ body.note-editor .footer__links {
   color: var(--color-coral-red);
 }
 
-.editor__noscript-share {
-  display: none;
-  padding-top: 24px;
-  margin-top: 24px;
-  border-top: 1px solid var(--color-oil-slick);
+.meta-stack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.editor__noscript-hint {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-warm-slate);
-  margin-bottom: 14px;
-}
-
-.editor__noscript-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-warm-slate);
-  margin-bottom: 6px;
-}
-
-.editor__noscript-controls {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-}
-
-.editor__noscript-controls .share-expiry {
-  margin: 0;
-  grid-template-columns: repeat(4, minmax(64px, 1fr));
-}
-
-.editor__noscript-submit {
-  font-family: var(--font-primary);
-  font-size: 13px;
-  letter-spacing: 0.02em;
-  color: var(--color-parchment);
-  background: var(--color-brick-red);
-  border: none;
-  border-radius: 3px;
-  padding: 9px 18px;
-  cursor: pointer;
-  transition: background 0.14s;
-}
-
-.editor__noscript-submit:hover {
-  background: var(--color-coral-red);
-}
-
-.editor__notice {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 24px 32px 28px;
-  font-size: 13px;
-  color: var(--color-wheat);
-}
-
-.editor__notice--error {
-  color: var(--color-coral-red);
-}
-
-.editor__notice a {
-  color: var(--color-coral-red);
-  word-break: break-all;
+.meta__sep {
+  color: var(--color-muddy-brown);
 }
 
 .share-pop {
@@ -528,8 +470,6 @@ body.note-editor .footer__links {
   position: relative;
 }
 
-/* Background lives on a pseudo-element so the push-in scales only the
-   fill, leaving the icon + text at rest. */
 .share-opt::before {
   content: "";
   position: absolute;
@@ -691,8 +631,6 @@ body.note-editor .footer__links {
   padding: 6px 8px 8px;
 }
 
-/* The result block already supplies the horizontal padding, so drop the
-   title's own side padding here to keep it flush with the link row / hint. */
 .share-pop__result .share-pop__title {
   padding-left: 0;
   padding-right: 0;
@@ -749,10 +687,6 @@ body.note-editor .footer__links {
 @media (max-width: 768px) {
   body.note-editor {
     --editor-tabs-offset-x: -38px;
-  }
-
-  body.note-editor .footer {
-    display: none;
   }
 
   body.note-editor .editor,
@@ -879,11 +813,14 @@ body.note-editor .footer__links {
   border-radius: 0;
 }
 
-/* highlight.js token colors, mapped onto the gruvbox palette. The highlighter
-   adds `class="hljs language-x"` + token <span>s to `pre code` AFTER
-   sanitization; only the coloring lives here (no background/padding), so the
-   hairline-outline <pre> above is preserved. Coral-red stays reserved for
-   links, so keywords use amber-gold instead of gruvbox's usual red. */
+/*
+ * highlight.js token colors mapped onto the gruvbox palette.
+ *
+ * The highlighter adds `class="hljs language-x"` and token spans to `pre code`
+ * after sanitization. Only coloring lives here so the <pre> background and
+ * padding above remain authoritative. Coral red stays reserved for links, so
+ * keywords use amber gold instead of gruvbox's usual red.
+ */
 .md-render .hljs-comment,
 .md-render .hljs-quote {
   color: var(--color-warm-slate);
@@ -996,198 +933,8 @@ body.note-editor .footer__links {
   max-width: 100%;
 }
 
-.note-view {
-  display: block;
-  width: 100%;
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 96px 32px 80px;
-}
-
-html:has(.note-view) {
-  scroll-padding-top: 72px;
-}
-
-.note-view__banner {
-  background: var(--color-brick-red-whisper);
-  color: var(--color-wheat);
-  border-radius: 4px;
-  padding: 12px 16px;
-  font-size: 13px;
-  line-height: 1.5;
-  margin-bottom: 28px;
-}
-
-.note-view__doc {
-  margin: 0 0 32px;
-}
-
-/* Preserve line breaks when JavaScript is unavailable to render Markdown. */
-.note-view__plain {
-  font-family: var(--font-primary);
-  font-size: 14px;
-  line-height: 1.7;
-  letter-spacing: 0.01em;
-  color: var(--color-clay);
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0 0 32px;
-}
-
-.note-view__plain-meta {
-  margin-top: 40px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-oil-slick);
-  font-size: 12px;
-  color: var(--color-muddy-brown);
-}
-
-.note-view__status {
-  font-size: 13px;
-  color: var(--color-warm-slate);
-}
-
-.note-view__error-title {
-  color: var(--color-coral-red);
-  font-size: 18px;
-  margin-bottom: 8px;
-}
-
-.note-view__footer {
-  margin-top: 40px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-oil-slick);
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  color: var(--color-muddy-brown);
-}
-
-.note-view__action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-primary);
-  font-size: 12px;
-  color: var(--color-warm-slate);
-  background: none;
-  border: 1px solid var(--color-oil-slick);
-  border-radius: 3px;
-  padding: 5px 10px;
-  cursor: pointer;
-  transition:
-    color 0.14s,
-    border-color 0.14s;
-}
-
-.note-view__action:hover {
-  color: var(--color-wheat);
-  border-color: var(--color-warm-slate);
-}
-
-.note-view__action.copied {
-  color: var(--color-olive-green);
-  border-color: var(--color-olive-green);
-}
+/* Utilities. */
 
 .hidden {
   display: none !important;
-}
-
-.res {
-  text-align: center;
-}
-
-.res__icon {
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 20px;
-  background-color: var(--color-coral-red);
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-}
-
-.res__icon--error {
-  -webkit-mask-image: url("/static/icons/phosphor/calendar-slash.svg");
-  mask-image: url("/static/icons/phosphor/calendar-slash.svg");
-}
-
-.res__message {
-  font-family: var(--font-primary);
-  font-size: 13px;
-  color: var(--color-clay);
-  line-height: 1.6;
-  letter-spacing: 0.01em;
-  max-width: 420px;
-  margin: 0 auto 24px;
-}
-
-.res__message strong {
-  color: var(--color-wheat);
-  font-weight: 600;
-}
-
-.res__btn {
-  display: block;
-  width: 100%;
-  text-align: center;
-  text-decoration: none;
-  background: var(--color-brick-red);
-  border: none;
-  border-radius: 3px;
-  color: var(--color-parchment);
-  padding: 13px;
-  font-family: var(--font-primary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition:
-    background 0.2s ease,
-    transform 0.2s ease;
-}
-
-.res__btn:hover {
-  background: var(--color-coral-red);
-}
-
-.res__btn:active {
-  transform: scale(0.99);
-}
-
-.card-note {
-  margin-top: 16px;
-  text-align: center;
-  font-size: 10px;
-  color: var(--color-muddy-brown);
-  line-height: 1.6;
-  letter-spacing: 0.03em;
-}
-
-.card-note__tip {
-  display: inline-block;
-  position: relative;
-  cursor: default;
-}
-
-.card-note__tooltip {
-  display: none;
-  position: absolute;
-  top: 1.6em;
-  left: 0;
-  white-space: pre;
-  text-align: left;
-  letter-spacing: 0.03em;
-  pointer-events: none;
-}
-
-.card-note__tip:hover .card-note__tooltip {
-  display: block;
 }

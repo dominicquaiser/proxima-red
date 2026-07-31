@@ -3,6 +3,12 @@
 # Core web framework
 Django==5.2.15
 
+# WebSocket support for the live-note sync hot path (apps.note.consumers).
+# Channels 4 needs no daphne: the ASGI server is uvicorn (production.txt) or
+# any dev ASGI runner; plain `manage.py runserver` stays WSGI/HTTP-only and
+# the live-note client falls back to polling there.
+channels>=4.2,<5.0
+
 # Rate limiting for authentication-sensitive endpoints
 django-ratelimit>=4.0,<5.0
 

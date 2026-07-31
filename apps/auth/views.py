@@ -36,6 +36,7 @@ from .mixins import (
 from .models import is_valid_user_id
 from .utils import get_authenticated_user_id, require_session_auth_api
 from .forms import (
+    KeypairForm,
     SignupForm,
     SigninForm,
     PasswordChangeForm,
@@ -43,10 +44,15 @@ from .forms import (
 )
 from . import services
 from .constants import (
+    DEFAULT_VAULT_TOOL,
     RATE_LIMIT_SIGNUP,
     RATE_LIMIT_SIGNIN,
     RATE_LIMIT_ACCOUNT,
+    RATE_LIMIT_KEYPAIR,
+    RATE_LIMIT_PUBKEY_LOOKUP,
     SESSION_KEY_AUTHENTICATED,
+    VAULT_TOOL_NOTE,
+    VAULT_TOOLS,
     TEMPLATE_SIGNUP,
     TEMPLATE_SIGNIN,
     TEMPLATE_ACCOUNT,
@@ -54,7 +60,10 @@ from .constants import (
     ERROR_USER_CREATION_FAILED,
     ERROR_ACCOUNT_DELETION_FAILED,
     ERROR_INVALID_CREDENTIALS,
+    ERROR_INVALID_SESSION,
     ERROR_INVALID_USER_ID,
+    ERROR_KEYPAIR_EXISTS,
+    ERROR_PUBKEY_NOT_FOUND,
     SUCCESS_ACCOUNT_CREATED,
     SUCCESS_USER_CREATED,
     SUCCESS_SIGNIN,
@@ -69,15 +78,26 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 
-def vault_url() -> str:
-    """Absolute URL of the vault on the pass subdomain.
+def vault_url(tool: str = DEFAULT_VAULT_TOOL) -> str:
+    """Absolute URL of a tool's vault on its canonical subdomain.
 
-    The vault view answers ``/vault/`` on any host, but it is canonically served
-    on ``PASS_SITE_URL`` (e.g. https://pass.proxima.red). Auth flows live on the
-    main site, so they must send users to the subdomain explicitly rather than to
-    a relative ``/vault/`` that would keep them on whatever host they signed in
-    on. When both sites share a host (local dev, tests) this is just that host.
+    Each vault is served on its tool's host (``PASS_SITE_URL`` /
+    ``NOTE_SITE_URL``, split by core's ``vault_dispatch``). Auth flows live on
+    the main site, so they must send users to the subdomain explicitly rather
+    than to a relative ``/vault/`` that would keep them on whatever host they
+    signed in on. When the sites share a host (local dev, tests) this is just
+    that host.
+
+    Args:
+        tool: A key from ``VAULT_TOOLS``; the ``tool`` request parameter is
+            vetted against the allowlist, so an unknown value falls back to the
+            pass vault (fail closed — never interpolated into the redirect).
+
+    Returns:
+        str: Absolute vault URL for the tool.
     """
+    if tool == VAULT_TOOL_NOTE:
+        return f"{settings.NOTE_SITE_URL}{reverse('note:vault')}"
     return f"{settings.PASS_SITE_URL}{reverse('passwd:vault')}"
 
 
@@ -95,16 +115,29 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
 
     form_class = None
 
+    def requested_tool(self, request: HttpRequest) -> str:
+        """Return the vetted vault tool requested by the ``tool`` parameter.
+
+        The signin/signup links on each tool's pages carry ``?tool=<key>`` so
+        the flow can land the user back on that tool's vault. POST wins over
+        GET (the form re-submits the value it was rendered with); anything not
+        in the allowlist falls back to the default.
+        """
+        tool = request.POST.get("tool") or request.GET.get("tool") or ""
+        return tool if tool in VAULT_TOOLS else DEFAULT_VAULT_TOOL
+
     def redirect_if_authenticated(self, request: HttpRequest):
         """Return a redirect to the vault for an already-authenticated session, else None."""
         if request.session.get(SESSION_KEY_AUTHENTICATED):
-            return redirect(vault_url())
+            return redirect(vault_url(self.requested_tool(request)))
         return None
 
     def get(self, request: HttpRequest) -> HttpResponse:
         """Display the form, or redirect to the vault when already authenticated."""
         return self.redirect_if_authenticated(request) or render(
-            request, self.template_name, {"form": self.form_class()}
+            request,
+            self.template_name,
+            {"form": self.form_class(), "tool": self.requested_tool(request)},
         )
 
     def render_form(
@@ -115,7 +148,7 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
         return render(
             request,
             self.template_name,
-            {"form": form or self.form_class()},
+            {"form": form or self.form_class(), "tool": self.requested_tool(request)},
             **kwargs,
         )
 
@@ -172,19 +205,20 @@ class SignupView(AuthFormView):
         if not form.is_valid():
             return self.form_error_response(request, form)
 
-        user = self._create_user_or_error(request, form.cleaned_data)
+        user = self._create_user_or_error(request, form)
         if isinstance(user, HttpResponse):
             return user
 
         return self._success_response(request, user)
 
-    def _create_user_or_error(self, request: HttpRequest, cleaned_data: dict):
-        """Create a user or return the appropriate error response."""
+    def _create_user_or_error(self, request: HttpRequest, form: SignupForm):
+        """Create a user (plus optional keypair) or return an error response."""
         try:
             return services.create_user_with_auth_secret(
-                cleaned_data["auth_secret"],
-                auth_salt=cleaned_data["auth_salt"],
-                vault_salt=cleaned_data["vault_salt"],
+                form.cleaned_data["auth_secret"],
+                auth_salt=form.cleaned_data["auth_salt"],
+                vault_salt=form.cleaned_data["vault_salt"],
+                keypair=form.keypair_payload(),
             )
         except UserCreationError as e:
             logger.error(LOG_SIGNUP_ERROR, exception_type(e))
@@ -277,6 +311,91 @@ class ReauthView(RatelimitGateMixin, View):
         return json_ok(auth_salt=user.auth_salt, vault_salt=user.vault_salt)
 
 
+class KeypairView(View):
+    """
+    Read or create the session account's collaboration keypair (JSON API).
+
+    GET returns the stored keypair (public key + vault-key-encrypted private
+    blob) so the browser can unwrap collaborator document keys after unlock.
+    POST is **create-only**: overwriting an existing keypair would strand
+    every document key already wrapped to the old public key, so an existing
+    row answers 409 and the client must use what is stored.
+    """
+
+    @method_decorator(require_session_auth_api)
+    def get(self, request: HttpRequest) -> HttpResponse:
+        user = services.get_user_by_id(get_authenticated_user_id(request))
+        if not user:
+            return json_error(ERROR_INVALID_SESSION, status=401)
+        keypair = services.get_user_keypair(user)
+        if keypair is None:
+            return json_ok(exists=False)
+        return json_ok(
+            exists=True,
+            public_key=keypair.public_key,
+            encrypted_private_key=keypair.encrypted_private_key,
+            private_key_iv=keypair.private_key_iv,
+        )
+
+    @method_decorator(
+        ratelimit(key=client_ip_key, rate=RATE_LIMIT_KEYPAIR, method="POST", block=True)
+    )
+    @method_decorator(require_session_auth_api)
+    def post(self, request: HttpRequest) -> HttpResponse:
+        user = services.get_user_by_id(get_authenticated_user_id(request))
+        if not user:
+            return json_error(ERROR_INVALID_SESSION, status=401)
+
+        form = KeypairForm(request.POST)
+        if not form.is_valid():
+            return json_form_error(form, status=400)
+
+        try:
+            keypair = services.create_user_keypair(
+                user,
+                public_key=form.cleaned_data["public_key"],
+                encrypted_private_key=form.cleaned_data["encrypted_private_key"],
+                private_key_iv=form.cleaned_data["private_key_iv"],
+            )
+        except Exception as e:
+            if getattr(e, "code", None) == "keypair_exists":
+                return json_error(ERROR_KEYPAIR_EXISTS, status=409)
+            logger.error(LOG_SIGNUP_ERROR, exception_type(e))
+            return json_error(ERROR_UNEXPECTED, status=500)
+
+        return json_ok(public_key=keypair.public_key)
+
+
+class PubkeyLookupView(View):
+    """
+    Return another account's public key by user_id, for the invite flow.
+
+    Deliberately **no decoy keys**, unlike the salts endpoint: wrapping a
+    document key to a decoy would create an invite the invitee can never
+    open — silently losing access is strictly worse than the existence
+    oracle. The oracle is accepted because the endpoint requires an
+    authenticated session, is rate limited, and reveals only "this user_id
+    exists and has collaboration enabled" (stated in the privacy policy).
+    """
+
+    @method_decorator(
+        ratelimit(
+            key=client_ip_key, rate=RATE_LIMIT_PUBKEY_LOOKUP, method="POST", block=True
+        )
+    )
+    @method_decorator(require_session_auth_api)
+    def post(self, request: HttpRequest) -> HttpResponse:
+        user_id = (request.POST.get("user_id") or "").strip()
+        if not is_valid_user_id(user_id):
+            return json_error(ERROR_INVALID_USER_ID)
+
+        public_key = services.get_public_key_for_user_id(user_id)
+        if public_key is None:
+            return json_error(ERROR_PUBKEY_NOT_FOUND, status=404)
+
+        return json_ok(user_id=user_id, public_key=public_key)
+
+
 @method_decorator(
     ratelimit(key=client_ip_key, rate=RATE_LIMIT_SIGNIN, method="POST", block=False),
     name="dispatch",
@@ -341,15 +460,16 @@ class SigninView(AuthFormView):
             logger.error(LOG_SIGNIN_ERROR, exception_type(e))
             return self.exception_response(request, ERROR_UNEXPECTED)
 
+        tool = self.requested_tool(request)
         return ajax_or_html(
             request,
             ajax=lambda: json_ok(
                 SUCCESS_SIGNIN,
                 auth_salt=user.auth_salt,
                 vault_salt=user.vault_salt,
-                redirect_url=vault_url(),
+                redirect_url=vault_url(tool),
             ),
-            html=lambda: redirect(vault_url()),
+            html=lambda: redirect(vault_url(tool)),
         )
 
 

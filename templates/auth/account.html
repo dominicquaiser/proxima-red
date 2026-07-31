@@ -27,9 +27,14 @@
       </a>
       <div class="header__auth">
         <a
-          href="{{ pass_site_url }}/vault/"
+          href="{{ pass_site_url }}{% url 'passwd:vault' %}"
           class="header__btn header__btn--outline"
-          >Vault</a
+          >Password Vault</a
+        >
+        <a
+          href="{{ note_site_url }}{% url 'note:vault' %}"
+          class="header__btn header__btn--outline"
+          >Note Vault</a
         >
         <form method="post" action="{% url 'auth:signout' %}">
           {% csrf_token %}
@@ -89,6 +94,10 @@
             action="{% url 'auth:change_password' %}"
             data-vault-data-url="{% url 'passwd:vault_data' %}"
             data-update-data-url="{% url 'passwd:update_data' %}"
+            data-note-index-url="{% url 'note:vault_index' %}"
+            data-note-list-url="{% url 'note:vault_notes' %}"
+            data-note-migrate-url="{% url 'note:vault_migrate' %}"
+            data-keypair-url="{% url 'auth:keypair' %}"
             novalidate
           >
             {% csrf_token %}

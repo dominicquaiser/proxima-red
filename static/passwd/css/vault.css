@@ -665,45 +665,10 @@
   font-weight: 500;
 }
 
-/* Create-share modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: rgba(29, 32, 33, 0.8);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 80px 24px 40px;
-  overflow-y: auto;
-  animation: modal-fade 0.15s ease;
-}
-@keyframes modal-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-.modal {
-  position: relative;
-  width: 100%;
-  max-width: 560px;
-  animation: modal-rise 0.18s ease;
-}
-@keyframes modal-rise {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* Create-share modal. The generic .modal-overlay/.modal shell and the
+   shared unlock-modal styles moved to shared/css/components.css (the unlock
+   partial is included by every tool's vault page); only the passwd-specific
+   pieces stay here. */
 .modal__close {
   position: absolute;
   top: 14px;
@@ -731,33 +696,6 @@
 .modal__close .vicon {
   width: 16px;
   height: 16px;
-}
-
-.unlock-signout {
-  margin-top: 14px;
-  text-align: center;
-}
-.unlock-signout__btn {
-  background: none;
-  border: none;
-  padding: 4px 6px;
-  color: var(--color-warm-sand);
-  font-family: var(--font-primary);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.15s ease;
-}
-.unlock-signout__btn:hover {
-  opacity: 1;
-}
-/* Inside the modal the card stretches to the modal width. */
-.modal .card {
-  max-width: none;
 }
 
 @media (max-width: 880px) {

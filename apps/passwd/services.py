@@ -212,8 +212,13 @@ def build_user_export(user: User) -> dict[str, Any]:
 
     Returns:
         A JSON-serializable dict with account metadata and, when present, the
-        user's encrypted vault blob (the server cannot decrypt it).
+        user's encrypted vault blob and note vault (the server cannot decrypt
+        either).
     """
+    # Late import: the export spans tools but lives here for now; if a third
+    # tool grows account data, move the account-level export to apps.auth.
+    from apps.note import services as note_services
+
     export: dict[str, Any] = {
         "exported_at": timezone.now().isoformat(),
         "account": {
@@ -222,6 +227,7 @@ def build_user_export(user: User) -> dict[str, Any]:
             "updated_at": user.updated_at.isoformat(),
         },
         "vault": None,
+        "note_vault": note_services.build_note_vault_export(user),
     }
 
     try:

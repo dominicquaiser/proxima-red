@@ -1,0 +1,500 @@
+/*
+ * Public note stylesheet.
+ *
+ * Loaded by unauthenticated editor, retrieve, and live-note pages. Shared
+ * editor and markdown primitives live in shared.css; this file owns public
+ * page chrome, no-JavaScript fallbacks, response cards, live collaboration
+ * affordances, and retrieve-view layout.
+ */
+
+/* Public editor footer. */
+
+/*
+ * The standalone editor pins the shared footer to the viewport bottom. Scoped
+ * to editor pages so retrieve pages keep the site-wide footer in normal flow.
+ */
+body.note-editor .footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  height: var(--bar-height);
+  display: flex;
+  align-items: center;
+  background: var(--color-pitch-black);
+  padding: 0 28px;
+}
+
+/*
+ * The footer is a flex container here, so stretch the links row to full width
+ * or .footer__right's margin-left:auto has no free space to push into.
+ */
+body.note-editor .footer__links {
+  flex: 1;
+}
+
+@media (max-width: 768px) {
+  body.note-editor .footer {
+    display: none;
+  }
+}
+
+/* No-JavaScript share controls for the public editor form. */
+
+.editor__noscript-share {
+  display: none;
+  padding-top: 24px;
+  margin-top: 24px;
+  border-top: 1px solid var(--color-oil-slick);
+}
+
+.editor__noscript-hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-warm-slate);
+  margin-bottom: 14px;
+}
+
+.editor__noscript-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-warm-slate);
+  margin-bottom: 6px;
+}
+
+.editor__noscript-controls {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.editor__noscript-controls .share-expiry {
+  margin: 0;
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
+}
+
+.editor__noscript-submit {
+  font-family: var(--font-primary);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--color-parchment);
+  background: var(--color-brick-red);
+  border: none;
+  border-radius: 3px;
+  padding: 9px 18px;
+  cursor: pointer;
+  transition: background 0.14s;
+}
+
+.editor__noscript-submit:hover {
+  background: var(--color-coral-red);
+}
+
+.editor__notice {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 32px 28px;
+  font-size: 13px;
+  color: var(--color-wheat);
+}
+
+.editor__notice--error {
+  color: var(--color-coral-red);
+}
+
+.editor__notice a {
+  color: var(--color-coral-red);
+  word-break: break-all;
+}
+
+/* Retrieved note view. */
+
+.note-view {
+  display: block;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 96px 32px 80px;
+}
+
+html:has(.note-view) {
+  scroll-padding-top: 72px;
+}
+
+.note-view__banner {
+  background: var(--color-brick-red-whisper);
+  color: var(--color-wheat);
+  border-radius: 4px;
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 28px;
+}
+
+.note-view__doc {
+  margin: 0 0 32px;
+}
+
+/* Preserve line breaks when JavaScript is unavailable to render Markdown. */
+.note-view__plain {
+  font-family: var(--font-primary);
+  font-size: 14px;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+  color: var(--color-clay);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 32px;
+}
+
+.note-view__plain-meta {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-oil-slick);
+  font-size: 12px;
+  color: var(--color-muddy-brown);
+}
+
+.note-view__status {
+  font-size: 13px;
+  color: var(--color-warm-slate);
+}
+
+.note-view__error-title {
+  color: var(--color-coral-red);
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.note-view__footer {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-oil-slick);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-muddy-brown);
+}
+
+.note-view__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-primary);
+  font-size: 12px;
+  color: var(--color-warm-slate);
+  background: none;
+  border: 1px solid var(--color-oil-slick);
+  border-radius: 3px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition:
+    color 0.14s,
+    border-color 0.14s;
+}
+
+.note-view__action:hover {
+  color: var(--color-wheat);
+  border-color: var(--color-warm-slate);
+}
+
+.note-view__action.copied {
+  color: var(--color-olive-green);
+  border-color: var(--color-olive-green);
+}
+
+/* Response card used for expired/error states. */
+
+.res {
+  text-align: center;
+}
+
+.res__icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 20px;
+  background-color: var(--color-coral-red);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+}
+
+.res__icon--error {
+  -webkit-mask-image: url("/static/icons/phosphor/calendar-slash.svg");
+  mask-image: url("/static/icons/phosphor/calendar-slash.svg");
+}
+
+.res__message {
+  font-family: var(--font-primary);
+  font-size: 13px;
+  color: var(--color-clay);
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  max-width: 420px;
+  margin: 0 auto 24px;
+}
+
+.res__message strong {
+  color: var(--color-wheat);
+  font-weight: 600;
+}
+
+.res__btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+  background: var(--color-brick-red);
+  border: none;
+  border-radius: 3px;
+  color: var(--color-parchment);
+  padding: 13px;
+  font-family: var(--font-primary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.res__btn:hover {
+  background: var(--color-coral-red);
+}
+
+.res__btn:active {
+  transform: scale(0.99);
+}
+
+.card-note {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--color-muddy-brown);
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+}
+
+.card-note__tip {
+  display: inline-block;
+  position: relative;
+  cursor: default;
+}
+
+.card-note__tooltip {
+  display: none;
+  position: absolute;
+  top: 1.6em;
+  left: 0;
+  white-space: pre;
+  text-align: left;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
+.card-note__tip:hover .card-note__tooltip {
+  display: block;
+}
+
+/* Live note page: sync status and expiry countdown. */
+
+.header__live {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.live-status {
+  white-space: nowrap;
+}
+
+.live-status--synced {
+  color: var(--color-muddy-brown);
+}
+
+.live-status--syncing {
+  color: var(--color-muddy-brown);
+}
+
+.live-status--offline {
+  color: var(--color-muddy-brown);
+}
+
+.live-status--expired,
+.live-status--error {
+  color: var(--color-coral-red);
+}
+
+.live-countdown {
+  font-size: 12px;
+  color: var(--color-warm-slate);
+  white-space: nowrap;
+}
+
+/* The countdown is secondary chrome; reclaim its space on narrow screens. */
+@media (max-width: 640px) {
+  .live-countdown {
+    display: none;
+  }
+}
+
+/*
+ * Presence overlays for remote collaborators on the live page.
+ *
+ * live-presence.js positions fixed carets and selection rectangles using the
+ * editor mirror's viewport coordinates. Each remote peer supplies --cc for
+ * its caret, label, and translucent selection color; the local caret remains
+ * the shared editor caret from shared.css.
+ */
+
+:root {
+  --presence-0: var(--color-olive-green);
+  --presence-1: var(--color-amber-gold);
+  --presence-2: var(--color-steel-blue);
+  --presence-3: var(--color-plum);
+  --presence-4: var(--color-seafoam-green);
+  --presence-5: var(--color-burnt-orange);
+  --presence-6: var(--color-moss-green);
+  --presence-7: var(--color-rust-orange);
+}
+
+.presence-caret {
+  position: fixed;
+  z-index: 2;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--cc);
+  pointer-events: none;
+}
+
+.presence-caret::after {
+  content: attr(data-name);
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  margin-bottom: 2px;
+  padding: 1px 5px;
+  background: var(--cc);
+  color: var(--color-pitch-black);
+  border-radius: 3px 3px 3px 0;
+  white-space: nowrap;
+  font-family: var(--font-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.presence-selection {
+  position: fixed;
+  z-index: 1;
+  border-radius: 2px;
+  background: var(--cc);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+/*
+ * Collaborator management panel for live-note owners.
+ *
+ * Anchored near the rail key button. The panel supports restricting access,
+ * inviting by user ID, and revoking access.
+ */
+
+.collab-panel {
+  width: min(340px, calc(100vw - 32px));
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--color-oil-slick);
+  border-radius: 12px;
+  background: var(--color-charcoal);
+  color: var(--color-driftwood);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  inset: auto;
+  position: fixed;
+  right: calc(var(--rail-width) + 16px);
+  bottom: calc(var(--bar-height) + 16px);
+}
+
+.collab-panel__title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-alabaster);
+  margin-bottom: 12px;
+}
+
+.collab-panel__hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-warm-slate);
+  margin-bottom: 12px;
+}
+
+.collab-panel__section+.collab-panel__section {
+  margin-top: 16px;
+}
+
+.collab-invite {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.collab-invite .field__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.collab-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.collab-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-oil-slick);
+  border-radius: 8px;
+  background: var(--color-dark-asphalt);
+}
+
+.collab-list__id {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-driftwood);
+}
+
+.collab-list__revoke {
+  border: none;
+  background: none;
+  color: var(--color-coral-red);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.collab-list__revoke:hover {
+  text-decoration: underline;
+}
