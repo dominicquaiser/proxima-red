@@ -24,7 +24,12 @@
   const WS_ACK_TIMEOUT_MS = 10000;
   // Server close codes (apps/note/constants.py).
   const WS_CLOSE_NOT_FOUND = 4404;
+  const WS_CLOSE_AUTH_REQUIRED = 4401;
+  const WS_CLOSE_FORBIDDEN = 4403;
   const WS_CLOSE_ABUSE = 4429;
+  const AUTH_REQUIRED_MESSAGE =
+    "This note is limited to named collaborators. Sign in to keep editing.";
+  const FORBIDDEN_MESSAGE = "You no longer have access to this note.";
   // Jitter staggers concurrent compactors; server covers_seq settles races.
   const COMPACT_PENDING_THRESHOLD = 64;
   const COMPACT_JITTER_SPAN = 16;
@@ -395,6 +400,11 @@
           fatal("expired", "This live note has expired.");
           return;
         }
+        if (response.status === 401) {
+          // Same eviction as the poll path, reached by whichever runs first.
+          fatal("error", AUTH_REQUIRED_MESSAGE);
+          return;
+        }
         if (response.status === 409 && result && result.code === "stale_epoch") {
           // Rekeyed: pause appends and let the page recover the new key.
           flushInFlight = false;
@@ -537,6 +547,13 @@
         const { response, result } = await window.Http.getJson(urls.updates + "?since=" + cursor);
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
+          return;
+        }
+        // A polling client has no socket to evict, so a mid-session restrict
+        // reaches it here instead. Terminal: retrying cannot grant access,
+        // and the default path would just back off in silence forever.
+        if (response.status === 401) {
+          fatal("error", AUTH_REQUIRED_MESSAGE);
           return;
         }
         if (!response.ok || !result.success) {
@@ -717,6 +734,16 @@
         if (stopped) return;
         if (event.code === WS_CLOSE_NOT_FOUND) {
           fatal("expired", "This live note has expired.");
+          return;
+        }
+        // Evicted: the owner restricted or re-keyed the note under us (or the
+        // gate refused us at connect). Polling would be refused too.
+        if (event.code === WS_CLOSE_AUTH_REQUIRED) {
+          fatal("error", AUTH_REQUIRED_MESSAGE);
+          return;
+        }
+        if (event.code === WS_CLOSE_FORBIDDEN) {
+          fatal("error", FORBIDDEN_MESSAGE);
           return;
         }
         if (event.code === WS_CLOSE_ABUSE) {

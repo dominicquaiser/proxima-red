@@ -6,6 +6,7 @@ owner role; link-mode docs are unchanged).
 """
 
 import json
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -193,6 +194,88 @@ class RekeyServiceTests(TestCase):
                 wraps=[],
             )
         self.assertEqual(ctx.exception.code, "wraps_mismatch")
+
+
+class AccessChangeBroadcastTests(TestCase):
+    """Narrowing access must reach the sockets already inside the group.
+
+    The consumer's gate runs once, at connect, so restrict and rekey publish a
+    ``live.access`` event that makes every open socket re-check itself (the
+    handler's own behaviour is covered in test_consumers). Here: that the two
+    narrowing paths publish it, that the widening ones don't, and that it
+    lands after the commit rather than inside the transaction.
+    """
+
+    def setUp(self):
+        self.owner = create_user_with_password("owner secret")
+        self.editor = create_user_with_password("editor secret")
+
+    def test_restrict_broadcasts_after_commit(self):
+        note = make_live_note(created_by=self.owner)
+
+        with patch.object(services, "broadcast_live_access_change") as broadcast:
+            with self.captureOnCommitCallbacks(execute=True):
+                services.restrict_live_note(
+                    note.pk, owner_user=self.owner, wrap=_wrap()
+                )
+                # Still inside the transaction: consumers re-read the gate
+                # from the database, so publishing here would race them
+                # against a grant that is not visible yet.
+                broadcast.assert_not_called()
+
+        broadcast.assert_called_once_with(note.pk)
+
+    def test_rekey_broadcasts_after_commit(self):
+        note = make_restricted_live_note(self.owner)
+        make_live_collaborator(note, self.editor)
+        newest = make_live_update(note)
+
+        with patch.object(services, "broadcast_live_access_change") as broadcast:
+            with self.captureOnCommitCallbacks(execute=True):
+                services.rekey_live_note(
+                    note.pk,
+                    owner_user=self.owner,
+                    snapshot="bmV3c25hcA==",
+                    snapshot_iv=VALID_IV_B64,
+                    covers_seq=newest.pk,
+                    key_epoch=1,
+                    remove_user_id=self.editor.user_id,
+                    wraps=[_wrap(self.owner.user_id)],
+                )
+                broadcast.assert_not_called()
+
+        broadcast.assert_called_once_with(note.pk)
+
+    def test_widening_access_broadcasts_nothing(self):
+        """Inviting and unrestricting strand nobody, so evict nobody."""
+        note = make_restricted_live_note(self.owner)
+
+        with patch.object(services, "broadcast_live_access_change") as broadcast:
+            with self.captureOnCommitCallbacks(execute=True):
+                services.add_live_collaborator(
+                    note.pk,
+                    owner_user=self.owner,
+                    invitee_user_id=self.editor.user_id,
+                    wrap=_wrap(),
+                )
+                services.unrestrict_live_note(note.pk, owner_user=self.owner)
+
+        broadcast.assert_not_called()
+
+    def test_broadcast_failure_does_not_break_the_revocation(self):
+        """A channel-layer outage must never fail the access change itself."""
+        note = make_live_note(created_by=self.owner)
+
+        with patch.object(
+            services, "get_channel_layer", side_effect=RuntimeError("redis down")
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                services.restrict_live_note(
+                    note.pk, owner_user=self.owner, wrap=_wrap()
+                )
+
+        note.refresh_from_db()
+        self.assertEqual(note.access_mode, LiveNote.ACCESS_RESTRICTED)
 
 
 class AppendEpochTests(TestCase):

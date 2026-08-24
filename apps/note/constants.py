@@ -224,4 +224,9 @@ LOG_LIVE_APPEND_FAILED: Final[str] = "Failed to append live note update (%s)"
 LOG_LIVE_SNAPSHOT_FAILED: Final[str] = "Failed to save live note snapshot (%s)"
 LOG_LIVE_WS_APPEND_FAILED: Final[str] = "Failed to append live note update over WS (%s)"
 LOG_LIVE_REKEY_FAILED: Final[str] = "Failed to rekey live note (%s)"
+# A warning, not an error: the access change itself committed, only the
+# socket eviction was missed (see services.broadcast_live_access_change).
+LOG_LIVE_ACCESS_BROADCAST_FAILED: Final[str] = (
+    "Failed to broadcast live note access change (%s)"
+)
 LOG_LIVE_COLLAB_FAILED: Final[str] = "Failed to update live note collaborators (%s)"

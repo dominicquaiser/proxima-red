@@ -16,6 +16,14 @@ authenticated session (close WS_CLOSE_AUTH_REQUIRED) and a collaborator row
 config/asgi.py and is read directly, because django.contrib.auth is not
 installed (see ``_restricted_gate``).
 
+Unlike an HTTP request, a socket outlives the check that admitted it, so the
+gate is re-run on demand: ``services.broadcast_live_access_change`` publishes
+a ``live.access`` event whenever an owner *narrows* access (restrict, rekey),
+and ``live_access`` evicts the sockets that no longer pass with the same close
+codes connect would have used. Without it a revoked collaborator keeps
+receiving the group's traffic and relaying awareness into it, and an anonymous
+editor keeps writing to a note that just became collaborators-only.
+
 Ordering contract: appends run under the service's row lock and every push
 carries ``(prev_seq, seq)`` computed under that lock, so the client can
 detect a missed frame (``prev_seq`` ahead of its cursor) and gap-heal with
@@ -243,10 +251,16 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         self._counted_socket = False
         self._bucket = TokenBucket(WS_MSG_BURST, WS_MSG_RATE)
         self._over_budget_streak = 0
+        # Frames can arrive between accept() and a gate close below. Nothing
+        # is served until the gates have all passed: receive_json drops
+        # anything sent before this flips, which also keeps it from reading
+        # expires_at before there is a note to read it from.
+        self._ready = False
+        self.expires_at = None
 
         pk = self.scope["url_route"]["kwargs"]["pk"]
         self.note_id: uuid.UUID = pk
-        self.group_name = f"live.{pk}"
+        self.group_name = services.live_group_name(pk)
         self.sockets_key = NOTE_SOCKETS_PREFIX + str(pk)
 
         await self.accept()
@@ -286,6 +300,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
 
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         self._joined_group = True
+        self._ready = True
 
     async def disconnect(self, code):
         """Leave the group and release the per-note socket slot."""
@@ -323,6 +338,10 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
 
     async def receive_json(self, content, **kwargs):
         """Dispatch one inbound frame through the expiry and budget gates."""
+        # Sent before the connect gates finished, or after one of them closed
+        # us: the socket is not (or no longer) admitted, so serve nothing.
+        if not self._ready:
+            return
         if timezone.now() >= self.expires_at:
             # The doc expired mid-session. The cron sweep will delete the row;
             # this session is over either way.
@@ -437,7 +456,10 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         The sender's own echo is skipped: it already advanced its cursor from
         the ack.
         """
-        if event.get("sender") == self.channel_name:
+        # An evicted socket stays in the group until its disconnect is
+        # processed; serving it in that window is the very leak the eviction
+        # exists to close.
+        if not self._ready or event.get("sender") == self.channel_name:
             return
         await self.send_json(
             {
@@ -451,11 +473,52 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
 
     async def live_awareness(self, event):
         """Forward another client's presence ciphertext."""
-        if event.get("sender") == self.channel_name:
+        if not self._ready or event.get("sender") == self.channel_name:
             return
         await self.send_json(
             {"type": "awareness", "payload": event["payload"], "iv": event["iv"]}
         )
+
+    async def live_access(self, event):
+        """Re-run the connect gate after the owner narrowed access.
+
+        Published by ``services.broadcast_live_access_change`` on restrict and
+        on rekey. The connect gate is a one-time check, so a socket otherwise
+        outlives the grant that admitted it. This closes the two ways that
+        happens, using the codes connect itself would have used: an anonymous
+        editor still inside a note that just became restricted, and a
+        collaborator whose row a rekey deleted.
+
+        Widening access publishes nothing, so a socket is only ever closed
+        here, never admitted.
+        """
+        if not self._ready:
+            return
+        note_state = await self._load_active_note(self.note_id)
+        if note_state is None:
+            await self.send_json({"type": "expired"})
+            await self._evict(WS_CLOSE_NOT_FOUND)
+            return
+        if note_state["access_mode"] != LiveNote.ACCESS_RESTRICTED:
+            return
+        gate = await self._restricted_gate(self.note_id)
+        if gate == "no_session":
+            await self._evict(WS_CLOSE_AUTH_REQUIRED)
+        elif gate == "forbidden":
+            await self._evict(WS_CLOSE_FORBIDDEN)
+
+    async def _evict(self, code: int):
+        """Stop serving this socket and close it with a terminal code.
+
+        Clearing ``_ready`` first matters: ``close()`` only asks the client to
+        go away, and frames already queued would otherwise still be served on
+        the way out.
+
+        Args:
+            code (int): One of the terminal ``WS_CLOSE_*`` constants.
+        """
+        self._ready = False
+        await self.close(code=code)
 
     # ── Helpers ──────────────────────────────────────────────────────────
 

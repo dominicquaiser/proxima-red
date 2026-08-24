@@ -35,11 +35,15 @@ from django.db.models.functions import Length
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
 from apps.auth.models import User, UserKeyPair
 
 from .constants import (
     DEFAULT_EXPIRY,
     EXPIRY_MAP,
+    LOG_LIVE_ACCESS_BROADCAST_FAILED,
     LOG_LIVE_EXPIRED_DELETED,
     MAX_COLLABORATORS_PER_NOTE,
     MAX_LIVE_PENDING_LENGTH,
@@ -543,6 +547,58 @@ def delete_expired_live_notes(*, now=None, batch_size=None) -> int:
 # ── Named collaborators (restricted live notes, M4) ─────────────────────────
 
 
+def live_group_name(pk) -> str:
+    """Return the channel-layer group broadcasting one live note.
+
+    Single source of truth for the group string, shared by the consumer (which
+    joins it) and :func:`broadcast_live_access_change` (which publishes to it).
+
+    Args:
+        pk (uuid.UUID | str): Primary key of the live note.
+
+    Returns:
+        str: The group name.
+    """
+    return f"live.{pk}"
+
+
+def broadcast_live_access_change(pk) -> None:
+    """Tell every open socket on a note to re-run its access gate.
+
+    The consumer's gate runs once, at connect, so without this a socket
+    outlives the grant that admitted it: a revoked collaborator keeps
+    receiving the group's traffic and keeps relaying awareness frames into it,
+    and an anonymous editor keeps writing to a note that just became
+    collaborators-only. Only the two paths that *narrow* access publish here
+    (:func:`restrict_live_note` and :func:`rekey_live_note`); widening access
+    strands nobody.
+
+    Always call this through ``transaction.on_commit``: the consumers re-read
+    their gate from the database, so publishing mid-transaction would race
+    them against state that is not visible yet (or that a rollback undoes).
+
+    Fails open, matching the consumer's posture on cache trouble. A
+    channel-layer outage must never fail a revocation: the key rotation is
+    what actually enforces it, and this only closes the socket that would
+    otherwise keep relaying ciphertext it can no longer read.
+
+    Args:
+        pk (uuid.UUID | str): Primary key of the live note.
+
+    Returns:
+        None: Delivery is best-effort.
+    """
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        async_to_sync(channel_layer.group_send)(
+            live_group_name(pk), {"type": "live.access"}
+        )
+    except Exception as exc:
+        logger.warning(LOG_LIVE_ACCESS_BROADCAST_FAILED, exc.__class__.__name__)
+
+
 def get_live_collaborator(note: LiveNote, user_id: str) -> LiveNoteCollaborator | None:
     """Return a user's collaborator row on a note, if any.
 
@@ -629,7 +685,7 @@ def restrict_live_note(pk, *, owner_user: User, wrap: dict) -> LiveNoteCollabora
 
         note.access_mode = LiveNote.ACCESS_RESTRICTED
         note.save(update_fields=["access_mode", "updated_at"])
-        return LiveNoteCollaborator.objects.create(
+        grant = LiveNoteCollaborator.objects.create(
             note=note,
             user=owner_user,
             role=LiveNoteCollaborator.ROLE_OWNER,
@@ -638,6 +694,11 @@ def restrict_live_note(pk, *, owner_user: User, wrap: dict) -> LiveNoteCollabora
             ephemeral_public_key=wrap["ephemeral_public_key"],
             key_epoch=note.key_epoch,
         )
+        # Anonymous editors already inside the group would otherwise keep
+        # writing: this is a gate change with no key rotation behind it, so
+        # the socket is the only thing that stops them.
+        transaction.on_commit(lambda: broadcast_live_access_change(note.pk))
+        return grant
 
 
 def unrestrict_live_note(pk, *, owner_user: User) -> None:
@@ -802,6 +863,10 @@ def rekey_live_note(
         if remove_user_id is not None:
             note.collaborators.filter(user__user_id=remove_user_id).delete()
         _rewrap_collaborators(survivors, wraps, key_epoch)
+        # The new epoch already locks the revoked user out of reading and
+        # writing; this closes the socket they would otherwise keep holding
+        # open on the group, relaying awareness frames into it.
+        transaction.on_commit(lambda: broadcast_live_access_change(note.pk))
         return key_epoch
 
 
