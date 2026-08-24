@@ -82,6 +82,7 @@ from .constants import (
     LOG_LIVE_SNAPSHOT_FAILED,
     LOG_VAULT_MIGRATE_FAILED,
     LOG_VAULT_SAVE_FAILED,
+    MAX_VAULT_NOTES_PER_USER,
     RATE_LIMIT_CREATE,
     RATE_LIMIT_LIVE_COLLAB,
     RATE_LIMIT_LIVE_CREATE,
@@ -100,6 +101,7 @@ from .constants import (
     TEMPLATE_LIVE,
     TEMPLATE_RETRIEVE,
     TEMPLATE_VAULT,
+    VAULT_TRASH_RETENTION_DAYS,
 )
 from .models import LiveNote, SharedNote
 
@@ -173,6 +175,9 @@ def _editor_context(request: HttpRequest, **extra) -> dict:
         "retrieval_url_base": retrieval_url_base,
         "live_url_base": live_url_base,
         "dummy_note_id": DUMMY_NOTE_ID,
+        # Handed to the vault UI so its Trash copy cannot drift from the window
+        # the sweep actually enforces.
+        "trash_retention_days": VAULT_TRASH_RETENTION_DAYS,
         **extra,
     }
 
@@ -650,6 +655,52 @@ class VaultNoteDeleteView(View):
         def save() -> JsonResponse:
             services.delete_vault_note(user, pk)
             return json_ok(SUCCESS_DATA_SAVED)
+
+        return _save_or_error(save, LOG_VAULT_SAVE_FAILED)
+
+
+class VaultNoteTrashView(View):
+    """
+    Move vault notes to Trash, or restore them, in one call.
+
+    Trash state itself lives in the encrypted index; this endpoint records only
+    the flag that lets ``delete_expired_notes`` enforce the retention window
+    server-side (see :class:`~apps.note.models.VaultNote`).
+
+    Deliberately bulk: deleting a folder trashes every note inside it in one
+    gesture, and a per-note endpoint would spend one write of the vault rate
+    limit per note. Owner-scoped and idempotent, so the client can retry.
+    """
+
+    @method_decorator(
+        ratelimit(
+            key=client_ip_key, rate=RATE_LIMIT_VAULT_WRITE, method="POST", block=True
+        )
+    )
+    @method_decorator(require_session_auth_api)
+    def post(self, request: HttpRequest) -> JsonResponse:
+        """Set or clear the Trash flag on a batch of the user's notes."""
+        data, error_response = _json_body_or_error(request)
+        if error_response:
+            return error_response
+
+        ids = data.get("ids")
+        if not isinstance(ids, list) or len(ids) > MAX_VAULT_NOTES_PER_USER:
+            return json_error(ERROR_INVALID_JSON)
+        if any(not isinstance(note_id, str) for note_id in ids):
+            return json_error(ERROR_INVALID_JSON)
+
+        trashed = data.get("trashed")
+        if not isinstance(trashed, bool):
+            return json_error(ERROR_INVALID_JSON)
+
+        user, error_response = _vault_session_user_or_error(request)
+        if error_response:
+            return error_response
+
+        def save() -> JsonResponse:
+            updated = services.set_vault_notes_trashed(user, ids, trashed=trashed)
+            return json_ok(SUCCESS_DATA_SAVED, updated=updated)
 
         return _save_or_error(save, LOG_VAULT_SAVE_FAILED)
 

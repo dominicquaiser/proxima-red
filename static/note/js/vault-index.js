@@ -79,15 +79,20 @@
 
   // --- Notes ---
 
-  function addNote(index, { id, name, folderId = null, createdAt, updatedAt }) {
+  // `trashed`/`deletedAt` default to active; orphan recovery passes the
+  // server row's trash state so a re-adopted note keeps it.
+  function addNote(
+    index,
+    { id, name, folderId = null, createdAt, updatedAt, trashed = false, deletedAt = null },
+  ) {
     const next = clone(index);
     const stamp = nowIso();
     next.notes.push({
       id,
       name: cleanName(name) || defaultName(index),
       folderId: folderExists(next, folderId) ? folderId : null,
-      trashed: false,
-      deletedAt: null,
+      trashed: !!trashed,
+      deletedAt: trashed ? deletedAt || stamp : null,
       createdAt: createdAt || stamp,
       updatedAt: updatedAt || stamp,
     });
@@ -194,17 +199,39 @@
     const serverIds = new Set(serverNotes.map((note) => note.id));
     const indexIds = new Set(index.notes.map((note) => note.id));
 
-    const droppedIds = index.notes
-      .filter((note) => !serverIds.has(note.id))
-      .map((note) => note.id);
-    const orphanIds = serverNotes
-      .filter((note) => !indexIds.has(note.id))
-      .map((note) => note.id);
+    const droppedIds = index.notes.filter((note) => !serverIds.has(note.id)).map((note) => note.id);
+    const orphanIds = serverNotes.filter((note) => !indexIds.has(note.id)).map((note) => note.id);
 
     const next = clone(index);
     next.notes = next.notes.filter((note) => serverIds.has(note.id));
 
     return { index: next, orphanIds, droppedIds, changed: droppedIds.length > 0 };
+  }
+
+  /**
+   * Ids whose index trash state disagrees with the server's `trashed_at`.
+   *
+   * The index is authoritative: it holds the user's actual intent, so a
+   * mismatch means an interrupted trash/restore (or a row predating the
+   * server-side flag) and the row is what gets corrected. vault.js repairs
+   * each direction with one bulk call on load.
+   *
+   * @param {Object} index
+   * @param {Array<{id: string, trashed_at: ?string}>} serverNotes
+   * @returns {{trash: string[], restore: string[]}}
+   */
+  function trashFlagDrift(index, serverNotes) {
+    const flaggedOnServer = new Set(
+      serverNotes.filter((note) => note.trashed_at).map((note) => note.id),
+    );
+    const trash = [];
+    const restore = [];
+    index.notes.forEach((note) => {
+      const flagged = flaggedOnServer.has(note.id);
+      if (note.trashed && !flagged) trash.push(note.id);
+      if (!note.trashed && flagged) restore.push(note.id);
+    });
+    return { trash, restore };
   }
 
   // Render input for the sidebar.
@@ -245,6 +272,7 @@
     defaultName,
     filter,
     reconcile,
+    trashFlagDrift,
     visibleTree,
   };
 })();

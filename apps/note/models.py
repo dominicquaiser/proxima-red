@@ -514,15 +514,24 @@ class VaultNote(models.Model):
     (AES-256-GCM), so the server only ever stores opaque ciphertext. The note
     carries no name and no folder: names and the folder tree live exclusively
     in the user's encrypted :class:`VaultIndex`, so the server learns nothing
-    about the vault's structure. There is deliberately no ``expires_at``:
-    vault notes never expire and are structurally invisible to the expired-
-    share sweeps, which query :class:`SharedNote` only.
+    about the vault's structure.
+
+    A note has no expiry of its own; it lives until the user deletes it. The
+    one exception is ``trashed_at``, which the client sets when it moves a note
+    to Trash and the ``delete_expired_notes`` sweep deletes after
+    ``VAULT_TRASH_RETENTION_DAYS``. That flag is a deliberate, bounded metadata
+    concession: without a plaintext signal the server cannot enforce a
+    retention window at all, since trash state otherwise exists only inside the
+    :class:`VaultIndex` ciphertext. It tells the server that a row is pending
+    deletion and when it was trashed.
 
     Attributes:
         id (uuid.UUID): UUID primary key for the note.
         user (User): Owning account; vault notes are never anonymous.
         content (str): Base64 AES-256-GCM ciphertext of the markdown document.
         iv (str): Base64-encoded initialization vector.
+        trashed_at (datetime.datetime | None): When the client moved the note
+            to Trash; ``None`` while the note is active.
         created_at (datetime.datetime): Timestamp when the note was created.
         updated_at (datetime.datetime): Timestamp of the last content write.
     """
@@ -552,6 +561,17 @@ class VaultNote(models.Model):
     iv = models.TextField(
         validators=[validate_required_iv],
         help_text=_("Initialization vector for AES-GCM encryption (Base64-encoded)"),
+    )
+
+    # Indexed because the retention sweep filters on it every minute. Written
+    # with QuerySet.update() so trashing never bumps ``updated_at``: moving a
+    # note to Trash is not a content write.
+    trashed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        default=None,
+        db_index=True,
+        help_text=_("When this note was moved to Trash (null while active)"),
     )
 
     created_at = models.DateTimeField(

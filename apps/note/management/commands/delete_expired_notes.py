@@ -4,9 +4,10 @@ Django management command to delete expired shared notes and live notes.
 This command can be run manually or scheduled via cron to automatically clean
 up expired notes from the database. It is a lean mirror of the passwd tool's
 ``delete_expired`` (each tool owns its cleanup, so the apps stay independent).
-It sweeps both note kinds with an expiry: static shared notes and live notes
-(editable share links; their update logs cascade with them). Vault notes have
-no expiry and are structurally invisible here.
+It sweeps static shared notes, live notes (editable share links; their update
+logs cascade with them), and vault notes that have sat in the user's Trash past
+the retention window. Active vault notes have no expiry and never match: only
+the client-set ``trashed_at`` flag makes a vault note eligible.
 
 Usage:
     python manage.py delete_expired_notes
@@ -89,6 +90,15 @@ class Command(BaseCommand):
                 now=now, batch_size=batch_size
             ),
             sample_line=self._live_note_sample,
+            options=options,
+        )
+        self._run_sweep(
+            label="trashed vault note",
+            queryset=services.expired_trashed_vault_notes(now=now),
+            delete=lambda batch_size: services.delete_expired_trashed_vault_notes(
+                now=now, batch_size=batch_size
+            ),
+            sample_line=self._vault_note_sample,
             options=options,
         )
 
@@ -204,4 +214,18 @@ class Command(BaseCommand):
             f"Expired: {note.expires_at.isoformat()} | "
             f"Pending updates: {note.updates.count()} | "
             f"Accesses: {note.access_count}"
+        )
+
+    @staticmethod
+    def _vault_note_sample(note):
+        """Format one expired trashed vault note as a preview line.
+
+        Vault notes have no name and no access counter, and their body is
+        ciphertext, so the size is the only other non-sensitive detail worth
+        printing.
+        """
+        return (
+            f"  - {str(note.id)[:8]}... | vault | "
+            f"Trashed: {note.trashed_at.isoformat()} | "
+            f"Size: {len(note.content)}"
         )

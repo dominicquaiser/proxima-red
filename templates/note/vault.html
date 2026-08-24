@@ -32,7 +32,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
 
     <div id="notification-container"></div>
 
-    <!-- ════ Sidebar: file manager ════ -->
+    <!-- --- Sidebar: file manager --- -->
     <aside class="sidebar" id="vault-sidebar">
       <div class="sidebar__top">
         <a href="{{ note_site_url }}/" class="header__logo">
@@ -73,7 +73,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </aside>
 
-    <!-- ════ Topbar: breadcrumb + EDIT/PREVIEW tabs ════ -->
+    <!-- --- Topbar: breadcrumb + EDIT/PREVIEW tabs --- -->
     <header class="topbar">
       <button class="tool topbar__sidebar-toggle" type="button" id="sidebar-open-btn" title="Open sidebar">
         <span class="nicon nicon--sidebar-simple" aria-hidden="true"></span>
@@ -105,7 +105,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </header>
 
-    <!-- ════ Editor surface ════ -->
+    <!-- --- Editor surface --- -->
     <main
       id="main-content"
       class="editor"
@@ -113,6 +113,8 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       data-notes-url="{% url 'note:vault_notes' %}"
       data-note-url-base="{% url 'note:vault_note' dummy_note_id %}"
       data-note-delete-url-base="{% url 'note:vault_note_delete' dummy_note_id %}"
+      data-note-trash-url="{% url 'note:vault_note_trash' %}"
+      data-trash-retention-days="{{ trash_retention_days }}"
       data-create-url="{% url 'note:create' %}"
       data-retrieve-url-base="{{ retrieval_url_base }}"
       data-live-create-url="{% url 'note:live_create' %}"
@@ -139,7 +141,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
 
     <div class="meta" id="note-meta" aria-hidden="true"></div>
 
-    <!-- ════ Tool rail ════ -->
+    <!-- --- Tool rail --- -->
     <nav class="rail" aria-label="Formatting toolbar">
       <div class="rail__group">
         <button class="tool" type="button" data-action="bold" title="Bold">
@@ -222,7 +224,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </nav>
 
-    <!-- ════ Share popover (creates a regular SharedNote snapshot) ════ -->
+    <!-- --- Share popover (creates a regular SharedNote snapshot) --- -->
     <div id="share-pop" popover class="share-pop">
       <div id="share-menu">
         <div class="share-pop__title">Create share link</div>
@@ -330,7 +332,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </div>
 
-    <!-- ════ Tree row context menu (filled by vault.js) ════ -->
+    <!-- --- Tree row context menu (filled by vault.js) --- -->
     <div id="ctx-menu" class="ctx-menu hidden" role="menu"></div>
 
     {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" %}

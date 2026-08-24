@@ -31,8 +31,16 @@ function sampleIndex() {
   index = Index.addFolder(index, "Research", "folder-1");
   index = Index.addFolder(index, "Personal", "folder-2");
   index = Index.addNote(index, { id: "note-root", name: "root.md" });
-  index = Index.addNote(index, { id: "note-ml", name: "machine_learning.md", folderId: "folder-1" });
-  index = Index.addNote(index, { id: "note-crypto", name: "cryptography.md", folderId: "folder-1" });
+  index = Index.addNote(index, {
+    id: "note-ml",
+    name: "machine_learning.md",
+    folderId: "folder-1",
+  });
+  index = Index.addNote(index, {
+    id: "note-crypto",
+    name: "cryptography.md",
+    folderId: "folder-1",
+  });
   index = Index.addNote(index, { id: "note-diary", name: "diary.md", folderId: "folder-2" });
   index = Index.trashNote(index, "note-diary");
   return index;
@@ -69,6 +77,7 @@ describe("immutability", () => {
     Index.touchNote(index, "note-ml");
     Index.filter(index, "ml");
     Index.reconcile(index, []);
+    Index.trashFlagDrift(index, []);
 
     assert.equal(JSON.stringify(index), snapshot);
   });
@@ -124,8 +133,26 @@ describe("notes", () => {
     const added = next.notes.find((note) => note.id === "n");
     assert.equal(added.folderId, null); // unknown folder falls back to root
     assert.equal(added.trashed, false);
+    assert.equal(added.deletedAt, null);
     assert.ok(added.createdAt);
     assert.ok(added.updatedAt);
+  });
+
+  test("addNote can adopt a note straight into Trash", () => {
+    const next = Index.addNote(sampleIndex(), {
+      id: "n",
+      name: "n.md",
+      trashed: true,
+      deletedAt: "2026-08-01T00:00:00Z",
+    });
+    const added = next.notes.find((note) => note.id === "n");
+    assert.equal(added.trashed, true);
+    assert.equal(added.deletedAt, "2026-08-01T00:00:00Z");
+  });
+
+  test("addNote stamps a trashed note that arrives without a deletedAt", () => {
+    const next = Index.addNote(sampleIndex(), { id: "n", name: "n.md", trashed: true });
+    assert.ok(next.notes.find((note) => note.id === "n").deletedAt);
   });
 
   test("renameNote changes the name", () => {
@@ -175,10 +202,53 @@ describe("notes", () => {
 
   test("touchNote bumps updatedAt", () => {
     const next = Index.touchNote(sampleIndex(), "note-ml", "2026-07-12T00:00:00Z");
-    assert.equal(
-      next.notes.find((n) => n.id === "note-ml").updatedAt,
-      "2026-07-12T00:00:00Z",
-    );
+    assert.equal(next.notes.find((n) => n.id === "note-ml").updatedAt, "2026-07-12T00:00:00Z");
+  });
+});
+
+describe("trashFlagDrift", () => {
+  test("no drift when the index and the rows agree", () => {
+    const index = sampleIndex(); // note-diary is the only trashed note
+    const rows = [
+      { id: "note-root", trashed_at: null },
+      { id: "note-ml", trashed_at: null },
+      { id: "note-crypto", trashed_at: null },
+      { id: "note-diary", trashed_at: "2026-08-01T00:00:00Z" },
+    ];
+    assert.deepEqual(Index.trashFlagDrift(index, rows), { trash: [], restore: [] });
+  });
+
+  test("reports rows missing the flag the index says should be trashed", () => {
+    const index = sampleIndex();
+    const rows = index.notes.map((note) => ({ id: note.id, trashed_at: null }));
+    assert.deepEqual(Index.trashFlagDrift(index, rows), {
+      trash: ["note-diary"],
+      restore: [],
+    });
+  });
+
+  test("reports rows still flagged that the index says are active", () => {
+    const index = sampleIndex();
+    const rows = index.notes.map((note) => ({
+      id: note.id,
+      trashed_at: "2026-08-01T00:00:00Z",
+    }));
+    assert.deepEqual(Index.trashFlagDrift(index, rows).restore.sort(), [
+      "note-crypto",
+      "note-ml",
+      "note-root",
+    ]);
+  });
+
+  test("ignores rows the index does not know about", () => {
+    const index = sampleIndex();
+    const rows = [{ id: "orphan-row", trashed_at: "2026-08-01T00:00:00Z" }];
+    // Every index entry is missing from the rows, so only the trash direction
+    // fires; the orphan itself is the adoption path's business, not drift.
+    assert.deepEqual(Index.trashFlagDrift(index, rows), {
+      trash: ["note-diary"],
+      restore: [],
+    });
   });
 });
 
@@ -216,10 +286,7 @@ describe("filter", () => {
 
   test("a matching folder name keeps all its notes", () => {
     const filtered = Index.filter(sampleIndex(), "research");
-    assert.deepEqual(
-      filtered.notes.map((n) => n.id).sort(),
-      ["note-crypto", "note-ml"],
-    );
+    assert.deepEqual(filtered.notes.map((n) => n.id).sort(), ["note-crypto", "note-ml"]);
   });
 
   test("drops folders with no matches", () => {

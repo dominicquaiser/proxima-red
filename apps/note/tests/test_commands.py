@@ -7,9 +7,17 @@ from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.note.models import LiveNote, LiveNoteUpdate, SharedNote
+from apps.auth.tests.factories import create_user_with_password
+from apps.note.constants import VAULT_TRASH_RETENTION_DAYS
+from apps.note.models import LiveNote, LiveNoteUpdate, SharedNote, VaultNote
 
-from .factories import make_live_note, make_live_update, make_note, make_plain_note
+from .factories import (
+    make_live_note,
+    make_live_update,
+    make_note,
+    make_plain_note,
+    make_vault_note,
+)
 
 
 def run_command(*args, **kwargs):
@@ -115,3 +123,41 @@ class DeleteExpiredLiveNotesCommandTests(TestCase):
         self.expired.delete()
         output = run_command()
         self.assertIn("No expired live notes to delete.", output)
+
+
+class DeleteTrashedVaultNotesCommandTests(TestCase):
+    """The vault-note sweep: same command, third pass.
+
+    Vault notes have no expiry of their own; only the client-set ``trashed_at``
+    flag plus the retention window makes one eligible.
+    """
+
+    def setUp(self):
+        self.user = create_user_with_password("correct horse battery staple")
+        self.window = timedelta(days=VAULT_TRASH_RETENTION_DAYS)
+        self.due = make_vault_note(
+            self.user, trashed_at=timezone.now() - self.window - timedelta(minutes=1)
+        )
+        self.recent = make_vault_note(self.user, trashed_at=timezone.now())
+        self.active = make_vault_note(self.user)
+
+    def test_deletes_only_notes_past_the_retention_window(self):
+        output = run_command()
+
+        self.assertFalse(VaultNote.objects.filter(pk=self.due.pk).exists())
+        self.assertTrue(VaultNote.objects.filter(pk=self.recent.pk).exists())
+        self.assertTrue(VaultNote.objects.filter(pk=self.active.pk).exists())
+        self.assertIn("Successfully deleted 1 expired trashed vault note(s).", output)
+
+    def test_dry_run_previews_without_deleting(self):
+        output = run_command("--dry-run", verbosity=2)
+
+        self.assertTrue(VaultNote.objects.filter(pk=self.due.pk).exists())
+        self.assertIn("DRY RUN: Would delete 1 expired trashed vault note(s).", output)
+        self.assertIn("| vault |", output)
+        self.assertNotIn(self.due.content, output)
+
+    def test_noop_message_when_nothing_is_due(self):
+        self.due.delete()
+        output = run_command()
+        self.assertIn("No expired trashed vault notes to delete.", output)

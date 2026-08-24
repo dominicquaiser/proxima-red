@@ -9,7 +9,12 @@ from django.utils import timezone
 
 from apps.auth.tests.factories import create_user_with_password
 from apps.note import services
-from apps.note.constants import DEFAULT_EXPIRY, EXPIRY_MAP, MAX_VAULT_NOTES_PER_USER
+from apps.note.constants import (
+    DEFAULT_EXPIRY,
+    EXPIRY_MAP,
+    MAX_VAULT_NOTES_PER_USER,
+    VAULT_TRASH_RETENTION_DAYS,
+)
 from apps.note.models import LiveNote, LiveNoteUpdate, SharedNote, VaultIndex, VaultNote
 
 from .factories import (
@@ -564,6 +569,126 @@ class VaultNoteServiceTests(TestCase):
 
         with_content = services.list_vault_notes(self.user, include_content=True)
         self.assertEqual(with_content[0]["content"], VALID_CONTENT_B64)
+
+    def test_serialize_exposes_trash_state(self):
+        note = make_vault_note(self.user)
+        self.assertIsNone(services.serialize_vault_note(note)["trashed_at"])
+
+        services.set_vault_notes_trashed(self.user, [note.pk], trashed=True)
+        note.refresh_from_db()
+        self.assertEqual(
+            services.serialize_vault_note(note)["trashed_at"],
+            note.trashed_at.isoformat(),
+        )
+
+
+class SetVaultNotesTrashedTests(TestCase):
+    """services.set_vault_notes_trashed: the bulk Trash flag."""
+
+    def setUp(self):
+        self.user = create_user_with_password("password-123")
+        self.other = create_user_with_password("other-password")
+
+    def test_sets_and_clears_the_flag_in_bulk(self):
+        first = make_vault_note(self.user)
+        second = make_vault_note(self.user)
+
+        updated = services.set_vault_notes_trashed(
+            self.user, [first.pk, second.pk], trashed=True
+        )
+
+        self.assertEqual(updated, 2)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNotNone(first.trashed_at)
+        self.assertIsNotNone(second.trashed_at)
+
+        services.set_vault_notes_trashed(self.user, [first.pk], trashed=False)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNone(first.trashed_at)
+        self.assertIsNotNone(second.trashed_at)
+
+    def test_does_not_bump_updated_at(self):
+        note = make_vault_note(self.user)
+        before = note.updated_at
+
+        services.set_vault_notes_trashed(self.user, [note.pk], trashed=True)
+
+        note.refresh_from_db()
+        self.assertEqual(note.updated_at, before)
+
+    def test_is_owner_scoped(self):
+        note = make_vault_note(self.other)
+
+        updated = services.set_vault_notes_trashed(self.user, [note.pk], trashed=True)
+
+        self.assertEqual(updated, 0)
+        note.refresh_from_db()
+        self.assertIsNone(note.trashed_at)
+
+    def test_tolerates_malformed_and_unknown_ids(self):
+        note = make_vault_note(self.user)
+
+        updated = services.set_vault_notes_trashed(
+            self.user,
+            ["not-a-uuid", "11111111-1111-1111-1111-111111111111", note.pk],
+            trashed=True,
+        )
+
+        self.assertEqual(updated, 1)
+
+    def test_empty_id_list_is_a_noop(self):
+        updated = services.set_vault_notes_trashed(self.user, [], trashed=True)
+        self.assertEqual(updated, 0)
+
+
+class ExpiredTrashedVaultNoteTests(TestCase):
+    """The retention sweep over trashed vault notes."""
+
+    def setUp(self):
+        self.user = create_user_with_password("password-123")
+        self.now = timezone.now()
+        self.window = timedelta(days=VAULT_TRASH_RETENTION_DAYS)
+
+    def test_active_notes_never_expire(self):
+        make_vault_note(self.user)
+        self.assertEqual(services.expired_trashed_vault_notes(now=self.now).count(), 0)
+
+    def test_recently_trashed_notes_are_kept(self):
+        make_vault_note(
+            self.user, trashed_at=self.now - self.window + timedelta(hours=1)
+        )
+        self.assertEqual(services.expired_trashed_vault_notes(now=self.now).count(), 0)
+
+    def test_a_note_exactly_at_the_cutoff_is_due(self):
+        note = make_vault_note(self.user, trashed_at=self.now - self.window)
+        self.assertEqual(
+            list(services.expired_trashed_vault_notes(now=self.now)), [note]
+        )
+
+    def test_delete_removes_only_due_notes(self):
+        due = make_vault_note(self.user, trashed_at=self.now - self.window)
+        recent = make_vault_note(self.user, trashed_at=self.now)
+        active = make_vault_note(self.user)
+
+        deleted = services.delete_expired_trashed_vault_notes(now=self.now)
+
+        self.assertEqual(deleted, 1)
+        self.assertFalse(VaultNote.objects.filter(pk=due.pk).exists())
+        self.assertTrue(VaultNote.objects.filter(pk=recent.pk).exists())
+        self.assertTrue(VaultNote.objects.filter(pk=active.pk).exists())
+
+    def test_delete_in_batches(self):
+        for _ in range(3):
+            make_vault_note(self.user, trashed_at=self.now - self.window)
+
+        deleted = services.delete_expired_trashed_vault_notes(
+            now=self.now, batch_size=2
+        )
+
+        self.assertEqual(deleted, 3)
+        self.assertEqual(VaultNote.objects.count(), 0)
 
 
 class MigrateVaultDataTests(TestCase):

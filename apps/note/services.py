@@ -24,6 +24,8 @@ Two conventions run through the live-note and collaboration functions:
 """
 
 import logging
+import uuid as uuid_module
+from datetime import timedelta
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -43,6 +45,7 @@ from .constants import (
     MAX_LIVE_PENDING_LENGTH,
     MAX_LIVE_PENDING_UPDATES,
     MAX_VAULT_NOTES_PER_USER,
+    VAULT_TRASH_RETENTION_DAYS,
 )
 from .models import (
     LiveNote,
@@ -989,13 +992,16 @@ def serialize_vault_note(
             tree without transferring every document.
 
     Returns:
-        dict[str, Any]: Note id, timestamps, ciphertext size, and optionally
-        the ciphertext + IV.
+        dict[str, Any]: Note id, timestamps, trash state, ciphertext size, and
+        optionally the ciphertext + IV.
     """
     payload: dict[str, Any] = {
         "id": str(note.id),
         "created_at": note.created_at.isoformat(),
         "updated_at": note.updated_at.isoformat(),
+        # The client reconciles this against the trash flag in its encrypted
+        # index on every load, so an interrupted trash/restore self-heals.
+        "trashed_at": note.trashed_at.isoformat() if note.trashed_at else None,
         "size": len(note.content),
     }
     if include_content:
@@ -1110,6 +1116,83 @@ def delete_vault_note(user: User, pk) -> bool:
     """
     deleted, _row_counts = VaultNote.objects.filter(user=user, pk=pk).delete()
     return bool(deleted)
+
+
+def set_vault_notes_trashed(user: User, ids, *, trashed: bool) -> int:
+    """Move the user's notes to Trash, or restore them.
+
+    One owner-scoped ``UPDATE``, so trashing a whole folder costs a single
+    query and a single request. ``QuerySet.update()`` is deliberate: it
+    bypasses ``auto_now``, leaving ``updated_at`` alone because moving a note
+    to Trash is not a content write.
+
+    Idempotent, like ``delete_vault_note``: unknown, foreign, and already-set
+    ids are harmless no-ops. Unparseable ids are dropped rather than raising,
+    since these come straight from a client payload.
+
+    Args:
+        user (User): The authenticated owner.
+        ids (Iterable[uuid.UUID | str]): Primary keys to update.
+        trashed (bool): ``True`` stamps ``trashed_at`` with the current server
+            time, ``False`` clears it.
+
+    Returns:
+        int: Number of rows actually updated.
+    """
+    valid_ids = []
+    for value in ids:
+        try:
+            valid_ids.append(uuid_module.UUID(str(value)))
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+    if not valid_ids:
+        return 0
+
+    return VaultNote.objects.filter(user=user, pk__in=valid_ids).update(
+        trashed_at=timezone.now() if trashed else None
+    )
+
+
+def expired_trashed_vault_notes(*, now=None) -> QuerySet[VaultNote]:
+    """Return vault notes that have sat in Trash past the retention window.
+
+    The vault-note counterpart of :func:`expired_notes`, sharing its single-
+    source-of-truth role for the cutoff. Active notes (``trashed_at`` null)
+    never match: vault notes have no expiry of their own.
+
+    Args:
+        now (datetime.datetime | None): Reference time the retention window is
+            measured back from. The current time is used when omitted.
+
+    Returns:
+        QuerySet[VaultNote]: Lazily evaluated notes due for deletion.
+    """
+    cutoff = (now or timezone.now()) - timedelta(days=VAULT_TRASH_RETENTION_DAYS)
+    return VaultNote.objects.filter(trashed_at__isnull=False, trashed_at__lte=cutoff)
+
+
+def delete_expired_trashed_vault_notes(*, now=None, batch_size=None) -> int:
+    """Delete vault notes that have sat in Trash past the retention window.
+
+    Args:
+        now (datetime.datetime | None): Reference time the retention window is
+            measured back from. The current time is used when omitted.
+        batch_size (int | None): Number of rows to delete per batch. ``None``
+            deletes all matching rows in one operation.
+
+    Returns:
+        int: Number of deleted ``VaultNote`` rows.
+    """
+    queryset = expired_trashed_vault_notes(now=now)
+
+    if batch_size is None:
+        deleted_count = queryset.count()
+        if deleted_count:
+            queryset.delete()
+        return deleted_count
+
+    return _delete_in_batches(queryset, batch_size)
 
 
 def migrate_vault_data(

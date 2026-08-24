@@ -25,6 +25,7 @@ from apps.note.constants import (
     MAX_VAULT_INDEX_LENGTH,
     MAX_VAULT_NOTE_CONTENT_LENGTH,
     MAX_VAULT_NOTES_PER_USER,
+    VAULT_TRASH_RETENTION_DAYS,
 )
 from apps.note.models import VaultIndex, VaultNote
 
@@ -88,6 +89,22 @@ class NoteVaultViewTests(VaultTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "note/vault.html")
         self.assertContains(response, self.user.user_id)
+
+    def test_vault_page_hands_the_client_its_trash_settings(self):
+        """The Trash endpoint and retention window reach the page.
+
+        Both are read straight off ``dataset``, so a renamed attribute would
+        silently give the client an ``undefined`` URL and a wrong-looking
+        tooltip rather than fail loudly.
+        """
+        self._authenticate()
+        response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
+        self.assertContains(
+            response, f'data-note-trash-url="{reverse("note:vault_note_trash")}"'
+        )
+        self.assertContains(
+            response, f'data-trash-retention-days="{VAULT_TRASH_RETENTION_DAYS}"'
+        )
 
     def test_vault_page_does_not_embed_ciphertext(self):
         """The shell never contains vault ciphertext; the browser fetches it
@@ -380,6 +397,100 @@ class VaultNoteDeleteViewTests(VaultTestCase):
             reverse("note:vault_note_delete", args=[uuid.uuid4()]), {}
         )
         self.assertEqual(response.status_code, 200)
+
+
+class VaultNoteTrashViewTests(VaultTestCase):
+    """POST /vault/notes/trash/ - the bulk, owner-scoped Trash flag."""
+
+    def setUp(self):
+        super().setUp()
+        self.url = reverse("note:vault_note_trash")
+
+    def test_requires_auth(self):
+        note = make_vault_note(self.user)
+        response = self._post_json(self.url, {"ids": [str(note.id)], "trashed": True})
+        self.assertEqual(response.status_code, 401)
+
+    def test_trashes_and_restores_in_bulk(self):
+        first = make_vault_note(self.user)
+        second = make_vault_note(self.user)
+        self._authenticate()
+
+        response = self._post_json(
+            self.url, {"ids": [str(first.id), str(second.id)], "trashed": True}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 2)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNotNone(first.trashed_at)
+        self.assertIsNotNone(second.trashed_at)
+
+        self._post_json(self.url, {"ids": [str(first.id)], "trashed": False})
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNone(first.trashed_at)
+        self.assertIsNotNone(second.trashed_at)
+
+    def test_is_owner_scoped(self):
+        other = create_user_with_password("other user password")
+        note = make_vault_note(other)
+        self._authenticate()
+
+        response = self._post_json(self.url, {"ids": [str(note.id)], "trashed": True})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 0)
+        note.refresh_from_db()
+        self.assertIsNone(note.trashed_at)
+
+    def test_repeating_the_call_is_harmless(self):
+        note = make_vault_note(self.user)
+        self._authenticate()
+
+        self._post_json(self.url, {"ids": [str(note.id)], "trashed": True})
+        note.refresh_from_db()
+        first_stamp = note.trashed_at
+
+        response = self._post_json(self.url, {"ids": [str(note.id)], "trashed": True})
+
+        self.assertEqual(response.status_code, 200)
+        note.refresh_from_db()
+        self.assertGreaterEqual(note.trashed_at, first_stamp)
+
+    def test_empty_id_list_is_accepted(self):
+        self._authenticate()
+        response = self._post_json(self.url, {"ids": [], "trashed": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 0)
+
+    def test_rejects_malformed_payloads(self):
+        self._authenticate()
+        note_id = str(make_vault_note(self.user).id)
+        payloads = [
+            {"trashed": True},  # no ids
+            {"ids": note_id, "trashed": True},  # not a list
+            {"ids": [1, 2], "trashed": True},  # not strings
+            {"ids": [note_id]},  # no flag
+            {"ids": [note_id], "trashed": "yes"},  # not a bool
+            {"ids": [note_id] * (MAX_VAULT_NOTES_PER_USER + 1), "trashed": True},
+        ]
+        for payload in payloads:
+            with self.subTest(payload=list(payload)):
+                response = self._post_json(self.url, payload)
+                self.assertEqual(response.status_code, 400)
+
+        self.assertIsNone(VaultNote.objects.get(pk=note_id).trashed_at)
+
+    def test_list_endpoint_reports_trash_state(self):
+        note = make_vault_note(self.user)
+        self._authenticate()
+        self._post_json(self.url, {"ids": [str(note.id)], "trashed": True})
+
+        response = self.client.get(reverse("note:vault_notes"), **AJAX)
+
+        self.assertIsNotNone(response.json()["notes"][0]["trashed_at"])
 
 
 class VaultMigrateViewTests(VaultTestCase):

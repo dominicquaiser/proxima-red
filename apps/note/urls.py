@@ -21,6 +21,13 @@ urlpatterns = [
     path("vault/", views.NoteVaultView.as_view(), name="vault"),
     path("vault/index/", views.VaultIndexView.as_view(), name="vault_index"),
     path("vault/notes/", views.VaultNoteCollectionView.as_view(), name="vault_notes"),
+    # Ahead of the ``<uuid:pk>`` routes below: the uuid converter cannot match
+    # "trash", so this is ordering hygiene rather than a real collision.
+    path(
+        "vault/notes/trash/",
+        views.VaultNoteTrashView.as_view(),
+        name="vault_note_trash",
+    ),
     path(
         "vault/notes/<uuid:pk>/",
         views.VaultNoteDetailView.as_view(),

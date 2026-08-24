@@ -31,6 +31,8 @@
     const notesUrl = main.dataset.notesUrl;
     const noteUrlBase = main.dataset.noteUrlBase;
     const noteDeleteUrlBase = main.dataset.noteDeleteUrlBase;
+    const noteTrashUrl = main.dataset.noteTrashUrl;
+    const trashRetentionDays = main.dataset.trashRetentionDays;
     const dummyNoteId = main.dataset.dummyNoteId;
 
     const crumbEl = document.getElementById("vault-crumb");
@@ -160,8 +162,7 @@
       row.appendChild(icon("file", "tree__icon"));
       const name = document.createElement("span");
       name.className = "tree__name";
-      name.textContent =
-        "unreadable note (" + id.slice(0, UNREADABLE_ID_PREFIX_LENGTH) + "…)";
+      name.textContent = "unreadable note (" + id.slice(0, UNREADABLE_ID_PREFIX_LENGTH) + "…)";
       row.appendChild(name);
       row.appendChild(rowActionsButton("unreadable", id));
       return row;
@@ -209,6 +210,8 @@
       });
       const trashSummary = document.createElement("summary");
       trashSummary.className = "tree__row";
+      trashSummary.title =
+        "Items in Trash are deleted permanently after " + trashRetentionDays + " days.";
       trashSummary.appendChild(icon("caret-right", "tree__chev"));
       trashSummary.appendChild(icon("trash", "tree__icon tree__icon--trash"));
       const trashName = document.createElement("span");
@@ -219,16 +222,10 @@
       tree.trash.forEach((note) => trashDetails.appendChild(buildFileRow(note, "trash")));
       treeEl.appendChild(trashDetails);
 
-      if (
-        tree.folders.length === 0 &&
-        tree.rootNotes.length === 0 &&
-        unreadableIds.size === 0
-      ) {
+      if (tree.folders.length === 0 && tree.rootNotes.length === 0 && unreadableIds.size === 0) {
         const empty = document.createElement("p");
         empty.className = "tree__empty";
-        empty.textContent = searchTerm
-          ? "No notes match the search."
-          : "No notes yet.";
+        empty.textContent = searchTerm ? "No notes match the search." : "No notes yet.";
         treeEl.appendChild(empty);
       }
 
@@ -312,7 +309,7 @@
         console.error("Failed to decrypt note:", error);
         window.Notify.show(
           "Could not decrypt the note with the current key. It may have been " +
-          "written under a previous password.",
+            "written under a previous password.",
           "error",
         );
         return;
@@ -372,9 +369,7 @@
           if (!response.ok || !result.success) {
             throw new Error(result.error || `HTTP ${response.status}`);
           }
-          await commitIndexChange((idx) =>
-            Index.touchNote(idx, currentNoteId, result.updated_at),
-          );
+          await commitIndexChange((idx) => Index.touchNote(idx, currentNoteId, result.updated_at));
         }
 
         lastSavedValue = text;
@@ -385,6 +380,28 @@
         window.Notify.show(error.message || "Failed to save the note.", "error");
       } finally {
         isSaving = false;
+      }
+    };
+
+    // Record Trash state on the server rows. Trash itself lives in the
+    // encrypted index; this flag is only what lets the expiry sweep delete a
+    // note once the retention window passes. Bulk on purpose: trashing a whole
+    // folder costs one write of the vault rate limit, not one per note.
+    const setTrashed = async (ids, trashed) => {
+      if (ids.length === 0) return true;
+      try {
+        const { response, result } = await window.Http.postForm(noteTrashUrl, {
+          ids,
+          trashed,
+        });
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || `HTTP ${response.status}`);
+        }
+        return true;
+      } catch (error) {
+        console.error("Failed to update Trash state:", error);
+        window.Notify.show("Could not update Trash. Please try again.", "error");
+        return false;
       }
     };
 
@@ -495,17 +512,22 @@
 
     // Destructive deletes require a second click.
     const ctxDeleteItem = (label, onConfirm) => {
-      const button = ctxItem(label, "trash", (event) => {
-        event.stopPropagation();
-        if (armedDelete === button) {
-          closeCtxMenu();
-          onConfirm();
-          return;
-        }
-        armedDelete = button;
-        button.classList.add("ctx-menu__item--armed");
-        button.replaceChildren(icon("trash"), document.createTextNode("Click again to confirm"));
-      }, "ctx-menu__item--danger");
+      const button = ctxItem(
+        label,
+        "trash",
+        (event) => {
+          event.stopPropagation();
+          if (armedDelete === button) {
+            closeCtxMenu();
+            onConfirm();
+            return;
+          }
+          armedDelete = button;
+          button.classList.add("ctx-menu__item--armed");
+          button.replaceChildren(icon("trash"), document.createTextNode("Click again to confirm"));
+        },
+        "ctx-menu__item--danger",
+      );
       return button;
     };
 
@@ -553,20 +575,34 @@
         divider.className = "ctx-menu__divider";
         ctxMenu.appendChild(divider);
         ctxMenu.appendChild(
-          ctxItem("Move to Trash", "trash", () => {
-            closeCtxMenu();
-            if (id === currentNoteId) {
-              setDirty(false);
-              startNewBuffer();
-            }
-            commitIndexChange((idx) => Index.trashNote(idx, id));
-          }, "ctx-menu__item--danger"),
+          ctxItem(
+            "Move to Trash",
+            "trash",
+            async () => {
+              closeCtxMenu();
+              if (id === currentNoteId) {
+                setDirty(false);
+                startNewBuffer();
+              }
+              // Index first, then the flag. The reverse order could leave a note
+              // the user still sees as active carrying a deletion flag.
+              if (await commitIndexChange((idx) => Index.trashNote(idx, id))) {
+                await setTrashed([id], true);
+              }
+            },
+            "ctx-menu__item--danger",
+          ),
         );
       } else if (kind === "trash") {
         ctxMenu.appendChild(
-          ctxItem("Restore", "arrow-counter-clockwise", () => {
+          ctxItem("Restore", "arrow-counter-clockwise", async () => {
             closeCtxMenu();
-            commitIndexChange((idx) => Index.restoreNote(idx, id));
+            // Clear the flag first, and abort the restore if that fails: a
+            // note left in Trash is recoverable, one the server still plans to
+            // delete is not.
+            if (await setTrashed([id], false)) {
+              await commitIndexChange((idx) => Index.restoreNote(idx, id));
+            }
           }),
         );
         ctxMenu.appendChild(ctxDeleteItem("Delete forever", () => deleteNoteForever(id)));
@@ -580,9 +616,16 @@
           }),
         );
         ctxMenu.appendChild(
-          ctxDeleteItem("Delete folder", () => {
-            // Folder contents move to Trash; rows stay on the server.
-            commitIndexChange((idx) => Index.deleteFolder(idx, id));
+          ctxDeleteItem("Delete folder", async () => {
+            // Folder contents move to Trash; rows stay on the server. Collect
+            // the ids deleteFolder will trash before mutating, then flag them
+            // in one call (index first, then the flag).
+            const trashing = index.notes
+              .filter((note) => note.folderId === id && !note.trashed)
+              .map((note) => note.id);
+            if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
+              await setTrashed(trashing, true);
+            }
           }),
         );
       }
@@ -694,9 +737,7 @@
           index = decrypted;
         } catch (error) {
           console.error("Failed to decrypt vault index:", error);
-          disableVault(
-            "Could not decrypt your vault index. Reload the page or sign in again.",
-          );
+          disableVault("Could not decrypt your vault index. Reload the page or sign in again.");
           return;
         }
       }
@@ -725,11 +766,15 @@
             result.iv,
             masterKey,
           );
+          // Re-adopt at the row's own Trash state, so a note recovered from a
+          // half-finished write does not silently climb back out of Trash.
           index = Index.addNote(index, {
             id,
             name: window.NoteMarkdown.titleSlug(text, "recovered-note") + ".md",
             createdAt: result.created_at,
             updatedAt: result.updated_at,
+            trashed: !!result.trashed_at,
+            deletedAt: result.trashed_at || null,
           });
           changed = true;
         } catch (error) {
@@ -741,6 +786,17 @@
 
       if (changed) await persistIndex();
       startNewBuffer();
+
+      // Housekeeping, after the vault is on screen and normally a no-op: bring
+      // rows whose Trash flag disagrees with the index back in line, one bulk
+      // call per direction. This is what heals an interrupted trash/restore,
+      // and it is why the ordering at those call sites is an optimization
+      // rather than a correctness requirement.
+      if (!readOnly) {
+        const drift = Index.trashFlagDrift(index, serverNotes);
+        await setTrashed(drift.trash, true);
+        await setTrashed(drift.restore, false);
+      }
     };
 
     const initialize = async () => {

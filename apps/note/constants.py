@@ -65,6 +65,11 @@ MAX_VAULT_INDEX_LENGTH: Final[int] = 500_000
 # account (200 x 200,000 chars) while being far above realistic use.
 MAX_VAULT_NOTES_PER_USER: Final[int] = 200
 
+# How long a note stays in the vault's Trash before the expiry sweep deletes
+# it for good. Single source of truth: the vault page hands this to the client
+# so the UI cannot drift from what the server actually enforces.
+VAULT_TRASH_RETENTION_DAYS: Final[int] = 7
+
 # Vault rate limits are per-IP like the anonymous ones. Reads are generous
 # (the vault UI lists + fetches notes on load); writes and the password-change
 # migration are tighter because they are user-initiated one-at-a-time actions.
