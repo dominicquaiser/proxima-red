@@ -397,6 +397,48 @@ class LiveNoteSnapshotViewTests(LiveViewTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"], ERROR_LIVE_STALE_SNAPSHOT)
 
+    def test_stale_key_epoch_answers_409_with_a_recoverable_code(self):
+        """The client must be able to tell "re-keyed" from "lost the race".
+
+        A plain 409 tells it to retry; only the code says to go and fetch the
+        new key instead.
+        """
+        rekeyed = make_live_note(key_epoch=4)
+        newest = make_live_update(rekeyed)
+
+        response = self._post_json(
+            reverse("note:live_snapshot", args=[rekeyed.id]),
+            {
+                "snapshot": "b2xka2V5c25hcHNob3Q=",
+                "snapshot_iv": VALID_IV_B64,
+                "covers_seq": newest.pk,
+                "key_epoch": 0,
+            },
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "stale_epoch")
+        rekeyed.refresh_from_db()
+        self.assertEqual(rekeyed.snapshot, VALID_CONTENT_B64)
+        self.assertEqual(rekeyed.updates.count(), 1)
+
+    def test_absent_key_epoch_still_compacts_a_link_note(self):
+        """Link-mode and pre-M4 clients send no epoch; 0 must keep working."""
+        newest = make_live_update(self.note)
+
+        response = self._post_json(
+            self.url,
+            {
+                "snapshot": "Y29tcGFjdGVk",
+                "snapshot_iv": VALID_IV_B64,
+                "covers_seq": newest.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.snapshot, "Y29tcGFjdGVk")
+
     def test_covers_seq_beyond_newest_answers_409(self):
         newest = make_live_update(self.note)
 

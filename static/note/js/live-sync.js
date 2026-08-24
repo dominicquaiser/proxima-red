@@ -28,6 +28,10 @@
   // Jitter staggers concurrent compactors; server covers_seq settles races.
   const COMPACT_PENDING_THRESHOLD = 64;
   const COMPACT_JITTER_SPAN = 16;
+  // Consecutive compaction failures before the user is warned. Above a lost
+  // race or a transient 5xx, below the server's pending-tail cap, so the
+  // warning lands while edits still flow rather than after they stop.
+  const COMPACT_FAILURE_LIMIT = 4;
   // Browser keepalive bodies are capped around 64KB.
   const KEEPALIVE_BODY_LIMIT = 60000;
 
@@ -157,6 +161,11 @@
     let backoffMs = 0;
     let status = "loading";
     let warnedBadRow = false;
+    let warnedBadSnapshot = false;
+    // Consecutive failed compactions, and whether the user has been told the
+    // document can no longer be compacted (see noteCompactOutcome).
+    let compactFailures = 0;
+    let warnedCompactStuck = false;
 
     // WebSocket transport state. `ws` is non-null from construction attempt
     // to close; only an OPEN socket carries traffic (wsIsOpen).
@@ -243,18 +252,48 @@
           warnedBadRow = true;
           window.Notify.show(
             "Skipped an update that could not be decrypted (it may have been " +
-            "tampered with). The rest of the document stays live.",
+              "tampered with). The rest of the document stays live.",
             "error",
           );
         }
       }
     }
 
+    // Apply a /state/ or /updates/ body. Returns false when nothing was
+    // applied and the cursor was deliberately left where it was, so the same
+    // range is refetched rather than skipped.
     async function applyServerBody(body) {
+      // Every read echoes the current key generation, which is the only way a
+      // client that isn't typing learns it was re-keyed: appends are what
+      // trigger stale_epoch, and a passive reader makes none. Left undetected
+      // it would keep decrypting rows with a dead key, skipping them all, and
+      // still advance its cursor. Bail before applying or advancing: after
+      // adoptRekey the next poll refetches this same range under the new key.
+      if (typeof body.key_epoch === "number" && body.key_epoch !== epoch) {
+        handleStaleEpoch();
+        return false;
+      }
+
       if (body.snapshot) {
         // Our cursor predates compaction; a Yjs snapshot update is CRDT-safe.
-        const bytes = await window.CryptoCore.decryptBytes(body.snapshot, body.snapshot_iv, key);
-        window.Y.applyUpdate(doc, bytes, "remote");
+        try {
+          const bytes = await window.CryptoCore.decryptBytes(body.snapshot, body.snapshot_iv, key);
+          window.Y.applyUpdate(doc, bytes, "remote");
+        } catch (error) {
+          // Unlike a single bad row, an unreadable snapshot cannot be skipped
+          // past: it *is* the history our cursor is missing. Hold the cursor
+          // so a later key adoption can still recover, and say so once
+          // instead of backing off silently forever.
+          if (!warnedBadSnapshot) {
+            warnedBadSnapshot = true;
+            window.Notify.show(
+              "Could not read this note's stored history with the current " +
+                "key. Recent edits from others may be missing.",
+              "error",
+            );
+          }
+          return false;
+        }
       }
       for (const row of body.updates) {
         await applyRow(row);
@@ -262,19 +301,41 @@
       // A WebSocket push may have advanced cursor while this request was in flight.
       cursor = Math.max(cursor, body.seq);
       pending = body.pending;
+      return true;
     }
 
     // --- Outbox flush ---
 
-    function scheduleFlush() {
+    // Retry the flush after `delayMs`. Every retry path books the one
+    // flushTimer slot, so flush()'s finally-block guard can tell that a retry
+    // is already pending: scheduling a backed-off retry any other way lets
+    // that guard fire an immediate flush on top of it and the backoff is
+    // silently lost.
+    function scheduleFlushAfter(delayMs) {
       if (stopped || flushTimer) return;
-      flushTimer = setTimeout(
-        function () {
-          flushTimer = null;
-          flush(false);
-        },
-        wsIsOpen() ? FLUSH_DEBOUNCE_WS_MS : FLUSH_DEBOUNCE_MS,
-      );
+      flushTimer = setTimeout(function () {
+        flushTimer = null;
+        flush(false);
+      }, delayMs);
+    }
+
+    function scheduleFlush() {
+      scheduleFlushAfter(wsIsOpen() ? FLUSH_DEBOUNCE_WS_MS : FLUSH_DEBOUNCE_MS);
+    }
+
+    // Retry after a compaction that was meant to drain a full pending tail.
+    // A drained tail earns a prompt retry; anything else has to back off, or
+    // flush and compact ping-pong at the debounce interval against a tail
+    // that cannot drain.
+    function scheduleFlushAfterCompact(drained) {
+      if (stopped) return;
+      if (drained) {
+        scheduleFlush();
+        return;
+      }
+      backoffMs = nextBackoffMs(backoffMs);
+      refreshStatus();
+      scheduleFlushAfter(backoffMs);
     }
 
     // Send merged outbox over WS; clear it only after the ack.
@@ -306,7 +367,11 @@
     }
 
     async function flush(keepalive) {
-      if (stopped || flushInFlight || !outbox.length) return;
+      // Appends stay paused while a rekey recovery is pending: our key is
+      // known-stale, so every attempt comes straight back as stale_epoch, and
+      // the finally-block below would re-arm the next one a debounce later.
+      // adoptRekey clears the flag and re-arms the flush itself.
+      if (stopped || flushInFlight || staleEpochInFlight || !outbox.length) return;
       flushInFlight = true;
       const count = outbox.length;
       refreshStatus();
@@ -337,10 +402,9 @@
           return;
         }
         if (response.status === 409) {
-          // Pending tail full: compact first, then retry the flush.
+          // Pending tail full: compact to drain it, then retry the flush.
           flushInFlight = false;
-          await compact();
-          scheduleFlush();
+          scheduleFlushAfterCompact(await compact());
           return;
         }
         if (!response.ok || !result || !result.success) {
@@ -355,11 +419,7 @@
       } catch (error) {
         // Keep the outbox; retry after a backoff (429, network, 5xx).
         backoffMs = nextBackoffMs(backoffMs);
-        if (!stopped) {
-          setTimeout(function () {
-            scheduleFlush();
-          }, backoffMs);
-        }
+        scheduleFlushAfter(backoffMs);
       } finally {
         flushInFlight = false;
         refreshStatus();
@@ -390,31 +450,77 @@
       if (shouldCompact(pending, compactJitter)) compact();
     }
 
-    // Best-effort full snapshot covering every row at or below current cursor.
+    // Full snapshot covering every row at or below current cursor.
+    //
+    // Mostly best-effort: losing a compaction race is normal and silent. But
+    // a compaction that can never succeed (snapshot over the server cap, the
+    // snapshot rate limit, an expired session on a restricted note) strands
+    // the document once the pending tail fills, so repeated failures escalate
+    // rather than staying quiet. Returns whether the snapshot was stored.
     async function compact() {
-      if (stopped || compactInFlight) return;
+      // While a rekey recovery is pending our key is known-stale, so the
+      // server would (correctly) refuse this snapshot anyway.
+      if (stopped || compactInFlight || staleEpochInFlight) return false;
       compactInFlight = true;
       try {
         const coversSeq = cursor;
-        if (!coversSeq) return;
+        if (!coversSeq) return false;
         const bytes = window.Y.encodeStateAsUpdate(doc);
         const payload = await window.CryptoCore.encryptBytesWithKey(bytes, key);
-        const { response } = await postJson(urls.snapshot, {
+        const { response, result } = await postJson(urls.snapshot, {
           snapshot: payload.encryptedData,
           snapshot_iv: payload.iv,
           covers_seq: coversSeq,
+          key_epoch: epoch,
         });
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
-          return;
+          return false;
         }
-        // 409 means another client won or our cursor is stale; try later.
-        if (response.ok) pending = 0;
+        if (response.status === 409 && result && result.code === "stale_epoch") {
+          // Rekeyed: this snapshot is under the old key. Never retry it.
+          // Storing it would replace the document with ciphertext no current
+          // reader can open. Recover the new key instead.
+          handleStaleEpoch();
+          return false;
+        }
+        if (response.ok) {
+          pending = 0;
+          noteCompactOutcome(true);
+          return true;
+        }
+        // A plain 409 is a lost race or a stale cursor: another client's
+        // snapshot already covers us, so this is success by proxy.
+        noteCompactOutcome(response.status === 409);
+        return false;
       } catch (error) {
-        /* best effort */
+        noteCompactOutcome(false);
+        return false;
       } finally {
         compactInFlight = false;
       }
+    }
+
+    // Escalate a compaction that keeps failing. Silent for the first few
+    // attempts (a transient 5xx or a lost race is routine); past the
+    // threshold the tail is filling with no way to drain it, which the user
+    // needs to know about because their edits stop propagating.
+    function noteCompactOutcome(ok) {
+      if (ok) {
+        compactFailures = 0;
+        return;
+      }
+      compactFailures += 1;
+      if (compactFailures < COMPACT_FAILURE_LIMIT || warnedCompactStuck) return;
+      warnedCompactStuck = true;
+      // Deliberately about the symptom, not the cause: the client cannot tell
+      // an oversized snapshot from a rate limit from an expired session, and
+      // all three end the same way for the user.
+      window.Notify.show(
+        "This note's history could not be saved. Editing may stop working - " +
+          "copy your work somewhere safe.",
+        "error",
+      );
     }
 
     // --- Poll loop (fallback transport; idle while the socket is open) ---
@@ -428,9 +534,7 @@
     async function poll() {
       if (stopped) return;
       try {
-        const { response, result } = await window.Http.getJson(
-          urls.updates + "?since=" + cursor,
-        );
+        const { response, result } = await window.Http.getJson(urls.updates + "?since=" + cursor);
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
           return;
@@ -438,9 +542,9 @@
         if (!response.ok || !result.success) {
           throw new Error("poll failed");
         }
-        await applyServerBody(result);
+        const applied = await applyServerBody(result);
         backoffMs = 0;
-        maybeCompact();
+        if (applied) maybeCompact();
         refreshStatus();
         schedulePoll(pollDelayMs(document.hidden, Math.random()));
       } catch (error) {
@@ -458,16 +562,13 @@
       if (stopped || gapFillInFlight) return;
       gapFillInFlight = true;
       try {
-        const { response, result } = await window.Http.getJson(
-          urls.updates + "?since=" + cursor,
-        );
+        const { response, result } = await window.Http.getJson(urls.updates + "?since=" + cursor);
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
           return;
         }
         if (response.ok && result && result.success) {
-          await applyServerBody(result);
-          maybeCompact();
+          if (await applyServerBody(result)) maybeCompact();
         }
       } catch (error) {
         // Best effort: the next gap or fallback poll retries.
@@ -504,14 +605,12 @@
         return null;
       }
       if (msg.code === "pending_tail_full") {
-        // Same recovery as the HTTP 409: compact, then retry the flush.
+        // Same recovery as the HTTP 409, backoff included.
         wsFlush = null;
         if (ackTimer) clearTimeout(ackTimer);
         ackTimer = null;
         flushInFlight = false;
-        return compact().then(function () {
-          if (!stopped) scheduleFlush();
-        });
+        return compact().then(scheduleFlushAfterCompact);
       }
       if (wsFlush) {
         // rate_limited / invalid_frame / server_error while our flush was
@@ -522,11 +621,7 @@
         flushInFlight = false;
         backoffMs = nextBackoffMs(backoffMs);
         refreshStatus();
-        if (!stopped) {
-          setTimeout(function () {
-            scheduleFlush();
-          }, backoffMs);
-        }
+        scheduleFlushAfter(backoffMs);
       }
       return null;
     }
@@ -681,7 +776,7 @@
         fatal(
           "error",
           "This link's key does not match the stored note. The link may be " +
-          "incomplete, or the data may have been tampered with.",
+            "incomplete, or the data may have been tampered with.",
         );
         return false;
       }

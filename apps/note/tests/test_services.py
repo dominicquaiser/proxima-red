@@ -432,6 +432,71 @@ class SaveLiveSnapshotTests(TestCase):
         self.assertEqual(self.note.snapshot_seq, 0)
         self.assertEqual(self.note.updates.count(), 1)
 
+    def test_stale_key_epoch_cannot_replace_the_snapshot(self):
+        """A client on a pre-rekey key must not overwrite the document.
+
+        The append path rejects a stale epoch because the row would be
+        unreadable; here the stakes are higher, since a snapshot *replaces*
+        the document and prunes the tail with it.
+        """
+        rekeyed = make_live_note(key_epoch=3)
+        newest = make_live_update(rekeyed)
+
+        with self.assertRaises(ValidationError) as ctx:
+            services.save_live_snapshot(
+                rekeyed.pk,
+                snapshot="b2xka2V5c25hcHNob3Q=",
+                snapshot_iv=VALID_IV_B64,
+                covers_seq=newest.pk,
+                key_epoch=0,
+            )
+
+        self.assertEqual(ctx.exception.code, "stale_epoch")
+        rekeyed.refresh_from_db()
+        self.assertEqual(rekeyed.snapshot, VALID_CONTENT_B64)
+        self.assertEqual(rekeyed.snapshot_seq, 0)
+        self.assertEqual(rekeyed.updates.count(), 1)
+
+    def test_stale_epoch_is_reported_before_a_lost_race(self):
+        """stale_epoch outranks stale_snapshot: the client must recover, not retry."""
+        rekeyed = make_live_note(key_epoch=2)
+        newest = make_live_update(rekeyed)
+        services.save_live_snapshot(
+            rekeyed.pk,
+            snapshot="Y29tcGFjdGVk",
+            snapshot_iv=VALID_IV_B64,
+            covers_seq=newest.pk,
+            key_epoch=2,
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            services.save_live_snapshot(
+                rekeyed.pk,
+                snapshot=VALID_CONTENT_B64,
+                snapshot_iv=VALID_IV_B64,
+                covers_seq=newest.pk,
+                key_epoch=0,
+            )
+
+        self.assertEqual(ctx.exception.code, "stale_epoch")
+
+    def test_current_key_epoch_compacts_normally(self):
+        rekeyed = make_live_note(key_epoch=5)
+        newest = make_live_update(rekeyed)
+
+        deleted = services.save_live_snapshot(
+            rekeyed.pk,
+            snapshot="Y29tcGFjdGVk",
+            snapshot_iv=VALID_IV_B64,
+            covers_seq=newest.pk,
+            key_epoch=5,
+        )
+
+        self.assertEqual(deleted, 1)
+        rekeyed.refresh_from_db()
+        self.assertEqual(rekeyed.snapshot, "Y29tcGFjdGVk")
+        self.assertEqual(rekeyed.key_epoch, 5)
+
 
 class ExpiredLiveNoteCleanupTests(TestCase):
     """services.expired_live_notes / delete_expired_live_notes."""

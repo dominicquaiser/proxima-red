@@ -1176,13 +1176,25 @@ class LiveNoteSnapshotView(View):
         if covers_seq is None:
             return json_error(ERROR_INVALID_JSON)
 
+        # Same convention as the append path: absent reads as 0 (link-mode and
+        # pre-M4 clients), and a genuine mismatch surfaces as stale_epoch.
+        key_epoch = _non_negative_int(data.get("key_epoch", 0)) or 0
+
         try:
             deleted = services.save_live_snapshot(
-                pk, snapshot=snapshot, snapshot_iv=snapshot_iv, covers_seq=covers_seq
+                pk,
+                snapshot=snapshot,
+                snapshot_iv=snapshot_iv,
+                covers_seq=covers_seq,
+                key_epoch=key_epoch,
             )
         except LiveNote.DoesNotExist:
             return json_error(ERROR_NOTE_NOT_FOUND, status=404)
         except ValidationError as e:
+            if e.code == "stale_epoch":
+                return json_error(
+                    ERROR_LIVE_STALE_EPOCH, status=409, code="stale_epoch"
+                )
             if e.code == "stale_snapshot":
                 return json_error(ERROR_LIVE_STALE_SNAPSHOT, status=409)
             if e.code == "covers_unknown_updates":

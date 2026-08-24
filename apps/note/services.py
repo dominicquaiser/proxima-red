@@ -247,7 +247,7 @@ def get_active_live_note(pk) -> LiveNote | None:
     transports: the HTTP endpoints' ``_live_note_or_404_json`` and the
     consumer's ``_load_active_note`` both call it, so the expire-on-read
     behaviour (and the deletion log) lives in exactly one place. Unknown and
-    expired are indistinguishable here — both return ``None`` — because each
+    expired are indistinguishable here (both return ``None``) because each
     transport renders both as its terminal "gone" signal (HTTP 404 / WS close
     ``WS_CLOSE_NOT_FOUND``).
 
@@ -423,7 +423,9 @@ def append_live_update(
         return row, pending_count + 1, prev_seq
 
 
-def save_live_snapshot(pk, *, snapshot: str, snapshot_iv: str, covers_seq: int) -> int:
+def save_live_snapshot(
+    pk, *, snapshot: str, snapshot_iv: str, covers_seq: int, key_epoch: int = 0
+) -> int:
     """Replace a live note's snapshot with a client's compaction and prune the log.
 
     First valid writer wins: a compaction whose ``covers_seq`` is not newer
@@ -445,18 +447,34 @@ def save_live_snapshot(pk, *, snapshot: str, snapshot_iv: str, covers_seq: int) 
         snapshot_iv (str): Base64-encoded initialization vector.
         covers_seq (int): The compacting client's applied cursor: every update
             row with an id at or below it is folded into the snapshot.
+        key_epoch (int): The document-key generation the client encrypted the
+            snapshot under. Must match the note's current ``key_epoch``, for
+            the same reason :func:`append_live_update` checks it, and more
+            urgently: an append under a stale key only adds a row others skip,
+            whereas a stale-key *snapshot* replaces the document and prunes
+            the tail, so accepting one would leave every current reader with
+            ciphertext no live key opens.
 
     Returns:
         int: Number of pruned update rows.
 
     Raises:
         LiveNote.DoesNotExist: If the note is unknown or already deleted.
-        ValidationError: Codes ``stale_snapshot`` (lost compaction race) or
+        ValidationError: Codes ``stale_epoch`` (the note was re-keyed),
+            ``stale_snapshot`` (lost compaction race) or
             ``covers_unknown_updates`` (cursor beyond the newest row), or if
             the fields fail model validation. Nothing is persisted.
     """
     with transaction.atomic():
         note = LiveNote.objects.select_for_update().get(pk=pk)
+
+        # Before the race guards: a stale-key compactor must not be told it
+        # merely lost a race, or the client would retry instead of recovering
+        # the new key.
+        if key_epoch != note.key_epoch:
+            raise ValidationError(
+                _("The document key has changed (stale epoch)."), code="stale_epoch"
+            )
 
         if covers_seq <= note.snapshot_seq:
             raise ValidationError(
@@ -756,7 +774,7 @@ def rekey_live_note(
         # Guards (all under the row lock, cheapest first): only the owner may
         # rekey, only a restricted note has keys to rotate, the epoch must be
         # exactly the next generation, and the snapshot must fold in the whole
-        # tail (strict equality — a mixed-key log is forbidden).
+        # tail (strict equality: a mixed-key log is forbidden).
         _require_owner(note, owner_user)
         if note.access_mode != LiveNote.ACCESS_RESTRICTED:
             raise ValidationError(_("Not restricted."), code="not_restricted")
@@ -794,9 +812,7 @@ def _rekey_survivors(
 
     Called under the ``LiveNote`` row lock by :func:`rekey_live_note`, before
     anything is written. The survivors are every current collaborator except
-    the revoked one; ``wraps`` must carry a new wrap for exactly them — a
-    missing wrap would strand a survivor, an extra one references a
-    non-collaborator.
+    the revoked one; ``wraps`` must carry a new wrap for exactly them.
 
     Args:
         note (LiveNote): The locked live note.
