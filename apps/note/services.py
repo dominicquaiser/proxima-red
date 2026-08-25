@@ -701,29 +701,15 @@ def restrict_live_note(pk, *, owner_user: User, wrap: dict) -> LiveNoteCollabora
         return grant
 
 
-def unrestrict_live_note(pk, *, owner_user: User) -> None:
-    """Revert a restricted note to link access, dropping all collaborator rows.
-
-    Owner-only. The document key is unchanged (whoever holds the fragment key
-    keeps access: the honest consequence, surfaced in the UI copy), so this is
-    a gate change, not a re-key.
-
-    Args:
-        pk: Primary key of the live note.
-        owner_user (User): The authenticated owner.
-
-    Raises:
-        LiveNote.DoesNotExist: Unknown note.
-        ValidationError: Codes ``not_owner`` or ``not_restricted``.
-    """
-    with transaction.atomic():
-        note = LiveNote.objects.select_for_update().get(pk=pk)
-        _require_owner(note, owner_user)
-        if note.access_mode != LiveNote.ACCESS_RESTRICTED:
-            raise ValidationError(_("Not restricted."), code="not_restricted")
-        note.access_mode = LiveNote.ACCESS_LINK
-        note.save(update_fields=["access_mode", "updated_at"])
-        note.collaborators.all().delete()
+# There is deliberately no `unrestrict_live_note`. Reverting to link access
+# means dropping every collaborator row, and after a rekey those rows hold the
+# only copies of the current document key. Unrestricting such a note would
+# therefore publish it to anyone with the link while destroying the last means
+# of reading it. Doing it safely requires rotating back to a fresh fragment
+# key and handing the owner the new link, which is a feature (with its own
+# "save this link or lose the document" hazard), not a gate flip. Until then,
+# restricting is# one-way and the panel copy says so; the way to get an open
+# document is to create a new editable link from the current text.
 
 
 def add_live_collaborator(pk, *, owner_user: User, invitee_user_id: str, wrap: dict):
@@ -1338,6 +1324,77 @@ def migrate_vault_data(
             keypair.full_clean()
             keypair.save()
         return migrated
+
+
+def build_note_export(user: User) -> dict[str, Any]:
+    """Build every note-app section of the account's GDPR data export.
+
+    Covers what the note tool holds *about the account* beyond the vault: the
+    shared notes and live notes it created, and its collaboration grants. All
+    payloads are ciphertext the server cannot read; they are included anyway
+    because they are the user's own data and only they hold the keys.
+
+    Live notes carry their pending update tail as well as the snapshot. The
+    snapshot alone is the document as of the last compaction, so shipping it
+    on its own would hand the user a knowingly stale copy. Both are bounded
+    per note by ``MAX_LIVE_SNAPSHOT_LENGTH`` and ``MAX_LIVE_PENDING_LENGTH``.
+
+    Collaboration grants are limited to this user's own rows. An owner can
+    already see their collaborators' ids in the management panel, but an
+    export file is a different distribution surface, and those ids are other
+    people's personal data (GDPR Art. 15(4)).
+
+    Args:
+        user (User): The user whose data should be exported.
+
+    Returns:
+        dict[str, Any]: ``shared_notes``, ``live_notes`` and
+        ``live_note_collaborations``.
+    """
+    return {
+        "shared_notes": [
+            {
+                "id": str(note.id),
+                "is_encrypted": note.is_encrypted,
+                "content": note.content,
+                "iv": note.iv,
+                "created_at": note.created_at.isoformat(),
+                "expires_at": note.expires_at.isoformat(),
+                "access_count": note.access_count,
+            }
+            for note in user.shared_notes.all()
+        ],
+        "live_notes": [
+            {
+                "id": str(note.id),
+                "snapshot": note.snapshot,
+                "snapshot_iv": note.snapshot_iv,
+                "snapshot_seq": note.snapshot_seq,
+                "access_mode": note.access_mode,
+                "key_epoch": note.key_epoch,
+                "created_at": note.created_at.isoformat(),
+                "updated_at": note.updated_at.isoformat(),
+                "expires_at": note.expires_at.isoformat(),
+                "access_count": note.access_count,
+                "pending_updates": _serialize_live_updates(list(note.updates.all())),
+            }
+            for note in user.live_notes.prefetch_related("updates")
+        ],
+        "live_note_collaborations": [
+            {
+                "note_id": str(row.note_id),
+                "role": row.role,
+                # This user's own wrap: the doc key encrypted to their public
+                # key, openable only with the private key in `keypair`.
+                "wrapped_key": row.wrapped_key,
+                "wrap_iv": row.wrap_iv,
+                "ephemeral_public_key": row.ephemeral_public_key,
+                "key_epoch": row.key_epoch,
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in user.live_collaborations.all()
+        ],
+    }
 
 
 def build_note_vault_export(user: User) -> dict[str, Any]:

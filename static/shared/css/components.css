@@ -182,6 +182,14 @@
 .btn-create:active {
   transform: scale(0.99);
 }
+/* .btn-create on an <a> (e.g. a sign-in link that must open in a new tab, which
+   only a real anchor gives you: middle-click, open-in-new-tab, screen readers). */
+.btn-create--link {
+  display: block;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+}
 
 /* Modal shell + the shared unlock overlay (partials/_unlock_modal.html).
    Lives here rather than in a tool's stylesheet because the unlock modal is
@@ -228,11 +236,16 @@
 .modal .card {
   max-width: none;
 }
-.unlock-signout {
+/* The quiet secondary action under a modal's primary button. .unlock-signout is
+   the original (the unlock overlay's "sign out instead"); .modal-alt-action is
+   the same treatment for any other modal. */
+.unlock-signout,
+.modal-alt-action {
   margin-top: 14px;
   text-align: center;
 }
-.unlock-signout__btn {
+.unlock-signout__btn,
+.modal-alt-action__btn {
   background: none;
   border: none;
   padding: 4px 6px;
@@ -247,6 +260,7 @@
   opacity: 0.7;
   transition: opacity 0.15s ease;
 }
-.unlock-signout__btn:hover {
+.unlock-signout__btn:hover,
+.modal-alt-action__btn:hover {
   opacity: 1;
 }

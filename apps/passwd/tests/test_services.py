@@ -1,5 +1,6 @@
 """Tests for passwd service helpers."""
 
+import json
 from datetime import timedelta
 
 from django.test import TestCase
@@ -8,6 +9,7 @@ from django.utils import timezone
 from apps.auth.tests.factories import create_user_with_password
 from apps.passwd.models import SharedPassword
 from apps.passwd.services import (
+    build_user_export,
     delete_expired_shares,
     delete_user_share,
     expired_shares,
@@ -114,3 +116,73 @@ class DeleteUserShareTests(TestCase):
         import uuid
 
         self.assertFalse(delete_user_share(self.owner, uuid.uuid4()))
+
+
+class BuildUserExportTests(TestCase):
+    """services.build_user_export: the account-wide GDPR export.
+
+    The failure mode here is silence. These assert on the shape of
+    the payload as much as on its contents.
+    """
+
+    def setUp(self):
+        self.user = create_user_with_password("export secret")
+
+    def test_export_has_a_section_for_every_kind_of_account_data(self):
+        export = build_user_export(self.user)
+        self.assertEqual(
+            set(export),
+            {
+                "exported_at",
+                "account",
+                "keypair",
+                "vault",
+                "shared_passwords",
+                "note_vault",
+                "shared_notes",
+                "live_notes",
+                "live_note_collaborations",
+            },
+        )
+
+    def test_empty_account_exports_empty_sections_not_missing_ones(self):
+        export = build_user_export(self.user)
+        self.assertIsNone(export["vault"])
+        self.assertIsNone(export["keypair"])
+        self.assertEqual(export["shared_passwords"], [])
+        self.assertEqual(export["shared_notes"], [])
+        self.assertEqual(export["live_notes"], [])
+        self.assertEqual(export["live_note_collaborations"], [])
+
+    def test_password_shares_are_included_with_both_ciphertext_pairs(self):
+        share = make_share(
+            created_by=self.user,
+            encrypted_title="dGl0bGU=",
+            title_iv="BBBBBBBBBBBBBBBB",
+        )
+        export = build_user_export(self.user)
+
+        self.assertEqual(len(export["shared_passwords"]), 1)
+        row = export["shared_passwords"][0]
+        self.assertEqual(row["id"], str(share.id))
+        self.assertEqual(row["encrypted_data"], share.encrypted_data)
+        self.assertEqual(row["iv"], share.iv)
+        self.assertEqual(row["encrypted_title"], "dGl0bGU=")
+        self.assertEqual(row["title_iv"], "BBBBBBBBBBBBBBBB")
+
+    def test_anonymous_rows_belong_to_nobody_and_are_not_exported(self):
+        """No created_by means nothing links the row to this account."""
+        make_share()  # anonymous
+        export = build_user_export(self.user)
+        self.assertEqual(export["shared_passwords"], [])
+
+    def test_another_users_rows_are_not_exported(self):
+        other = create_user_with_password("other secret")
+        make_share(created_by=other)
+        export = build_user_export(self.user)
+        self.assertEqual(export["shared_passwords"], [])
+
+    def test_export_is_json_serializable(self):
+        """It is served as a file download, so a stray UUID or datetime fails hard."""
+        make_share(created_by=self.user)
+        json.dumps(build_user_export(self.user))

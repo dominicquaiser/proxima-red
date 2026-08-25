@@ -203,20 +203,55 @@ def save_user_vault_data(user: User, encrypted_data: str, iv: bytes) -> ServiceD
     return service_data
 
 
+def serialize_shared_password(share: SharedPassword) -> dict[str, Any]:
+    """
+    Serialize one password share for the GDPR export.
+
+    Both ciphertext pairs are included: they are the user's own data and only
+    the key in the share's URL fragment opens them, which the server has never
+    seen. The title fields are blank when the share was created without one.
+
+    Args:
+        share: The stored share row.
+
+    Returns:
+        A JSON-serializable dict of the row's fields.
+    """
+    return {
+        "id": str(share.id),
+        "encrypted_data": share.encrypted_data,
+        "iv": share.iv,
+        "encrypted_title": share.encrypted_title,
+        "title_iv": share.title_iv,
+        "created_at": share.created_at.isoformat(),
+        "expires_at": share.expires_at.isoformat(),
+        "access_count": share.access_count,
+    }
+
+
 def build_user_export(user: User) -> dict[str, Any]:
     """
     Build a GDPR data-export payload for the user.
+
+    Covers every row either tool keys to the account, so that "a copy of the
+    personal data undergoing processing" (Art. 15(3)) is the whole of it and
+    not just the vault blobs. Ciphertext is included throughout: the server
+    cannot read any of it, but it is the user's data and they hold the keys.
+
+    Anonymous shares and notes are absent by construction. They carry no
+    ``created_by``, so nothing links them to an account.
 
     Args:
         user: The user whose data should be exported.
 
     Returns:
-        A JSON-serializable dict with account metadata and, when present, the
-        user's encrypted vault blob and note vault (the server cannot decrypt
-        either).
+        A JSON-serializable dict: account metadata, the collaboration keypair,
+        both tools' vaults, and the shares, notes, live notes and
+        collaboration grants belonging to the account.
     """
     # Late import: the export spans tools but lives here for now; if a third
     # tool grows account data, move the account-level export to apps.auth.
+    from apps.auth import services as auth_services
     from apps.note import services as note_services
 
     export: dict[str, Any] = {
@@ -226,8 +261,13 @@ def build_user_export(user: User) -> dict[str, Any]:
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat(),
         },
+        "keypair": auth_services.build_keypair_export(user),
         "vault": None,
+        "shared_passwords": [
+            serialize_shared_password(share) for share in user.shared_passwords.all()
+        ],
         "note_vault": note_services.build_note_vault_export(user),
+        **note_services.build_note_export(user),
     }
 
     try:

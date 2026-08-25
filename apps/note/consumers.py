@@ -65,6 +65,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 from apps.auth.constants import SESSION_KEY_AUTHENTICATED, SESSION_KEY_USER_ID
+from apps.core.http import exception_type
 
 from . import services
 from .constants import (
@@ -401,7 +402,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             await self._send_error(code)
             return
         except Exception as e:
-            logger.error(LOG_LIVE_WS_APPEND_FAILED, e.__class__.__name__)
+            logger.error(LOG_LIVE_WS_APPEND_FAILED, exception_type(e))
             await self._send_error(WS_ERROR_SERVER)
             return
 

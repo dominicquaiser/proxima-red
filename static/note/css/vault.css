@@ -549,3 +549,13 @@ body.note-vault.note-dirty .tool[data-action="save"] {
     left: 0;
   }
 }
+
+/* Session-expiry modal: the explanatory line above the sign-in button. Sits on
+   the card's dark body, so it takes the body's muted foreground rather than the
+   header's charcoal-on-red. */
+.session-modal__note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-putty);
+  margin: 0 0 20px;
+}

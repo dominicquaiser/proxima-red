@@ -360,7 +360,6 @@ body.note-editor {
 }
 
 @keyframes editor-caret-blink {
-
   0%,
   45% {
     opacity: 1;
@@ -931,6 +930,49 @@ body.note-editor {
 
 .md-render img {
   max-width: 100%;
+}
+
+/* Stand-in for an image hosted elsewhere, which is never loaded (see
+   isBlockedImageSrc in markdown.js). Deliberately looks like a labelled slot
+   rather than an error: nothing is broken, the note simply does not reach out
+   to other servers. Inline-flex so it sits correctly whether the image was on
+   its own line or inside a paragraph. */
+.md-image-blocked {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px dashed var(--color-stony-gray);
+  border-radius: 2px;
+  background: var(--color-oil-slick);
+  cursor: help;
+  vertical-align: middle;
+}
+
+.md-image-blocked__label {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-warm-sand);
+  opacity: 0.8;
+}
+
+/* The alt text is usually the only description of what is missing, so it gets
+   the readable treatment; the host is supporting detail. */
+.md-image-blocked__alt {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--color-putty);
+  overflow-wrap: anywhere;
+}
+
+.md-image-blocked__host {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-stony-gray);
+  overflow-wrap: anywhere;
 }
 
 /* Utilities. */

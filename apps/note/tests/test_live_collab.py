@@ -15,6 +15,7 @@ from django.urls import reverse
 
 from apps.auth.tests.factories import create_user_with_password
 from apps.note import services
+from apps.note.constants import ERROR_LIVE_UNRESTRICT_UNSUPPORTED
 from apps.note.models import LiveNote, LiveNoteCollaborator, LiveNoteUpdate
 
 from .factories import (
@@ -247,7 +248,7 @@ class AccessChangeBroadcastTests(TestCase):
         broadcast.assert_called_once_with(note.pk)
 
     def test_widening_access_broadcasts_nothing(self):
-        """Inviting and unrestricting strand nobody, so evict nobody."""
+        """An invite grants access, so it evicts nobody: no broadcast."""
         note = make_restricted_live_note(self.owner)
 
         with patch.object(services, "broadcast_live_access_change") as broadcast:
@@ -258,7 +259,6 @@ class AccessChangeBroadcastTests(TestCase):
                     invitee_user_id=self.editor.user_id,
                     wrap=_wrap(),
                 )
-                services.unrestrict_live_note(note.pk, owner_user=self.owner)
 
         broadcast.assert_not_called()
 
@@ -421,3 +421,51 @@ class LiveRestrictViewTests(TestCase):
             {"restrict": True, **_wrap()},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_unrestricting_is_refused_and_changes_nothing(self):
+        """Restricting is one-way.
+
+        Reverting would drop every collaborator row, and after a rekey those
+        hold the only copies of the key that opens the document — it would
+        publish the note to anyone with the link while destroying the means of
+        reading it. Refused explicitly, so a caller learns why instead of
+        watching a no-op report success.
+        """
+        self._auth(self.owner)
+        self._post(
+            reverse("note:live_access", args=[self.note.pk]),
+            {"restrict": True, **_wrap()},
+        )
+
+        response = self._post(
+            reverse("note:live_access", args=[self.note.pk]), {"restrict": False}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"], ERROR_LIVE_UNRESTRICT_UNSUPPORTED
+        )
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.access_mode, LiveNote.ACCESS_RESTRICTED)
+        self.assertEqual(self.note.collaborators.count(), 1)
+
+    def test_restrict_must_be_exactly_true(self):
+        """A truthiness test would read the string "false" as "restrict"."""
+        self._auth(self.owner)
+        response = self._post(
+            reverse("note:live_access", args=[self.note.pk]),
+            {"restrict": "false", **_wrap()},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.access_mode, LiveNote.ACCESS_LINK)
+
+    def test_absent_restrict_still_restricts(self):
+        """The field is optional: restricting is all this endpoint does."""
+        self._auth(self.owner)
+        response = self._post(
+            reverse("note:live_access", args=[self.note.pk]), _wrap()
+        )
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.access_mode, LiveNote.ACCESS_RESTRICTED)

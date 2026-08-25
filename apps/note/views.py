@@ -66,6 +66,7 @@ from .constants import (
     ERROR_LIVE_STALE_EPOCH,
     ERROR_LIVE_STALE_SNAPSHOT,
     ERROR_LIVE_TAIL_FULL,
+    ERROR_LIVE_UNRESTRICT_UNSUPPORTED,
     ERROR_MISSING_FIELDS,
     ERROR_NOTE_NOT_FOUND,
     ERROR_RATE_LIMITED,
@@ -103,7 +104,7 @@ from .constants import (
     TEMPLATE_VAULT,
     VAULT_TRASH_RETENTION_DAYS,
 )
-from .models import LiveNote, SharedNote
+from .models import LiveNote, LiveNoteCollaborator, SharedNote
 
 logger = logging.getLogger(__name__)
 
@@ -897,7 +898,7 @@ def _live_owner_or_error(request: HttpRequest, note: LiveNote):
     if user is None:
         return None, json_error(ERROR_NOTE_NOT_FOUND, status=401)
     owner_row = services.get_live_collaborator(note, user_id)
-    if owner_row is None or owner_row.role != "owner":
+    if owner_row is None or owner_row.role != LiveNoteCollaborator.ROLE_OWNER:
         return None, json_error(ERROR_LIVE_NOT_OWNER, status=403)
     return user, None
 
@@ -1006,7 +1007,9 @@ class LiveNotePageView(View):
         # the server re-checks it on every management endpoint regardless.
         created_by_user_id = note.created_by.user_id if note.created_by else None
         if is_restricted:
-            is_owner = bool(collaborator and collaborator.role == "owner")
+            is_owner = bool(
+                collaborator and collaborator.role == LiveNoteCollaborator.ROLE_OWNER
+            )
         else:
             is_owner = bool(session_user_id) and session_user_id == created_by_user_id
 
@@ -1287,23 +1290,31 @@ class LiveNoteKeyView(View):
     name="dispatch",
 )
 class LiveNoteAccessView(View):
-    """Toggle a live note between link and restricted access (owner-only)."""
+    """Switch a live note from link to restricted access (owner-only).
+
+    One-way on purpose. Reverting would have to drop every collaborator row,
+    and after a rekey those rows hold the only copies of the current document
+    key, so it would publish the note while destroying the means of reading it
+    (see the note where ``unrestrict_live_note`` used to live in
+    ``apps.note.services``). ``{"restrict": false}`` is refused rather than
+    ignored, so a client asking for it is told why.
+    """
 
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest, pk) -> JsonResponse:
-        """Restrict the note (seeding the owner's wrap) or revert it to link.
+        """Restrict the note, seeding the owner's wrap of the current key.
 
-        Restricting requires the owner's wrap of the *current* document key in
-        the body; unrestricting (``{"restrict": false}``) needs no key material
-        because neither direction rotates the key.
+        The wrap is required: restricting rotates no key, so the owner's
+        browser wraps the document key it already holds to its own public key.
 
         Args:
             request (HttpRequest): Authenticated POST request.
             pk (uuid.UUID): UUID of the live note.
 
         Returns:
-            JsonResponse: The resulting ``access_mode``, or a mapped
-            collaboration error (403 non-owner, 409 already restricted, ...).
+            JsonResponse: The resulting ``access_mode``, a 400 when the body
+            asks to unrestrict, or a mapped collaboration error (403
+            non-owner, 409 already restricted, ...).
         """
         limited = _rate_limited_json(request)
         if limited:
@@ -1316,34 +1327,38 @@ class LiveNoteAccessView(View):
         if error_response:
             return error_response
 
+        # Absent means restrict (the only thing this endpoint does). Anything
+        # else must be exactly `true`: a truthiness test would read the string
+        # "false" as a request to restrict.
+        restrict = data.get("restrict", True)
+        if restrict is not True:
+            return json_error(ERROR_LIVE_UNRESTRICT_UNSUPPORTED, status=400)
+
         user_id = get_authenticated_user_id(request)
         user = get_user_by_id(user_id)
         if user is None:
             return json_error(ERROR_NOTE_NOT_FOUND, status=401)
 
-        restrict = data.get("restrict", True)
+        wrap_values, wrap_error = _string_fields_or_error(
+            data,
+            "wrapped_key",
+            "wrap_iv",
+            "ephemeral_public_key",
+            missing_message=ERROR_LIVE_MISSING_FIELDS,
+        )
+        if wrap_error:
+            return wrap_error
+
         try:
-            if restrict:
-                wrap_values, wrap_error = _string_fields_or_error(
-                    data,
-                    "wrapped_key",
-                    "wrap_iv",
-                    "ephemeral_public_key",
-                    missing_message=ERROR_LIVE_MISSING_FIELDS,
-                )
-                if wrap_error:
-                    return wrap_error
-                services.restrict_live_note(
-                    pk,
-                    owner_user=user,
-                    wrap={
-                        "wrapped_key": wrap_values[0],
-                        "wrap_iv": wrap_values[1],
-                        "ephemeral_public_key": wrap_values[2],
-                    },
-                )
-            else:
-                services.unrestrict_live_note(pk, owner_user=user)
+            services.restrict_live_note(
+                pk,
+                owner_user=user,
+                wrap={
+                    "wrapped_key": wrap_values[0],
+                    "wrap_iv": wrap_values[1],
+                    "ephemeral_public_key": wrap_values[2],
+                },
+            )
         except LiveNote.DoesNotExist:
             return json_error(ERROR_NOTE_NOT_FOUND, status=404)
         except ValidationError as e:
@@ -1352,11 +1367,7 @@ class LiveNoteAccessView(View):
             logger.error(LOG_LIVE_COLLAB_FAILED, exception_type(e))
             return json_error(ERROR_UNEXPECTED, status=500)
 
-        return json_ok(
-            access_mode=(
-                LiveNote.ACCESS_RESTRICTED if restrict else LiveNote.ACCESS_LINK
-            )
-        )
+        return json_ok(access_mode=LiveNote.ACCESS_RESTRICTED)
 
 
 class LiveNoteCollaboratorsView(View):

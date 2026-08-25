@@ -60,7 +60,14 @@
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    if (!blob || !blob.success || !blob.encrypted_data || !blob.iv) {
+    // `success` is checked separately from the data fields: an unreadable
+    // reply must throw, while a successful-but-empty one is a user with no
+    // vault yet. Both used to arrive here as a rejected JSON parse; Http now
+    // hands back {success: false}, so the distinction has to be made here.
+    if (!blob.success) {
+      throw new Error(blob.error || "Could not read the vault blob.");
+    }
+    if (!blob.encrypted_data || !blob.iv) {
       return null;
     }
 
@@ -100,8 +107,13 @@
     if (!indexResponse.ok) {
       throw new Error(`HTTP ${indexResponse.status}`);
     }
+    // Same fail-closed split as recoverCurrentVaultData: unreadable throws,
+    // successful-but-empty means the user has no note index yet.
+    if (!indexBlob.success) {
+      throw new Error(indexBlob.error || "Could not read the note index.");
+    }
     let index = null;
-    if (indexBlob && indexBlob.success && indexBlob.encrypted_data && indexBlob.iv) {
+    if (indexBlob.encrypted_data && indexBlob.iv) {
       index = await window.AuthCrypto.decryptAccountData(
         indexBlob.encrypted_data,
         indexBlob.iv,
@@ -115,8 +127,14 @@
     if (!listResponse.ok) {
       throw new Error(`HTTP ${listResponse.status}`);
     }
+    // Must throw rather than fall through to an empty list: migrating zero
+    // notes "successfully" would rotate the password and strand every note
+    // under the old key.
+    if (!listResult.success) {
+      throw new Error(listResult.error || "Could not list the vault notes.");
+    }
     const notes = [];
-    for (const row of (listResult && listResult.notes) || []) {
+    for (const row of listResult.notes || []) {
       notes.push({
         id: row.id,
         text: await window.PasswordCrypto.decryptPassword(row.content, row.iv, oldKey),
@@ -131,14 +149,19 @@
   // can't be read throws, aborting the change before any key is rotated (a
   // partially-migrated keypair would strand every wrapped document key).
   // Returns the raw PKCS8 bytes to re-encrypt, or null when the account has no
-  // keypair. The bytes never re-import as a key — only the ciphertext moves
+  // keypair. The bytes never re-import as a key, only the ciphertext moves
   // between vault keys.
   const recoverCurrentKeypair = async (keypairUrl, currentPassword, currentVaultSalt) => {
     const { response, result: blob } = await window.Http.getJson(keypairUrl);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    if (!blob || !blob.success || !blob.exists) {
+    // Unreadable throws; {success: true, exists: false} is an account that
+    // never generated a collaboration keypair.
+    if (!blob.success) {
+      throw new Error(blob.error || "Could not read the account keypair.");
+    }
+    if (!blob.exists) {
       return null;
     }
     const oldKey = await resolveCurrentVaultKey(currentPassword, currentVaultSalt);

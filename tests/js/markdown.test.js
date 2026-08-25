@@ -34,7 +34,7 @@ const source = fs.readFileSync(
 );
 vm.runInThisContext(source, { filename: "markdown.js" });
 
-const { isHighlightLanguageClass, slugifyHeading } = window.NoteMarkdown;
+const { isHighlightLanguageClass, slugifyHeading, isBlockedImageSrc } = window.NoteMarkdown;
 
 describe("isHighlightLanguageClass", () => {
   test("accepts bare language tokens marked emits", () => {
@@ -106,5 +106,62 @@ describe("slugifyHeading", () => {
     assert.equal(slugifyHeading("   "), "");
     assert.equal(slugifyHeading(""), "");
     assert.equal(slugifyHeading(undefined), "");
+  });
+});
+
+describe("isBlockedImageSrc", () => {
+  const ORIGIN = "https://note.proxima.red";
+
+  test("blocks images hosted on another server", () => {
+    // The privacy case: loading one would hand that host the reader's IP and
+    // the moment they opened the note.
+    assert.equal(isBlockedImageSrc("https://evil.example/px.gif", ORIGIN), true);
+    assert.equal(isBlockedImageSrc("http://example.com/a.png", ORIGIN), true);
+    assert.equal(isBlockedImageSrc("https://pass.proxima.red/x.png", ORIGIN), true);
+  });
+
+  test("blocks protocol-relative URLs, which are cross-origin in disguise", () => {
+    assert.equal(isBlockedImageSrc("//evil.example/px.gif", ORIGIN), true);
+  });
+
+  test("allows data: URIs, which make no request at all", () => {
+    const pixel = "data:image/png;base64,iVBORw0KGgo=";
+    assert.equal(isBlockedImageSrc(pixel, ORIGIN), false);
+  });
+
+  test("allows same-origin images, absolute or relative", () => {
+    assert.equal(isBlockedImageSrc("/static/images/logo.png", ORIGIN), false);
+    assert.equal(isBlockedImageSrc("logo.png", ORIGIN), false);
+    assert.equal(isBlockedImageSrc(ORIGIN + "/static/x.png", ORIGIN), false);
+  });
+
+  test("matches the CSP exactly: allowed iff data: or same-origin", () => {
+    // The placeholder must appear if and only if the browser would refuse the
+    // request - otherwise either a broken icon survives with no explanation,
+    // or something gets labelled "not shown" that would have loaded fine.
+    const cspWouldAllow = (src) =>
+      /^data:/i.test(src) ||
+      src.startsWith(ORIGIN + "/") ||
+      !/^([a-z][a-z0-9+.-]*:)?\/\//i.test(src);
+    for (const src of [
+      "data:image/gif;base64,R0lGOD==",
+      "/static/a.png",
+      "a.png",
+      ORIGIN + "/b.png",
+      "https://elsewhere.test/c.png",
+      "//elsewhere.test/d.png",
+      "http://note.proxima.red/e.png",
+    ]) {
+      assert.equal(isBlockedImageSrc(src, ORIGIN), !cspWouldAllow(src), src);
+    }
+  });
+
+  test("blocks anything unparseable rather than handing it to the browser", () => {
+    assert.equal(isBlockedImageSrc("http://[::bad", ORIGIN), true);
+  });
+
+  test("an absent src is not a blocked image", () => {
+    assert.equal(isBlockedImageSrc("", ORIGIN), false);
+    assert.equal(isBlockedImageSrc(null, ORIGIN), false);
   });
 });

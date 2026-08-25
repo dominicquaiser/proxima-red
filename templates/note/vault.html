@@ -337,6 +337,63 @@ handoff from sign-in, sessionStorage, or the unlock modal).
 
     {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" %}
 
+    {% comment %} Session-expiry prompt, raised when a vault API answers 401. Distinct from the
+    unlock overlay above, which only re-derives a missing vault key and cannot help here:
+    /auth/reauth/ is itself session-gated, so an expired session needs a real sign-in. Dismissible
+    on purpose (the unlock overlay is not) because the user's unsaved note sits behind it and they
+    must always be able to reach it. Sign-in opens in a new tab so this page, and the buffer, both
+    survive; the vault key is unchanged by signing in again, so the retry just works. {% endcomment %}
+    <div
+      id="session-modal"
+      class="modal-overlay hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="session-title"
+    >
+      <div class="modal">
+        <div class="card">
+          <div class="card__header">
+            <div class="card__eyebrow">Session Expired</div>
+            <div class="card__title" id="session-title">[note·]<span> /session</span></div>
+            <div class="card__subtitle">
+              Your sign-in timed out.<br />
+              Sign in again in a new tab, then come back to this one.
+            </div>
+          </div>
+
+          <div class="card__body">
+            <p class="session-modal__note hidden" data-session-mode="retry">
+              Your unsaved note is still here. Nothing has been lost. Once you are signed in,
+              come back and try again.
+            </p>
+            <p class="session-modal__note hidden" data-session-mode="reload">
+              Your vault could not be loaded. Reload this page once you are signed in.
+            </p>
+            <a
+              class="btn-create btn-create--link"
+              id="session-signin-btn"
+              href="{{ site_url }}{% url 'auth:signin' %}?tool=note"
+              target="_blank"
+              rel="noopener"
+              >Sign in (new tab)</a
+            >
+            <div class="modal-alt-action">
+              <button type="button" class="modal-alt-action__btn" id="session-dismiss-btn">
+                Keep editing
+              </button>
+              <button
+                type="button"
+                class="modal-alt-action__btn hidden"
+                id="session-reload-btn"
+              >
+                Reload page
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     {% include "partials/_util_scripts.html" %} {% include "partials/_auth_scripts.html" %}
     <script src="{% static 'auth/js/unlock.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/yjs.min.js' %}" defer></script>

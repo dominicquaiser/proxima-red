@@ -1,5 +1,6 @@
 """Tests for the note app service layer."""
 
+import json
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -20,9 +21,11 @@ from apps.note.models import LiveNote, LiveNoteUpdate, SharedNote, VaultIndex, V
 from .factories import (
     VALID_CONTENT_B64,
     VALID_IV_B64,
+    make_live_collaborator,
     make_live_note,
     make_live_update,
     make_note,
+    make_restricted_live_note,
     make_vault_index,
     make_vault_note,
 )
@@ -830,3 +833,86 @@ class BuildNoteVaultExportTests(TestCase):
         self.assertIn("updated_at", export["index"])
         self.assertEqual(export["notes"][0]["id"], str(note.id))
         self.assertEqual(export["notes"][0]["content"], VALID_CONTENT_B64)
+
+
+class BuildNoteExportTests(TestCase):
+    """services.build_note_export: the note tool's non-vault GDPR sections."""
+
+    def setUp(self):
+        self.user = create_user_with_password("password-123")
+
+    def test_empty_account(self):
+        export = services.build_note_export(self.user)
+        self.assertEqual(export["shared_notes"], [])
+        self.assertEqual(export["live_notes"], [])
+        self.assertEqual(export["live_note_collaborations"], [])
+
+    def test_includes_shared_notes_with_ciphertext(self):
+        note = make_note(created_by=self.user)
+        export = services.build_note_export(self.user)
+
+        self.assertEqual(len(export["shared_notes"]), 1)
+        row = export["shared_notes"][0]
+        self.assertEqual(row["id"], str(note.id))
+        self.assertEqual(row["content"], VALID_CONTENT_B64)
+        self.assertTrue(row["is_encrypted"])
+
+    def test_live_note_carries_its_pending_tail_as_well_as_the_snapshot(self):
+        """Snapshot alone is the document as of the last compaction.
+
+        Shipping it without the tail would hand the user a knowingly stale
+        copy of their own document.
+        """
+        note = make_live_note(created_by=self.user)
+        first = make_live_update(note)
+        second = make_live_update(note)
+
+        export = services.build_note_export(self.user)
+
+        row = export["live_notes"][0]
+        self.assertEqual(row["id"], str(note.id))
+        self.assertEqual(row["snapshot"], VALID_CONTENT_B64)
+        self.assertEqual(
+            [u["seq"] for u in row["pending_updates"]], [first.pk, second.pk]
+        )
+
+    def test_collaboration_grants_include_this_users_own_wrap(self):
+        owner = create_user_with_password("owner secret")
+        note = make_restricted_live_note(owner)
+        make_live_collaborator(note, self.user)
+
+        export = services.build_note_export(self.user)
+
+        self.assertEqual(len(export["live_note_collaborations"]), 1)
+        grant = export["live_note_collaborations"][0]
+        self.assertEqual(grant["note_id"], str(note.id))
+        self.assertEqual(grant["role"], "editor")
+        self.assertEqual(grant["wrapped_key"], VALID_CONTENT_B64)
+
+    def test_other_collaborators_ids_are_not_disclosed_to_the_owner(self):
+        """Art. 15(4): an export must not hand over other people's data.
+
+        The owner can see collaborator ids live in the management panel, but a
+        downloadable file is a different distribution surface.
+        """
+        someone_else = create_user_with_password("editor secret")
+        note = make_restricted_live_note(self.user)
+        make_live_collaborator(note, someone_else)
+
+        export = services.build_note_export(self.user)
+
+        serialized = json.dumps(export)
+        self.assertNotIn(someone_else.user_id, serialized)
+        # The owner's own grant on that note is still theirs to have.
+        self.assertEqual(len(export["live_note_collaborations"]), 1)
+
+    def test_anonymous_and_foreign_rows_are_excluded(self):
+        make_note()  # anonymous
+        make_live_note()  # anonymous
+        other = create_user_with_password("other secret")
+        make_note(created_by=other)
+
+        export = services.build_note_export(self.user)
+
+        self.assertEqual(export["shared_notes"], [])
+        self.assertEqual(export["live_notes"], [])

@@ -242,6 +242,13 @@
           collaborators only — they open the note with their account, no key
           in the link.
         </p>
+        {% comment %} Stated before the click, not after: restricting is one-way. Reverting would
+        mean dropping the collaborator rows, and once the note has been re-keyed those hold the
+        only copies of the key that opens it. {% endcomment %}
+        <p class="collab-panel__hint collab-panel__hint--warn">
+          This cannot be undone. To share an open document later, create a new
+          editable link from its text.
+        </p>
         <button class="btn-create" id="collab-restrict-btn" type="button">
           Restrict to collaborators
         </button>

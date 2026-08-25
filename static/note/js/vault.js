@@ -39,6 +39,9 @@
     const searchInput = document.getElementById("vault-search");
     const ctxMenu = document.getElementById("ctx-menu");
     const saveBtn = document.getElementById("save-note-btn");
+    const sessionModal = document.getElementById("session-modal");
+    const sessionDismissBtn = document.getElementById("session-dismiss-btn");
+    const sessionReloadBtn = document.getElementById("session-reload-btn");
 
     const Index = window.NoteVaultIndex;
 
@@ -232,11 +235,77 @@
       renderCrumb();
     };
 
+    // `message` is optional: the session-expiry path locks the vault but lets
+    // its own modal carry the explanation, so a toast alongside would only
+    // compete with it.
     const disableVault = (message) => {
       readOnly = true;
       if (saveBtn) saveBtn.disabled = true;
-      window.Notify.show(message, "error");
+      if (message) window.Notify.show(message, "error");
     };
+
+    // --- Expired session ---
+    //
+    // A 401 from any vault API means the session itself is gone. The unlock
+    // overlay cannot fix that (/auth/reauth/ is session-gated too, and only
+    // ever re-derives a missing key), so the recovery is a real sign-in - in
+    // a NEW tab, because this tab holds the unsaved buffer and there is no
+    // autosave to fall back on. The vault key survives signing in again (it
+    // derives from the password and vault_salt, neither of which a sign-in
+    // changes), so the retry afterwards just works.
+    //
+    // `mode` is "retry" (the editor is intact; sign in and try again) or
+    // "reload" (the vault never loaded; sign in and reload the page).
+    const showSessionExpired = (mode) => {
+      if (!sessionModal) {
+        // No modal in the DOM: still say something useful rather than nothing.
+        window.Notify.show("Your session timed out. Sign in again to save your work.", "error");
+        return;
+      }
+      sessionModal.querySelectorAll("[data-session-mode]").forEach((el) => {
+        el.classList.toggle(HIDDEN_CLASS, el.dataset.sessionMode !== mode);
+      });
+      if (sessionDismissBtn) {
+        sessionDismissBtn.classList.toggle(HIDDEN_CLASS, mode !== "retry");
+      }
+      if (sessionReloadBtn) {
+        sessionReloadBtn.classList.toggle(HIDDEN_CLASS, mode !== "reload");
+      }
+      sessionModal.classList.remove(HIDDEN_CLASS);
+    };
+
+    const hideSessionExpired = () => {
+      if (sessionModal) sessionModal.classList.add(HIDDEN_CLASS);
+    };
+
+    /**
+     * Raise or clear the sign-in prompt from one reply. Last response wins.
+     *
+     * Callers return early on true, skipping their own error toast: the modal
+     * is the message. Clearing on every non-401 matters as much as raising on
+     * a 401, because a save is two requests (row, then index) and can fail on
+     * the second. Hiding once at the end of a flow would dismiss a prompt
+     * that had just gone up.
+     *
+     * @param {Response} response
+     * @param {"retry"|"reload"} mode
+     * @returns {boolean} True when the session has expired.
+     */
+    const sessionIsGone = (response, mode) => {
+      if (response.status === 401) {
+        showSessionExpired(mode);
+        return true;
+      }
+      hideSessionExpired();
+      return false;
+    };
+
+    if (sessionDismissBtn) {
+      sessionDismissBtn.addEventListener("click", hideSessionExpired);
+    }
+    if (sessionReloadBtn) {
+      sessionReloadBtn.addEventListener("click", () => window.location.reload());
+    }
 
     // Encrypt and save the current index.
     const persistIndex = async () => {
@@ -250,6 +319,7 @@
           encrypted_data: payload.encryptedData,
           iv: payload.iv,
         });
+        if (sessionIsGone(response, "retry")) return false;
         if (!response.ok || !result.success) {
           throw new Error(result.error || `HTTP ${response.status}`);
         }
@@ -292,6 +362,7 @@
       let body;
       try {
         const { response, result } = await window.Http.getJson(noteUrl(id));
+        if (sessionIsGone(response, "retry")) return;
         if (!response.ok || !result.success) {
           throw new Error(result.error || `HTTP ${response.status}`);
         }
@@ -340,6 +411,7 @@
       if (core.noteTooLarge()) return;
 
       isSaving = true;
+      let indexed = false;
       try {
         const payload = await window.CryptoCore.encryptWithKey(text, masterKey);
 
@@ -349,11 +421,12 @@
             content: payload.encryptedData,
             iv: payload.iv,
           });
+          if (sessionIsGone(response, "retry")) return;
           if (!response.ok || !result.success) {
             throw new Error(result.error || `HTTP ${response.status}`);
           }
           currentNoteId = result.note_id;
-          await commitIndexChange((idx) =>
+          indexed = await commitIndexChange((idx) =>
             Index.addNote(idx, {
               id: result.note_id,
               name: currentName,
@@ -366,14 +439,25 @@
             content: payload.encryptedData,
             iv: payload.iv,
           });
+          if (sessionIsGone(response, "retry")) return;
           if (!response.ok || !result.success) {
             throw new Error(result.error || `HTTP ${response.status}`);
           }
-          await commitIndexChange((idx) => Index.touchNote(idx, currentNoteId, result.updated_at));
+          indexed = await commitIndexChange((idx) =>
+            Index.touchNote(idx, currentNoteId, result.updated_at),
+          );
         }
 
+        // The row is written either way, so the buffer does match the server.
         lastSavedValue = text;
         setDirty(false);
+        if (!indexed) {
+          // Row saved, index not: the note exists but is missing from the
+          // tree until reconcile() re-adopts it on the next load. Saying
+          // "saved" here would contradict whatever persistIndex just put on
+          // screen.
+          return;
+        }
         window.Notify.show("Note saved to your vault.", "success");
       } catch (error) {
         console.error("Failed to save note:", error);
@@ -394,6 +478,7 @@
           ids,
           trashed,
         });
+        if (sessionIsGone(response, "retry")) return false;
         if (!response.ok || !result.success) {
           throw new Error(result.error || `HTTP ${response.status}`);
         }
@@ -409,6 +494,7 @@
     const deleteNoteForever = async (id) => {
       try {
         const { response, result } = await window.Http.postForm(noteDeleteUrl(id), {});
+        if (sessionIsGone(response, "retry")) return;
         if (!response.ok || !result.success) {
           throw new Error(result.error || `HTTP ${response.status}`);
         }
@@ -716,7 +802,14 @@
       let blob;
       try {
         const { response, result } = await window.Http.getJson(indexUrl);
+        // "reload", not "retry": nothing loaded, so there is no buffer to
+        // preserve and no in-place retry to offer.
+        if (sessionIsGone(response, "reload")) {
+          disableVault();
+          return;
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!result.success) throw new Error(result.error || `HTTP ${response.status}`);
         blob = result;
       } catch (error) {
         console.error("Failed to load vault index:", error);
@@ -724,7 +817,7 @@
         return;
       }
 
-      if (blob?.success && blob.encrypted_data && blob.iv) {
+      if (blob.encrypted_data && blob.iv) {
         try {
           const decrypted = await window.AuthCrypto.decryptAccountData(
             blob.encrypted_data,
@@ -745,6 +838,10 @@
       let serverNotes = [];
       try {
         const { response, result } = await window.Http.getJson(notesUrl);
+        if (sessionIsGone(response, "reload")) {
+          disableVault();
+          return;
+        }
         if (!response.ok || !result.success) throw new Error(`HTTP ${response.status}`);
         serverNotes = result.notes || [];
       } catch (error) {
@@ -760,6 +857,13 @@
       for (const id of outcome.orphanIds) {
         try {
           const { response, result } = await window.Http.getJson(noteUrl(id));
+          // Stop rather than fall through to the catch: that path files the
+          // row as "unreadable", which is a claim about the key and would
+          // stick in the UI long after signing in fixed the real problem.
+          if (sessionIsGone(response, "reload")) {
+            disableVault();
+            return;
+          }
           if (!response.ok || !result.success) throw new Error(`HTTP ${response.status}`);
           const text = await window.PasswordCrypto.decryptPassword(
             result.content,

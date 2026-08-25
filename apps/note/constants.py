@@ -30,8 +30,9 @@ DEFAULT_EXPIRY: Final[str] = "1day"
 # content fits the Base64 ciphertext of a 128KiB markdown document (131,072
 # plaintext bytes + 16-byte GCM tag Base64-encode to 174,784 chars) with
 # headroom, and bounds abuse at ~6MB/hour/IP together with RATE_LIMIT_CREATE.
-# Cross-runtime contract: MAX_NOTE_PLAINTEXT_BYTES in static/note/js/editor.js
-# is derived from this cap and must shrink if this shrinks.
+# Cross-runtime contract: MAX_NOTE_PLAINTEXT_BYTES in
+# static/note/js/editor-core.js is derived from this cap and must shrink if
+# this shrinks.
 MAX_NOTE_CONTENT_LENGTH: Final[int] = 200_000
 
 # Cross-runtime contract: must match GCM_IV_LENGTH_BYTES in static/shared/js/crypto.js.
@@ -201,6 +202,12 @@ ERROR_LIVE_STALE_EPOCH: Final[str] = (
 ERROR_LIVE_NOT_OWNER: Final[str] = "Only the owner can manage collaborators."
 ERROR_LIVE_ALREADY_RESTRICTED: Final[str] = "This note is already restricted."
 ERROR_LIVE_NOT_RESTRICTED: Final[str] = "This note is not restricted."
+# Restricting is one-way: see the comment where unrestrict_live_note used to
+# live in apps/note/services.py.
+ERROR_LIVE_UNRESTRICT_UNSUPPORTED: Final[str] = (
+    "Restricting a note cannot be undone. To share an open document, create a "
+    "new editable link from its text."
+)
 ERROR_LIVE_COLLAB_LIMIT: Final[str] = (
     "This note already has the maximum number of collaborators."
 )

@@ -10,6 +10,69 @@
   const DEFAULT_ERROR_MESSAGE = "An unexpected error occurred.";
 
   /**
+   * Describe a reply that could not be parsed as JSON.
+   *
+   * These endpoints answer JSON, so a body that will not parse is the server
+   * (or something in front of it) answering with a page instead: a
+   * `block=True` rate limiter handing back the HTML 403, a proxy error page,
+   * or a redirect to sign-in that fetch followed transparently. The status is
+   * the only evidence available, so map it to something the user can act on.
+   *
+   * @param {Response} response
+   * @returns {string}
+   */
+  const statusErrorMessage = (response) => {
+    // A followed redirect is a 200 carrying someone else's HTML: an auth or
+    // rate-limit bounce, not the endpoint's own answer.
+    if (response.redirected) {
+      return "Your session may have expired. Please reload the page and try again.";
+    }
+    if (response.status === 401) {
+      return "Your session has expired. Please sign in again.";
+    }
+    if (response.status === 403) {
+      return "That request was refused. Wait a moment, then reload the page and try again.";
+    }
+    if (response.status === 429) {
+      return "Too many requests. Please wait a moment and try again.";
+    }
+    if (response.status >= 500) {
+      return "The server could not complete that request. Please try again.";
+    }
+    return DEFAULT_ERROR_MESSAGE;
+  };
+
+  /**
+   * Parse a reply body, guaranteeing callers a non-null object.
+   *
+   * `Response.json()` rejects on a non-JSON body, and every caller here
+   * reaches straight for `result.success` / `result.error`. Letting the
+   * rejection escape surfaced the parser's own complaint ("Unexpected token
+   * '<'") as the user-facing error on every rate limit and proxy hiccup, and
+   * skipped the caller's own error handling on the way past. Synthesising a
+   * failure body instead keeps that handling on the normal path.
+   *
+   * @param {Response} response
+   * @returns {Promise<Object>} The parsed body, or a synthesized failure.
+   */
+  const parseJsonBody = async (response) => {
+    let parsed;
+    try {
+      parsed = await response.json();
+    } catch (error) {
+      return { success: false, error: statusErrorMessage(response) };
+    }
+    // Valid JSON that is not a plain object (`null`, a string, a number, an
+    // array) leaves the same callers reading `success`/`error` off something
+    // that has neither. `null` throws outright; the rest degrade to an error
+    // with no message. Normalise them all to the failure shape.
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { success: false, error: statusErrorMessage(response) };
+    }
+    return parsed;
+  };
+
+  /**
    * Resolve the CSRF token from the DOM or cookie jar.
    *
    * Prefers a hidden `csrfmiddlewaretoken` form field anywhere in the
@@ -35,11 +98,14 @@
    * - Any other object is sent as `application/json`.
    *
    * Both the raw `Response` and parsed body are returned so callers retain
-   * full control over success/error handling.
+   * full control over success/error handling. `result` is always a non-null
+   * object: a reply that is not a JSON object becomes
+   * `{success: false, error}` (see `parseJsonBody`), so `result.success` and
+   * `result.error` are safe to read without a guard.
    *
    * @param {string} url - The endpoint to POST to.
    * @param {FormData|URLSearchParams|HTMLFormElement|Object} body - Request payload.
-   * @returns {Promise<{response: Response, result: *}>}
+   * @returns {Promise<{response: Response, result: Object}>}
    */
   const postForm = async (url, body) => {
     const normalizedBody = body instanceof HTMLFormElement ? new FormData(body) : body;
@@ -64,8 +130,7 @@
       body: payload,
       credentials: "same-origin",
     });
-    const result = await response.json();
-    return { response, result };
+    return { response, result: await parseJsonBody(response) };
   };
 
   /**
@@ -75,18 +140,18 @@
    * `X-Requested-With: XMLHttpRequest` header (so Django's `is_ajax_request`
    * sees it) with same-origin credentials, and returns both the raw `Response`
    * and the parsed body so callers control success/error handling. No CSRF
-   * token is needed for a GET.
+   * token is needed for a GET. `result` carries the same always-an-object
+   * guarantee as `postForm`.
    *
    * @param {string} url - The endpoint to GET.
-   * @returns {Promise<{response: Response, result: *}>}
+   * @returns {Promise<{response: Response, result: Object}>}
    */
   const getJson = async (url) => {
     const response = await fetch(url, {
       headers: { "X-Requested-With": "XMLHttpRequest" },
       credentials: "same-origin",
     });
-    const result = await response.json();
-    return { response, result };
+    return { response, result: await parseJsonBody(response) };
   };
 
   /**

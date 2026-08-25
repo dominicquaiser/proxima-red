@@ -444,7 +444,13 @@ html:has(.note-view) {
   margin-bottom: 12px;
 }
 
-.collab-panel__section+.collab-panel__section {
+/* The irreversibility warning above the restrict button: same hint type, but
+   it has to read as a consequence rather than as more description. */
+.collab-panel__hint--warn {
+  color: var(--color-coral-red);
+}
+
+.collab-panel__section + .collab-panel__section {
   margin-top: 16px;
 }
 

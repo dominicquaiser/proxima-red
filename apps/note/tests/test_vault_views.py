@@ -106,6 +106,35 @@ class NoteVaultViewTests(VaultTestCase):
             response, f'data-trash-retention-days="{VAULT_TRASH_RETENTION_DAYS}"'
         )
 
+    def test_vault_page_renders_the_session_expiry_modal(self):
+        """The 401 prompt and the ids ``vault.js`` looks up by name.
+
+        ``vault.js`` reaches for these through ``getElementById``, so a rename
+        here degrades silently to a toast instead of failing loudly.
+        """
+        self._authenticate()
+        response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
+        self.assertContains(response, 'id="session-modal"')
+        self.assertContains(response, 'id="session-dismiss-btn"')
+        self.assertContains(response, 'id="session-reload-btn"')
+        self.assertContains(response, 'data-session-mode="retry"')
+        self.assertContains(response, 'data-session-mode="reload"')
+
+    def test_session_modal_signs_in_on_the_canonical_auth_host(self):
+        """Absolute, main-site, new-tab.
+
+        Auth is canonical on ``SITE_URL``, so a relative link from the note
+        host would bounce through ``MainSiteRedirectMixin``. ``target=_blank``
+        is the load-bearing part: this tab holds the unsaved buffer and the
+        vault has no autosave, so sign-in must not navigate away from it.
+        """
+        self._authenticate()
+        response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
+        self.assertContains(
+            response, f'href="https://proxima.red{reverse("auth:signin")}?tool=note"'
+        )
+        self.assertContains(response, 'target="_blank"')
+
     def test_vault_page_does_not_embed_ciphertext(self):
         """The shell never contains vault ciphertext; the browser fetches it
         only after the vault key is established."""

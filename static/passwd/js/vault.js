@@ -440,6 +440,13 @@
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
+        // An unreadable reply has to disable the vault, not fall through to
+        // the empty-vault render below: showing someone "no saved links" when
+        // the load actually failed invites them to conclude their data is
+        // gone. (Http used to enforce this by rejecting the JSON parse.)
+        if (!result.success) {
+          throw new Error(result.error || `HTTP ${response.status}`);
+        }
         blob = result;
       } catch (error) {
         console.error("Failed to load saved vault data:", error);
@@ -447,7 +454,9 @@
         return;
       }
 
-      if (!blob?.success || !blob.encrypted_data || !blob.iv) {
+      // success is guaranteed by the check above; only the data fields are
+      // still in question, and their absence just means an empty vault.
+      if (!blob.encrypted_data || !blob.iv) {
         renderShares();
         return;
       }

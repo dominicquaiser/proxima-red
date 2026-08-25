@@ -197,11 +197,39 @@ def get_user_keypair(user: User) -> UserKeyPair | None:
     return UserKeyPair.objects.filter(user=user).first()
 
 
+def build_keypair_export(user: User) -> dict | None:
+    """
+    Build the collaboration-keypair section of the account's GDPR export.
+
+    Includes the encrypted private blob as stored. It is ciphertext under the
+    user's own vault key, so only they can open it, and it is the one piece
+    of the export that could actually be *used*: without it, a restored
+    account could never unwrap a document key it had been granted.
+
+    Args:
+        user: The user whose data should be exported.
+
+    Returns:
+        The public key, the vault-key-encrypted private key and its IV, plus
+        timestamps; or None when the account never generated a keypair.
+    """
+    keypair = get_user_keypair(user)
+    if keypair is None:
+        return None
+    return {
+        "public_key": keypair.public_key,
+        "encrypted_private_key": keypair.encrypted_private_key,
+        "private_key_iv": keypair.private_key_iv,
+        "created_at": keypair.created_at.isoformat(),
+        "updated_at": keypair.updated_at.isoformat(),
+    }
+
+
 def create_user_keypair(
     user: User, *, public_key: str, encrypted_private_key: str, private_key_iv: str
 ) -> UserKeyPair:
     """
-    Create a user's collaboration keypair — create-only, never overwrite.
+    Create a user's collaboration keypair (create-only, never overwrite).
 
     Overwriting an existing keypair would strand every document key already
     wrapped to the old public key, so an existing row is a hard conflict the
@@ -243,7 +271,7 @@ def get_public_key_for_user_id(user_id: str) -> str | None:
     Return the public key for a user_id, for the invite flow.
 
     Deliberately NO decoy keys, unlike the salts endpoint: a decoy public key
-    would let an invite be created that the invitee can never open — silently
+    would let an invite be created that the invitee can never open; silently
     losing data is strictly worse than the account-existence oracle, which is
     accepted here because the endpoint requires an authenticated session and
     is rate limited (documented in the privacy policy).

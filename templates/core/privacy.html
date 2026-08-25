@@ -315,6 +315,16 @@
         production. A note is also deleted immediately when it is accessed after its expiry time.
         The maximum retention period is 4 weeks.
       </p>
+      <p>
+        <strong>Images hosted elsewhere are never loaded.</strong> A note is Markdown, and Markdown
+        can reference an image by URL. Displaying such an image would make your browser contact
+        that third-party server, telling it your IP address, your browser version, and the moment
+        you opened the note — in effect giving whoever wrote the note a read receipt on you. Notes
+        therefore render a labelled placeholder in place of any image hosted on another server,
+        naming the host it would have contacted. Nothing is requested from it. Images embedded
+        directly in the note's text (<code>data:</code> URIs) contain their own bytes, make no
+        request, and are displayed normally.
+      </p>
 
       <h3>3.6 Live Notes (Editable Share Links)</h3>
       <p>
@@ -780,8 +790,14 @@
         <strong>Practical note on access and portability requests:</strong> Account data held by the
         server consists of a random 8-digit ID, an Argon2 hash, and two public KDF salts — none of
         which reveals the account password or vault contents (which remain encrypted). Authenticated
-        users can export their vault data via the account page, which returns the encrypted blob;
-        decryption happens in the browser.
+        users can export their data via the account page. The export is a single JSON file
+        containing every row the server keys to the account: the account metadata, the collaboration
+        keypair, both tools' vaults, and the password shares, notes, live notes and collaboration
+        grants the account created. Ciphertext is included as stored — the server cannot decrypt any
+        of it, and decryption happens in the browser. Anonymous shares and notes carry no link to an
+        account and therefore do not appear. The export deliberately omits the user IDs of
+        <em>other</em> collaborators on notes the account owns: those are third parties' personal
+        data (Art. 15(4) GDPR), and they remain visible in the note's collaborator panel instead.
       </p>
       <p>
         Requests relating to server log data will be forwarded to the hosting provider, as the
