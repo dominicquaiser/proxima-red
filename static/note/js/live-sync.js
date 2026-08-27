@@ -24,12 +24,7 @@
   const WS_ACK_TIMEOUT_MS = 10000;
   // Server close codes (apps/note/constants.py).
   const WS_CLOSE_NOT_FOUND = 4404;
-  const WS_CLOSE_AUTH_REQUIRED = 4401;
-  const WS_CLOSE_FORBIDDEN = 4403;
   const WS_CLOSE_ABUSE = 4429;
-  const AUTH_REQUIRED_MESSAGE =
-    "This note is limited to named collaborators. Sign in to keep editing.";
-  const FORBIDDEN_MESSAGE = "You no longer have access to this note.";
   // Jitter staggers concurrent compactors; server covers_seq settles races.
   const COMPACT_PENDING_THRESHOLD = 64;
   const COMPACT_JITTER_SPAN = 16;
@@ -145,13 +140,9 @@
       onStatus,
       onFatal,
       onAwareness,
-      onStaleEpoch,
     } = opts;
 
-    // Mutable so a rekey (M4 revocation) can swap the document key + epoch
-    // without tearing down the sync client.
-    let key = initialKey;
-    let epoch = 0;
+    const key = initialKey;
 
     const compactJitter = Math.floor(Math.random() * COMPACT_JITTER_SPAN);
 
@@ -268,17 +259,6 @@
     // applied and the cursor was deliberately left where it was, so the same
     // range is refetched rather than skipped.
     async function applyServerBody(body) {
-      // Every read echoes the current key generation, which is the only way a
-      // client that isn't typing learns it was re-keyed: appends are what
-      // trigger stale_epoch, and a passive reader makes none. Left undetected
-      // it would keep decrypting rows with a dead key, skipping them all, and
-      // still advance its cursor. Bail before applying or advancing: after
-      // adoptRekey the next poll refetches this same range under the new key.
-      if (typeof body.key_epoch === "number" && body.key_epoch !== epoch) {
-        handleStaleEpoch();
-        return false;
-      }
-
       if (body.snapshot) {
         // Our cursor predates compaction; a Yjs snapshot update is CRDT-safe.
         try {
@@ -356,7 +336,6 @@
             txn: wsFlush.txn,
             payload: payload.encryptedData,
             iv: payload.iv,
-            key_epoch: epoch,
           }),
         );
         ackTimer = setTimeout(function () {
@@ -372,11 +351,7 @@
     }
 
     async function flush(keepalive) {
-      // Appends stay paused while a rekey recovery is pending: our key is
-      // known-stale, so every attempt comes straight back as stale_epoch, and
-      // the finally-block below would re-arm the next one a debounce later.
-      // adoptRekey clears the flag and re-arms the flush itself.
-      if (stopped || flushInFlight || staleEpochInFlight || !outbox.length) return;
+      if (stopped || flushInFlight || !outbox.length) return;
       flushInFlight = true;
       const count = outbox.length;
       refreshStatus();
@@ -392,23 +367,12 @@
         const useKeepalive = keepalive && payload.encryptedData.length < KEEPALIVE_BODY_LIMIT;
         const { response, result } = await postJson(
           urls.updates,
-          { payload: payload.encryptedData, iv: payload.iv, key_epoch: epoch },
+          { payload: payload.encryptedData, iv: payload.iv },
           useKeepalive,
         );
 
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
-          return;
-        }
-        if (response.status === 401) {
-          // Same eviction as the poll path, reached by whichever runs first.
-          fatal("error", AUTH_REQUIRED_MESSAGE);
-          return;
-        }
-        if (response.status === 409 && result && result.code === "stale_epoch") {
-          // Rekeyed: pause appends and let the page recover the new key.
-          flushInFlight = false;
-          handleStaleEpoch();
           return;
         }
         if (response.status === 409) {
@@ -437,23 +401,6 @@
       }
     }
 
-    // --- Rekey recovery (M4) ---
-
-    let staleEpochInFlight = false;
-
-    // Pause appends and ask the page to recover after a stale key epoch.
-    function handleStaleEpoch() {
-      if (stopped || staleEpochInFlight) return;
-      staleEpochInFlight = true;
-      setStatus("syncing");
-      if (onStaleEpoch) {
-        Promise.resolve(onStaleEpoch()).catch(function () {
-          // Recovery failed (e.g. access revoked): the page decides the
-          // terminal state; leave appends paused.
-        });
-      }
-    }
-
     // --- Compaction ---
 
     function maybeCompact() {
@@ -463,35 +410,25 @@
     // Full snapshot covering every row at or below current cursor.
     //
     // Mostly best-effort: losing a compaction race is normal and silent. But
-    // a compaction that can never succeed (snapshot over the server cap, the
-    // snapshot rate limit, an expired session on a restricted note) strands
-    // the document once the pending tail fills, so repeated failures escalate
-    // rather than staying quiet. Returns whether the snapshot was stored.
+    // a compaction that can never succeed (snapshot over the server cap, or
+    // the snapshot rate limit) strands the document once the pending tail
+    // fills, so repeated failures escalate rather than staying quiet.
+    // Returns whether the snapshot was stored.
     async function compact() {
-      // While a rekey recovery is pending our key is known-stale, so the
-      // server would (correctly) refuse this snapshot anyway.
-      if (stopped || compactInFlight || staleEpochInFlight) return false;
+      if (stopped || compactInFlight) return false;
       compactInFlight = true;
       try {
         const coversSeq = cursor;
         if (!coversSeq) return false;
         const bytes = window.Y.encodeStateAsUpdate(doc);
         const payload = await window.CryptoCore.encryptBytesWithKey(bytes, key);
-        const { response, result } = await postJson(urls.snapshot, {
+        const { response } = await postJson(urls.snapshot, {
           snapshot: payload.encryptedData,
           snapshot_iv: payload.iv,
           covers_seq: coversSeq,
-          key_epoch: epoch,
         });
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
-          return false;
-        }
-        if (response.status === 409 && result && result.code === "stale_epoch") {
-          // Rekeyed: this snapshot is under the old key. Never retry it.
-          // Storing it would replace the document with ciphertext no current
-          // reader can open. Recover the new key instead.
-          handleStaleEpoch();
           return false;
         }
         if (response.ok) {
@@ -524,8 +461,8 @@
       if (compactFailures < COMPACT_FAILURE_LIMIT || warnedCompactStuck) return;
       warnedCompactStuck = true;
       // Deliberately about the symptom, not the cause: the client cannot tell
-      // an oversized snapshot from a rate limit from an expired session, and
-      // all three end the same way for the user.
+      // an oversized snapshot from a rate limit, and both end the same way
+      // for the user.
       window.Notify.show(
         "This note's history could not be saved. Editing may stop working - " +
           "copy your work somewhere safe.",
@@ -547,13 +484,6 @@
         const { response, result } = await window.Http.getJson(urls.updates + "?since=" + cursor);
         if (response.status === 404) {
           fatal("expired", "This live note has expired.");
-          return;
-        }
-        // A polling client has no socket to evict, so a mid-session restrict
-        // reaches it here instead. Terminal: retrying cannot grant access,
-        // and the default path would just back off in silence forever.
-        if (response.status === 401) {
-          fatal("error", AUTH_REQUIRED_MESSAGE);
           return;
         }
         if (!response.ok || !result.success) {
@@ -613,14 +543,6 @@
     }
 
     function handleErrorFrame(msg) {
-      if (msg.code === "stale_epoch") {
-        wsFlush = null;
-        if (ackTimer) clearTimeout(ackTimer);
-        ackTimer = null;
-        flushInFlight = false;
-        handleStaleEpoch();
-        return null;
-      }
       if (msg.code === "pending_tail_full") {
         // Same recovery as the HTTP 409, backoff included.
         wsFlush = null;
@@ -736,16 +658,6 @@
           fatal("expired", "This live note has expired.");
           return;
         }
-        // Evicted: the owner restricted or re-keyed the note under us (or the
-        // gate refused us at connect). Polling would be refused too.
-        if (event.code === WS_CLOSE_AUTH_REQUIRED) {
-          fatal("error", AUTH_REQUIRED_MESSAGE);
-          return;
-        }
-        if (event.code === WS_CLOSE_FORBIDDEN) {
-          fatal("error", FORBIDDEN_MESSAGE);
-          return;
-        }
         if (event.code === WS_CLOSE_ABUSE) {
           wsGaveUp = true; // server asked us not to come back
         } else {
@@ -813,7 +725,6 @@
       }
       cursor = body.seq;
       pending = body.pending;
-      if (typeof body.key_epoch === "number") epoch = body.key_epoch;
 
       refreshStatus();
       maybeCompact();
@@ -842,47 +753,6 @@
           ws.send(JSON.stringify({ type: "awareness", payload: payload, iv: iv }));
         } catch (error) {
           /* racing a close; the 20s re-announce recovers */
-        }
-      },
-      /**
-       * Current cursor + key epoch for owner rekey.
-       *
-       * @returns {{cursor: number, epoch: number, hasPending: boolean}}
-       */
-      rekeyContext: function () {
-        return {
-          cursor: cursor,
-          epoch: epoch,
-          hasPending: outbox.length > 0 || flushInFlight,
-        };
-      },
-      /**
-       * Flush now and resolve once the outbox has drained.
-       *
-       * @returns {Promise<boolean>}
-       */
-      flushNow: async function () {
-        if (stopped) return false;
-        if (flushTimer) {
-          clearTimeout(flushTimer);
-          flushTimer = null;
-        }
-        await flush(false);
-        return outbox.length === 0 && !flushInFlight;
-      },
-      /**
-       * Adopt a rotated document key + epoch after rekey recovery.
-       *
-       * @param {CryptoKey} newKey
-       * @param {number} newEpoch
-       */
-      adoptRekey: function (newKey, newEpoch) {
-        key = newKey;
-        epoch = newEpoch;
-        staleEpochInFlight = false;
-        if (!stopped) {
-          refreshStatus();
-          if (outbox.length) scheduleFlush();
         }
       },
     };

@@ -135,24 +135,20 @@ class BuildUserExportTests(TestCase):
             {
                 "exported_at",
                 "account",
-                "keypair",
                 "vault",
                 "shared_passwords",
                 "note_vault",
                 "shared_notes",
                 "live_notes",
-                "live_note_collaborations",
             },
         )
 
     def test_empty_account_exports_empty_sections_not_missing_ones(self):
         export = build_user_export(self.user)
         self.assertIsNone(export["vault"])
-        self.assertIsNone(export["keypair"])
         self.assertEqual(export["shared_passwords"], [])
         self.assertEqual(export["shared_notes"], [])
         self.assertEqual(export["live_notes"], [])
-        self.assertEqual(export["live_note_collaborations"], [])
 
     def test_password_shares_are_included_with_both_ciphertext_pairs(self):
         share = make_share(

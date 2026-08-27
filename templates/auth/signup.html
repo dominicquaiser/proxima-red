@@ -26,10 +26,6 @@
         <input type="hidden" id="id_auth_secret" name="auth_secret" />
         <input type="hidden" id="id_auth_salt" name="auth_salt" />
         <input type="hidden" id="id_vault_salt" name="vault_salt" />
-        {# Collaboration keypair, generated client-side at signup (see signup.js). #}
-        <input type="hidden" id="id_public_key" name="public_key" />
-        <input type="hidden" id="id_encrypted_private_key" name="encrypted_private_key" />
-        <input type="hidden" id="id_private_key_iv" name="private_key_iv" />
         {# Vetted vault destination (see AuthFormView.requested_tool). #}
         <input type="hidden" name="tool" value="{{ tool }}" />
 

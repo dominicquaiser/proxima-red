@@ -245,13 +245,11 @@ def build_user_export(user: User) -> dict[str, Any]:
         user: The user whose data should be exported.
 
     Returns:
-        A JSON-serializable dict: account metadata, the collaboration keypair,
-        both tools' vaults, and the shares, notes, live notes and
-        collaboration grants belonging to the account.
+        A JSON-serializable dict: account metadata, both tools' vaults, and
+        the shares, notes and live notes belonging to the account.
     """
     # Late import: the export spans tools but lives here for now; if a third
     # tool grows account data, move the account-level export to apps.auth.
-    from apps.auth import services as auth_services
     from apps.note import services as note_services
 
     export: dict[str, Any] = {
@@ -261,7 +259,6 @@ def build_user_export(user: User) -> dict[str, Any]:
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat(),
         },
-        "keypair": auth_services.build_keypair_export(user),
         "vault": None,
         "shared_passwords": [
             serialize_shared_password(share) for share in user.shared_passwords.all()

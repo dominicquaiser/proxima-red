@@ -220,11 +220,6 @@ class LiveNote(models.Model):
         snapshot_iv (str): Base64-encoded initialization vector of the snapshot.
         snapshot_seq (int): Highest update id covered by the snapshot; 0 for a
             freshly seeded document.
-        access_mode (str): ``ACCESS_LINK`` (anyone holding the link may edit)
-            or ``ACCESS_RESTRICTED`` (a session plus a
-            :class:`LiveNoteCollaborator` row is required).
-        key_epoch (int): Document-key generation, incremented by each rekey.
-            Always 0 for link-mode and pre-M4 notes.
         created_at (datetime.datetime): Timestamp when the live note was created.
         updated_at (datetime.datetime): Timestamp of the last snapshot write.
         expires_at (datetime.datetime): Timestamp after which the live note is
@@ -265,33 +260,6 @@ class LiveNote(models.Model):
     snapshot_seq = models.BigIntegerField(
         default=0,
         help_text=_("Highest update id folded into the snapshot; 0 when seeded"),
-    )
-
-    # ── Named-collaborator access control (M4) ──────────────────────────────
-    # "link" is the default anonymous editable-share behavior (holding the
-    # fragment key is the capability); "restricted" gates every endpoint on a
-    # session + a LiveNoteCollaborator row and wraps the doc key per user.
-    ACCESS_LINK = "link"
-    ACCESS_RESTRICTED = "restricted"
-    ACCESS_MODES = [
-        (ACCESS_LINK, "Anyone with the link"),
-        (ACCESS_RESTRICTED, "Named collaborators only"),
-    ]
-    access_mode = models.CharField(
-        max_length=10,
-        choices=ACCESS_MODES,
-        default=ACCESS_LINK,
-        help_text=_(
-            "Whether the link alone grants access, or a collaborator row is required"
-        ),
-    )
-
-    # Bumped on each rekey (revocation). Appends carry the epoch they encrypted
-    # under; a mismatch is rejected so a client on the old key can't append
-    # ciphertext no one else can read. 0 for link-mode / pre-M4 notes.
-    key_epoch = models.BigIntegerField(
-        default=0,
-        help_text=_("Document-key generation; incremented on each rekey"),
     )
 
     created_at = models.DateTimeField(
@@ -424,85 +392,6 @@ class LiveNoteUpdate(models.Model):
             f"<LiveNoteUpdate id={self.pk} "
             f"note={str(self.note_id)[:8]}... "
             f"created={self.created_at.isoformat()}>"
-        )
-
-
-class LiveNoteCollaborator(models.Model):
-    """
-    A named collaborator's access to a restricted live note (M4).
-
-    Holds the document key **wrapped to this collaborator's public key** (see
-    ``static/shared/js/keywrap.js``): only the collaborator's private key can
-    unwrap it, so the server stores the wrap but can never open the document.
-    The row's existence is also the access grant: restricted endpoints check
-    for it. Revoking = deleting the row and rekeying the document (rotate the
-    doc key, re-wrap to the survivors, bump ``LiveNote.key_epoch``), so a
-    removed collaborator cannot read anything written afterward.
-
-    Attributes:
-        note (LiveNote): The restricted live note.
-        user (User): The collaborator.
-        role (str): ``owner`` (may invite/revoke/rekey) or ``editor``.
-        wrapped_key (str): Base64 AES-GCM ciphertext of the doc key.
-        wrap_iv (str): Base64 IV for the wrap.
-        ephemeral_public_key (str): Base64 SPKI of the wrap's ephemeral key.
-        key_epoch (int): The document key generation this wrap is for; must
-            match ``LiveNote.key_epoch`` to be current.
-    """
-
-    ROLE_OWNER = "owner"
-    ROLE_EDITOR = "editor"
-    ROLES = [(ROLE_OWNER, "Owner"), (ROLE_EDITOR, "Editor")]
-
-    note = models.ForeignKey(
-        LiveNote,
-        on_delete=models.CASCADE,
-        related_name="collaborators",
-        help_text=_("Restricted live note this grant belongs to"),
-    )
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name="live_collaborations",
-        help_text=_("The collaborator"),
-    )
-    role = models.CharField(max_length=8, choices=ROLES, default=ROLE_EDITOR)
-    wrapped_key = models.TextField(
-        help_text=_(
-            "Base64 AES-GCM ciphertext of the document key, wrapped to this user"
-        )
-    )
-    wrap_iv = models.TextField(help_text=_("Base64 IV for the wrapped key"))
-    ephemeral_public_key = models.TextField(
-        help_text=_("Base64 SPKI of the wrap's ephemeral ECDH public key")
-    )
-    key_epoch = models.BigIntegerField(
-        default=0, help_text=_("Document-key generation this wrap decrypts")
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "note_livenotecollaborator"
-        verbose_name = _("Live Note Collaborator")
-        verbose_name_plural = _("Live Note Collaborators")
-        constraints = [
-            models.UniqueConstraint(
-                fields=["note", "user"], name="note_livecollab_unique_note_user"
-            )
-        ]
-        indexes = [
-            models.Index(fields=["note", "user"], name="note_livecollab_note_user_idx"),
-        ]
-
-    def __str__(self) -> str:
-        """Return a non-sensitive label (no wrapped key material)."""
-        return f"Collaborator {self.user_id} on note {str(self.note_id)[:8]}..."
-
-    def __repr__(self) -> str:
-        """Return a non-sensitive detailed representation."""
-        return (
-            f"<LiveNoteCollaborator note={str(self.note_id)[:8]}... "
-            f"user={self.user_id} role={self.role} epoch={self.key_epoch}>"
         )
 
 

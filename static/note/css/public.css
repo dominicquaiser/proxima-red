@@ -3,7 +3,7 @@
  *
  * Loaded by unauthenticated editor, retrieve, and live-note pages. Shared
  * editor and markdown primitives live in shared.css; this file owns public
- * page chrome, no-JavaScript fallbacks, response cards, live collaboration
+ * page chrome, no-JavaScript fallbacks, response cards, live editing
  * affordances, and retrieve-view layout.
  */
 
@@ -405,102 +405,4 @@ html:has(.note-view) {
   background: var(--cc);
   opacity: 0.22;
   pointer-events: none;
-}
-
-/*
- * Collaborator management panel for live-note owners.
- *
- * Anchored near the rail key button. The panel supports restricting access,
- * inviting by user ID, and revoking access.
- */
-
-.collab-panel {
-  width: min(340px, calc(100vw - 32px));
-  margin: 0;
-  padding: 18px;
-  border: 1px solid var(--color-oil-slick);
-  border-radius: 12px;
-  background: var(--color-charcoal);
-  color: var(--color-driftwood);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
-  inset: auto;
-  position: fixed;
-  right: calc(var(--rail-width) + 16px);
-  bottom: calc(var(--bar-height) + 16px);
-}
-
-.collab-panel__title {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--color-alabaster);
-  margin-bottom: 12px;
-}
-
-.collab-panel__hint {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--color-warm-slate);
-  margin-bottom: 12px;
-}
-
-/* The irreversibility warning above the restrict button: same hint type, but
-   it has to read as a consequence rather than as more description. */
-.collab-panel__hint--warn {
-  color: var(--color-coral-red);
-}
-
-.collab-panel__section + .collab-panel__section {
-  margin-top: 16px;
-}
-
-.collab-invite {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.collab-invite .field__input {
-  flex: 1;
-  min-width: 0;
-}
-
-.collab-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.collab-list__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--color-oil-slick);
-  border-radius: 8px;
-  background: var(--color-dark-asphalt);
-}
-
-.collab-list__id {
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-driftwood);
-}
-
-.collab-list__revoke {
-  border: none;
-  background: none;
-  color: var(--color-coral-red);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 2px 4px;
-}
-
-.collab-list__revoke:hover {
-  text-decoration: underline;
 }

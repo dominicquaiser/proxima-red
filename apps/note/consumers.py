@@ -8,21 +8,9 @@ one cursor space. Awareness frames (encrypted presence: cursor + selection +
 name/color) are relayed to the group and never persisted; they are ephemeral
 by design.
 
-Access model: the scope twin of the views' ``_live_access_or_error``. A
-link-mode note is anonymous (holding the link is the capability, exactly like
-the HTTP endpoints); a restricted note (M4) additionally requires an
-authenticated session (close WS_CLOSE_AUTH_REQUIRED) and a collaborator row
-(close WS_CLOSE_FORBIDDEN). The session comes from SessionMiddlewareStack in
-config/asgi.py and is read directly, because django.contrib.auth is not
-installed (see ``_restricted_gate``).
-
-Unlike an HTTP request, a socket outlives the check that admitted it, so the
-gate is re-run on demand: ``services.broadcast_live_access_change`` publishes
-a ``live.access`` event whenever an owner *narrows* access (restrict, rekey),
-and ``live_access`` evicts the sockets that no longer pass with the same close
-codes connect would have used. Without it a revoked collaborator keeps
-receiving the group's traffic and relaying awareness into it, and an anonymous
-editor keeps writing to a note that just became collaborators-only.
+Access model: anonymous, the scope twin of the HTTP endpoints. Holding the
+link is the capability; the fragment key gates understanding the ciphertext,
+not reaching the socket.
 
 Ordering contract: appends run under the service's row lock and every push
 carries ``(prev_seq, seq)`` computed under that lock, so the client can
@@ -31,8 +19,7 @@ one HTTP ``?since=`` fetch. Persist-then-broadcast: a row id is only ever
 announced after its transaction committed.
 
 Frames (JSON text):
-- client -> server: {"type": "update", "txn": n, "payload": b64, "iv": b64,
-                     "key_epoch": n} (key_epoch optional, absent reads as 0)
+- client -> server: {"type": "update", "txn": n, "payload": b64, "iv": b64}
                     {"type": "awareness", "payload": b64, "iv": b64}
 - server -> sender: {"type": "ack", "txn": n, "seq": id, "prev_seq": id,
                      "pending": n}
@@ -43,8 +30,8 @@ Frames (JSON text):
                     {"type": "expired"} followed by close WS_CLOSE_NOT_FOUND
 
 Close codes are terminal, error frames are recoverable (the socket stays
-open): WS_CLOSE_NOT_FOUND (unknown or expired), WS_CLOSE_AUTH_REQUIRED /
-WS_CLOSE_FORBIDDEN (restricted documents), WS_CLOSE_ABUSE (do not reconnect).
+open): WS_CLOSE_NOT_FOUND (unknown or expired), WS_CLOSE_ABUSE (do not
+reconnect).
 
 Abuse controls mirror the HTTP endpoints' posture (fail open on cache
 trouble, per-IP buckets on the shared default cache): a per-IP connect
@@ -64,7 +51,6 @@ from django.utils import timezone
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
-from apps.auth.constants import SESSION_KEY_AUTHENTICATED, SESSION_KEY_USER_ID
 from apps.core.http import exception_type
 
 from . import services
@@ -75,14 +61,11 @@ from .constants import (
     RATE_LIMIT_LIVE_WS_CONNECT,
     WS_ABUSE_STREAK,
     WS_CLOSE_ABUSE,
-    WS_CLOSE_AUTH_REQUIRED,
-    WS_CLOSE_FORBIDDEN,
     WS_CLOSE_NOT_FOUND,
     WS_ERROR_AWARENESS_TOO_LARGE,
     WS_ERROR_INVALID_FRAME,
     WS_ERROR_RATE_LIMITED,
     WS_ERROR_SERVER,
-    WS_ERROR_STALE_EPOCH,
     WS_ERROR_TAIL_FULL,
     WS_ERROR_UPDATE_TOO_LARGE,
     WS_MSG_BURST,
@@ -252,10 +235,10 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         self._counted_socket = False
         self._bucket = TokenBucket(WS_MSG_BURST, WS_MSG_RATE)
         self._over_budget_streak = 0
-        # Frames can arrive between accept() and a gate close below. Nothing
-        # is served until the gates have all passed: receive_json drops
-        # anything sent before this flips, which also keeps it from reading
-        # expires_at before there is a note to read it from.
+        # Frames can arrive between accept() and a close below. Nothing is
+        # served until the checks have all passed: receive_json drops anything
+        # sent before this flips, which also keeps it from reading expires_at
+        # before there is a note to read it from.
         self._ready = False
         self.expires_at = None
 
@@ -277,21 +260,6 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=WS_CLOSE_NOT_FOUND)
             return
         self.expires_at = note_state["expires_at"]
-
-        # Restricted-access gate (M4): link mode stays anonymous; a restricted
-        # doc needs a session (close 4401) and a collaborator row (close 4403,
-        # indistinguishable from 4404 by a non-collaborator who can't tell
-        # restricted from missing). The gate runs in a DB thread because
-        # reading the (lazy, DB-backed) scope session and the collaborator row
-        # are both synchronous ORM operations.
-        if note_state["access_mode"] == LiveNote.ACCESS_RESTRICTED:
-            gate = await self._restricted_gate(pk)
-            if gate == "no_session":
-                await self.close(code=WS_CLOSE_AUTH_REQUIRED)
-                return
-            if gate == "forbidden":
-                await self.close(code=WS_CLOSE_FORBIDDEN)
-                return
 
         sockets = _cache_incr(self.sockets_key, NOTE_SOCKETS_TTL)
         self._counted_socket = sockets is not None
@@ -380,13 +348,8 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         if len(payload) > MAX_LIVE_UPDATE_LENGTH:
             await self._send_error(WS_ERROR_UPDATE_TOO_LARGE)
             return
-        # Absent/invalid key_epoch reads as 0 (link-mode and pre-M4 clients);
-        # a genuine mismatch surfaces as stale_epoch from the service.
-        raw_epoch = content.get("key_epoch", 0)
-        key_epoch = raw_epoch if isinstance(raw_epoch, int) and raw_epoch >= 0 else 0
-
         try:
-            seq, pending, prev_seq = await self._append_update(payload, iv, key_epoch)
+            seq, pending, prev_seq = await self._append_update(payload, iv)
         except LiveNote.DoesNotExist:
             # Deleted by the expiry sweep between our connect and this frame.
             await self.send_json({"type": "expired"})
@@ -395,8 +358,6 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         except ValidationError as e:
             if e.code == "pending_tail_full":
                 code = WS_ERROR_TAIL_FULL
-            elif e.code == "stale_epoch":
-                code = WS_ERROR_STALE_EPOCH
             else:
                 code = WS_ERROR_INVALID_FRAME
             await self._send_error(code)
@@ -480,47 +441,6 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             {"type": "awareness", "payload": event["payload"], "iv": event["iv"]}
         )
 
-    async def live_access(self, event):
-        """Re-run the connect gate after the owner narrowed access.
-
-        Published by ``services.broadcast_live_access_change`` on restrict and
-        on rekey. The connect gate is a one-time check, so a socket otherwise
-        outlives the grant that admitted it. This closes the two ways that
-        happens, using the codes connect itself would have used: an anonymous
-        editor still inside a note that just became restricted, and a
-        collaborator whose row a rekey deleted.
-
-        Widening access publishes nothing, so a socket is only ever closed
-        here, never admitted.
-        """
-        if not self._ready:
-            return
-        note_state = await self._load_active_note(self.note_id)
-        if note_state is None:
-            await self.send_json({"type": "expired"})
-            await self._evict(WS_CLOSE_NOT_FOUND)
-            return
-        if note_state["access_mode"] != LiveNote.ACCESS_RESTRICTED:
-            return
-        gate = await self._restricted_gate(self.note_id)
-        if gate == "no_session":
-            await self._evict(WS_CLOSE_AUTH_REQUIRED)
-        elif gate == "forbidden":
-            await self._evict(WS_CLOSE_FORBIDDEN)
-
-    async def _evict(self, code: int):
-        """Stop serving this socket and close it with a terminal code.
-
-        Clearing ``_ready`` first matters: ``close()`` only asks the client to
-        go away, and frames already queued would otherwise still be served on
-        the way out.
-
-        Args:
-            code (int): One of the terminal ``WS_CLOSE_*`` constants.
-        """
-        self._ready = False
-        await self.close(code=code)
-
     # ── Helpers ──────────────────────────────────────────────────────────
 
     async def _send_error(self, code: str):
@@ -533,54 +453,25 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _load_active_note(self, pk):
-        """Fetch the note's expiry + access mode, deleting it if expired.
+        """Fetch the note's expiry, deleting it if expired.
 
         Shares the expire-on-read gate (``services.get_active_live_note``)
         with the views' ``_live_note_or_404_json``, so unknown and expired are
         indistinguishable across both transports (both end in
-        WS_CLOSE_NOT_FOUND here). Only the two fields needed to run the connect
-        gate are returned, rather than the note itself, so nothing is held
-        across the async boundary.
+        WS_CLOSE_NOT_FOUND here). Only the field the connect path needs is
+        returned, rather than the note itself, so nothing is held across the
+        async boundary.
 
         Returns:
-            dict | None: ``expires_at`` and ``access_mode``, or ``None`` when
-            the note is gone.
+            dict | None: ``expires_at``, or ``None`` when the note is gone.
         """
         note = services.get_active_live_note(pk)
         if note is None:
             return None
-        return {"expires_at": note.expires_at, "access_mode": note.access_mode}
+        return {"expires_at": note.expires_at}
 
     @database_sync_to_async
-    def _restricted_gate(self, pk) -> str:
-        """Evaluate the restricted-access gate in a DB thread.
-
-        Reads the custom session keys from the (lazy, DB-backed) scope
-        session and checks for a collaborator row. django.contrib.auth is not
-        installed, so the session is read directly (mirrors
-        ``require_session_auth_api``).
-
-        Returns:
-            str: ``"ok"``, ``"no_session"`` (no authenticated session), or
-            ``"forbidden"`` (authenticated but not a collaborator).
-        """
-        session = self.scope.get("session")
-        user_id = (
-            session.get(SESSION_KEY_USER_ID)
-            if session and session.get(SESSION_KEY_AUTHENTICATED)
-            else None
-        )
-        if not user_id:
-            return "no_session"
-        is_collaborator = LiveNote.objects.filter(
-            pk=pk, collaborators__user__user_id=user_id
-        ).exists()
-        return "ok" if is_collaborator else "forbidden"
-
-    @database_sync_to_async
-    def _append_update(
-        self, payload: str, iv: str, key_epoch: int
-    ) -> tuple[int, int, int]:
+    def _append_update(self, payload: str, iv: str) -> tuple[int, int, int]:
         """Append one update in a DB thread, through the HTTP write path.
 
         Deliberately the same ``services.append_live_update`` the polling
@@ -590,7 +481,6 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         Args:
             payload (str): Base64 ciphertext of one merged Yjs update.
             iv (str): Base64-encoded initialization vector.
-            key_epoch (int): Document-key generation the client encrypted under.
 
         Returns:
             tuple[int, int, int]: The new row's id (the client's cursor), the
@@ -598,9 +488,9 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
 
         Raises:
             LiveNote.DoesNotExist: If the note was deleted by the expiry sweep.
-            ValidationError: Codes ``stale_epoch`` or ``pending_tail_full``.
+            ValidationError: Code ``pending_tail_full``.
         """
         row, pending, prev_seq = services.append_live_update(
-            self.note_id, payload=payload, iv=iv, key_epoch=key_epoch
+            self.note_id, payload=payload, iv=iv
         )
         return row.pk, pending, prev_seq

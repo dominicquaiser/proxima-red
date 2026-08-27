@@ -34,12 +34,9 @@ from channels.testing.websocket import WebsocketCommunicator  # noqa: E402
 
 from apps.note.constants import (
     WS_CLOSE_ABUSE,
-    WS_CLOSE_AUTH_REQUIRED,
-    WS_CLOSE_FORBIDDEN,
     WS_CLOSE_NOT_FOUND,
     WS_ERROR_AWARENESS_TOO_LARGE,
     WS_ERROR_INVALID_FRAME,
-    WS_ERROR_STALE_EPOCH,
     WS_ERROR_TAIL_FULL,
     WS_ERROR_UPDATE_TOO_LARGE,
 )
@@ -49,10 +46,8 @@ from apps.note.models import LiveNote, LiveNoteUpdate
 from .factories import (
     VALID_CONTENT_B64,
     VALID_IV_B64,
-    make_live_collaborator,
     make_live_note,
     make_live_update,
-    make_restricted_live_note,
 )
 
 # Imported late so config.asgi initialises against the test settings.
@@ -157,6 +152,13 @@ class LiveConsumerConnectTests(LiveConsumerTestCase):
             message = await second.receive_output()
         self.assertEqual(message["type"], "websocket.close")
         self.assertEqual(message["code"], WS_CLOSE_ABUSE)
+        await self._close_all()
+
+    async def test_link_note_connects_anonymously(self):
+        """Holding the link is the whole capability; no session required."""
+        note = await self._make_note()
+        communicator = await self._connect(note.pk)
+        self.assertTrue(await communicator.receive_nothing())
         await self._close_all()
 
     async def test_disconnect_releases_the_socket_slot(self):
@@ -388,243 +390,6 @@ class LiveConsumerAwarenessTests(LiveConsumerTestCase):
 
         self.assertEqual(reply, {"type": "error", "code": WS_ERROR_AWARENESS_TOO_LARGE})
         self.assertTrue(await receiver.receive_nothing())
-        await self._close_all()
-
-
-class LiveConsumerRestrictedTests(LiveConsumerTestCase):
-    """The restricted-access connect gate (M4 named collaborators)."""
-
-    async def test_link_note_stays_anonymous(self):
-        note = await LiveConsumerConnectTests._make_note()
-        communicator = await self._connect(note.pk)
-        self.assertTrue(await communicator.receive_nothing())
-        await self._close_all()
-
-    async def test_restricted_note_without_session_closes_4401(self):
-        note = await self._make_restricted()
-        communicator = await self._connect(note.pk)
-        message = await communicator.receive_output()
-        self.assertEqual(message["type"], "websocket.close")
-        self.assertEqual(message["code"], WS_CLOSE_AUTH_REQUIRED)
-        await self._close_all()
-
-    async def test_restricted_note_non_collaborator_closes_4403(self):
-        note, _owner = await self._make_restricted(return_owner=True)
-        stranger = await self._make_user("stranger secret")
-        communicator = await self._connect(note.pk, session_user=stranger)
-        message = await communicator.receive_output()
-        self.assertEqual(message["type"], "websocket.close")
-        self.assertEqual(message["code"], WS_CLOSE_FORBIDDEN)
-        await self._close_all()
-
-    async def test_restricted_note_collaborator_connects(self):
-        note, owner = await self._make_restricted(return_owner=True)
-        communicator = await self._connect(note.pk, session_user=owner)
-        self.assertTrue(await communicator.receive_nothing())
-        await self._close_all()
-
-    async def test_stale_epoch_update_gets_error_frame(self):
-        note, owner = await self._make_restricted(return_owner=True, key_epoch=2)
-        communicator = await self._connect(note.pk, session_user=owner)
-        await communicator.send_json_to(
-            {
-                "type": "update",
-                "payload": VALID_CONTENT_B64,
-                "iv": VALID_IV_B64,
-                "key_epoch": 1,
-            }
-        )
-        reply = await communicator.receive_json_from()
-        self.assertEqual(reply, {"type": "error", "code": WS_ERROR_STALE_EPOCH})
-        await self._close_all()
-
-    @staticmethod
-    async def _make_user(secret):
-        from channels.db import database_sync_to_async
-        from apps.auth.tests.factories import create_user_with_password
-
-        return await database_sync_to_async(create_user_with_password)(secret)
-
-    @staticmethod
-    async def _make_restricted_with_editor():
-        """A restricted note with an owner and a second, editor collaborator."""
-        from channels.db import database_sync_to_async
-        from apps.auth.tests.factories import create_user_with_password
-
-        @database_sync_to_async
-        def build():
-            owner = create_user_with_password("owner secret")
-            editor = create_user_with_password("editor secret")
-            note = make_restricted_live_note(owner)
-            make_live_collaborator(note, editor)
-            return note, owner, editor
-
-        return await build()
-
-    @staticmethod
-    async def _make_restricted(return_owner=False, key_epoch=0):
-        from channels.db import database_sync_to_async
-        from apps.auth.tests.factories import create_user_with_password
-
-        @database_sync_to_async
-        def build():
-            owner = create_user_with_password("owner secret")
-            note = make_restricted_live_note(owner)
-            if key_epoch:
-                note.key_epoch = key_epoch
-                note.save(update_fields=["key_epoch"])
-                # keep the owner grant at the note's epoch so they remain valid
-                note.collaborators.update(key_epoch=key_epoch)
-            return note, owner
-
-        note, owner = await build()
-        return (note, owner) if return_owner else note
-
-
-class LiveConsumerEvictionTests(LiveConsumerTestCase):
-    """Re-running the access gate on an already-connected socket.
-
-    The connect gate is a one-time check, so narrowing a note's access has to
-    reach the sockets already inside the group. These drive the consumer's
-    ``live.access`` handler directly; the services' side of the wiring (that
-    restrict and rekey actually publish the event, after commit) is covered in
-    test_services.
-    """
-
-    async def _publish_access_change(self, note_id):
-        from channels.layers import get_channel_layer
-
-        from apps.note import services
-
-        await get_channel_layer().group_send(
-            services.live_group_name(note_id), {"type": "live.access"}
-        )
-
-    async def test_anonymous_socket_is_evicted_when_the_note_is_restricted(self):
-        """The gate change is all there is: restricting rotates no key."""
-        from channels.db import database_sync_to_async
-
-        from apps.auth.tests.factories import create_user_with_password
-
-        note = await LiveConsumerConnectTests._make_note()
-        communicator = await self._connect(note.pk)
-        self.assertTrue(await communicator.receive_nothing())
-
-        @database_sync_to_async
-        def restrict():
-            owner = create_user_with_password("owner secret")
-            note.created_by = owner
-            note.save(update_fields=["created_by"])
-            note.access_mode = LiveNote.ACCESS_RESTRICTED
-            note.save(update_fields=["access_mode"])
-            make_live_collaborator(note, owner, role="owner")
-
-        await restrict()
-        await self._publish_access_change(note.pk)
-
-        message = await communicator.receive_output()
-        self.assertEqual(message["type"], "websocket.close")
-        self.assertEqual(message["code"], WS_CLOSE_AUTH_REQUIRED)
-        await self._close_all()
-
-    async def test_revoked_collaborator_socket_is_evicted(self):
-        from channels.db import database_sync_to_async
-
-        note, _owner, editor = await LiveConsumerRestrictedTests._make_restricted_with_editor()
-        communicator = await self._connect(note.pk, session_user=editor)
-        self.assertTrue(await communicator.receive_nothing())
-
-        @database_sync_to_async
-        def revoke():
-            note.collaborators.filter(user=editor).delete()
-
-        await revoke()
-        await self._publish_access_change(note.pk)
-
-        message = await communicator.receive_output()
-        self.assertEqual(message["type"], "websocket.close")
-        self.assertEqual(message["code"], WS_CLOSE_FORBIDDEN)
-        await self._close_all()
-
-    async def test_surviving_collaborator_socket_stays_open(self):
-        """A rekey broadcasts to everyone; only the revoked socket may close."""
-        note, owner, _editor = await LiveConsumerRestrictedTests._make_restricted_with_editor()
-        communicator = await self._connect(note.pk, session_user=owner)
-
-        await self._publish_access_change(note.pk)
-
-        self.assertTrue(await communicator.receive_nothing())
-        await self._close_all()
-
-    async def test_link_note_socket_survives_a_spurious_broadcast(self):
-        note = await LiveConsumerConnectTests._make_note()
-        communicator = await self._connect(note.pk)
-
-        await self._publish_access_change(note.pk)
-
-        self.assertTrue(await communicator.receive_nothing())
-        await self._close_all()
-
-    async def test_evicted_socket_serves_no_further_frames(self):
-        """close() only asks the client to leave; queued frames must not run."""
-        from channels.db import database_sync_to_async
-
-        note, _owner, editor = await LiveConsumerRestrictedTests._make_restricted_with_editor()
-        communicator = await self._connect(note.pk, session_user=editor)
-
-        @database_sync_to_async
-        def revoke():
-            note.collaborators.filter(user=editor).delete()
-
-        await revoke()
-        await self._publish_access_change(note.pk)
-        message = await communicator.receive_output()
-        self.assertEqual(message["code"], WS_CLOSE_FORBIDDEN)
-
-        await communicator.send_json_to(
-            {"type": "update", "payload": VALID_CONTENT_B64, "iv": VALID_IV_B64}
-        )
-        self.assertTrue(await communicator.receive_nothing())
-
-        @database_sync_to_async
-        def update_count():
-            return LiveNoteUpdate.objects.filter(note=note).count()
-
-        self.assertEqual(await update_count(), 0)
-        await self._close_all()
-
-    async def test_evicted_socket_is_not_served_the_groups_traffic(self):
-        """The eviction's whole point: no more of the document on the wire.
-
-        An evicted socket stays in the channel group until its disconnect is
-        processed, so the group handlers have to refuse it in that window.
-        """
-        from channels.db import database_sync_to_async
-
-        note, owner, editor = await LiveConsumerRestrictedTests._make_restricted_with_editor()
-        evicted = await self._connect(note.pk, session_user=editor)
-        survivor = await self._connect(note.pk, session_user=owner)
-
-        @database_sync_to_async
-        def revoke():
-            note.collaborators.filter(user=editor).delete()
-
-        await revoke()
-        await self._publish_access_change(note.pk)
-        closed = await evicted.receive_output()
-        self.assertEqual(closed["code"], WS_CLOSE_FORBIDDEN)
-
-        # The survivor keeps editing; none of it may reach the evicted socket.
-        await survivor.send_json_to(
-            {"type": "update", "txn": 1, "payload": VALID_CONTENT_B64, "iv": VALID_IV_B64}
-        )
-        ack = await survivor.receive_json_from()
-        self.assertEqual(ack["type"], "ack")
-        await survivor.send_json_to(
-            {"type": "awareness", "payload": VALID_CONTENT_B64, "iv": VALID_IV_B64}
-        )
-
-        self.assertTrue(await evicted.receive_nothing())
         await self._close_all()
 
 

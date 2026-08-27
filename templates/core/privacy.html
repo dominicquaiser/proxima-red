@@ -376,15 +376,9 @@
         links.
       </p>
       <p>
-        <strong>Restricted (named-collaborator) live notes.</strong> The owner of a live note may
-        optionally restrict it to named accounts instead of anyone-with-the-link. The document key is
-        then wrapped to each collaborator's account key (see §3.7) rather than carried in the link,
-        and the server stores, per collaborator, a row linking the note to that account together with
-        the wrapped key. As a necessary consequence the server learns <em>which accounts collaborate
-        on which restricted note</em> — a relationship it does not learn for anonymous link notes. It
-        still never learns the note's content. Revoking a collaborator rotates the document key and
-        re-wraps it to the remaining collaborators, so the revoked account cannot read edits made
-        afterwards; edits it had already seen are, of course, already seen.
+        Editable links are always anonymous: holding the link is the entire capability, and the
+        server keeps no record of <em>which accounts</em> edit a given note. Access is not
+        restricted to named accounts, and there is no account-to-note relationship to store.
       </p>
       <p>
         While a live note is open, each participant's browser holds a persistent connection
@@ -444,21 +438,6 @@
             <td>Public KDF salt for the client-side vault key derivation (Base64)</td>
           </tr>
           <tr>
-            <td><code>public_key</code> (optional)</td>
-            <td>
-              Public half of a collaboration keypair (ECDH P-256), used to invite the account to
-              restricted live notes. Created client-side; generated at signup or on first
-              collaboration.
-            </td>
-          </tr>
-          <tr>
-            <td><code>encrypted_private_key</code> (optional)</td>
-            <td>
-              Private half of the collaboration keypair, encrypted in the browser under the account's
-              vault key (AES-256-GCM). The server stores the ciphertext but can never decrypt it.
-            </td>
-          </tr>
-          <tr>
             <td><code>created_at</code></td>
             <td>Account creation timestamp</td>
           </tr>
@@ -480,17 +459,6 @@
         The <code>auth_salt</code> and <code>vault_salt</code> are public inputs published by the
         <code>/auth/salts/</code> endpoint. For unknown user IDs, deterministic decoy salts are
         returned so that the endpoint is not an account-existence oracle.
-      </p>
-      <p>
-        <strong>Collaboration keys (optional).</strong> When you invite named collaborators to a
-        restricted live note, the document's encryption key is wrapped to each collaborator's public
-        key so that only they can unwrap it — the server relays the wrapped keys but never holds the
-        document key. Because public keys are distributed by the server, this model trusts the server
-        not to substitute a key of its own when you look up a collaborator by User ID (a limitation
-        inherent to any server-distributed public-key directory; out-of-band key-fingerprint
-        verification is not yet offered). Looking up another account's public key requires you to be
-        signed in and is rate limited; it reveals only that a given User ID exists and has enabled
-        collaboration.
       </p>
       <p>
         <strong>Purpose:</strong> Providing authenticated access to the vault and associating
@@ -700,11 +668,11 @@
             <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
           </tr>
           <tr>
-            <td>Live notes (editable links) incl. update log and collaborator grants</td>
+            <td>Live notes (editable links) incl. update log</td>
             <td>Up to the chosen expiry (max 4 weeks); deleted automatically at expiry</td>
           </tr>
           <tr>
-            <td>User account data (incl. collaboration keypair)</td>
+            <td>User account data</td>
             <td>Until account deletion</td>
           </tr>
           <tr>
@@ -791,13 +759,11 @@
         server consists of a random 8-digit ID, an Argon2 hash, and two public KDF salts — none of
         which reveals the account password or vault contents (which remain encrypted). Authenticated
         users can export their data via the account page. The export is a single JSON file
-        containing every row the server keys to the account: the account metadata, the collaboration
-        keypair, both tools' vaults, and the password shares, notes, live notes and collaboration
-        grants the account created. Ciphertext is included as stored — the server cannot decrypt any
-        of it, and decryption happens in the browser. Anonymous shares and notes carry no link to an
-        account and therefore do not appear. The export deliberately omits the user IDs of
-        <em>other</em> collaborators on notes the account owns: those are third parties' personal
-        data (Art. 15(4) GDPR), and they remain visible in the note's collaborator panel instead.
+        containing every row the server keys to the account: the account metadata, both tools'
+        vaults, and the password shares, notes and live notes the account created. Ciphertext is
+        included as stored — the server cannot decrypt any of it, and decryption happens in the
+        browser. Anonymous shares and notes carry no link to an account and therefore do not
+        appear.
       </p>
       <p>
         Requests relating to server log data will be forwarded to the hosting provider, as the

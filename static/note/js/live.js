@@ -1,6 +1,6 @@
 /**
  * @fileoverview Live-note page controller: fragment-key handling, Y.Doc to
- * editor binding, sync status, presence, collaboration, and expiry countdown.
+ * editor binding, sync status, presence, and expiry countdown.
  *
  * Fragment keys are scrubbed from the URL and stashed in tab sessionStorage
  * so refresh does not strand an active editing session.
@@ -19,7 +19,6 @@
 
   const KEY_STASH_PREFIX = "noteLiveKey:";
   const COUNTDOWN_INTERVAL_MS = 1000;
-  const NOTE_VAULT_KEY_STORAGE = "noteVaultMasterKey";
   const EDITOR_PLACEHOLDER = "# Write your markdown here";
 
   function expiryText(remainingMs) {
@@ -62,56 +61,11 @@
       if (message) window.Notify.show(message, "error");
     }
 
-    // Create the doc before key resolution; restricted notes may unwrap later.
     const doc = new window.Y.Doc();
     const ytext = doc.getText("content");
 
-    const context = {
-      accessMode: main.dataset.accessMode || "link",
-      isOwner: main.dataset.isOwner === "1",
-      isAuthenticated: main.dataset.isAuthenticated === "1",
-      userId: main.dataset.userId || "",
-    };
-
-    // Mutable so revocation rekeys can swap the document key in place.
     let key = null;
-    let keyBase64 = "";
     const keyStash = KEY_STASH_PREFIX + noteId;
-
-    // sync/presence refs are late-bound after their constructors run.
-    const collabRefs = {};
-    const collab =
-      window.NoteLiveCollab && context.isAuthenticated
-        ? window.NoteLiveCollab.create({
-          doc,
-          urls: {
-            key: main.dataset.keyUrl,
-            access: main.dataset.accessUrl,
-            collaborators: main.dataset.collaboratorsUrl,
-            rekey: main.dataset.rekeyUrl,
-            keypair: main.dataset.keypairUrl,
-            pubkey: main.dataset.pubkeyUrl,
-          },
-          context,
-          refs: collabRefs,
-          getDocKeyBase64: function () {
-            return keyBase64;
-          },
-          setDocKey: setDocKey,
-          panel: document.getElementById("collab-panel"),
-          onTerminal: enterTerminalState,
-        })
-        : null;
-
-    function setDocKey(newKey, newKeyBase64) {
-      key = newKey;
-      keyBase64 = newKeyBase64;
-      try {
-        sessionStorage.setItem(keyStash, newKeyBase64);
-      } catch (error) {
-        /* storage unavailable: the key still works for this load */
-      }
-    }
 
     let fragmentKey = window.location.hash.slice(1);
     if (fragmentKey) {
@@ -126,7 +80,6 @@
           "encrypt",
           "decrypt",
         ]);
-        keyBase64 = fragmentKey;
         try {
           sessionStorage.setItem(keyStash, fragmentKey);
         } catch (error) {
@@ -134,24 +87,6 @@
         }
       } catch (error) {
         enterTerminalState("error", "The key in the link is not valid.");
-        return;
-      }
-    } else if (context.accessMode === "restricted" && collab) {
-      // Invited collaborator, no fragment key: recover it from the wrap.
-      paintStatus("loading");
-      try {
-        const recovered = await collab.resolveDocKeyFromWrap();
-        if (!recovered) {
-          enterTerminalState("error", "You do not have access to this note.");
-          return;
-        }
-        key = recovered.key;
-        keyBase64 = recovered.keyBase64;
-      } catch (error) {
-        enterTerminalState(
-          "error",
-          "Could not unlock this note. Make sure your account is unlocked and try again.",
-        );
         return;
       }
     } else {
@@ -241,9 +176,7 @@
       onAwareness: function (payload, iv) {
         if (presence) presence.applyRemote(payload, iv);
       },
-      onStaleEpoch: collab ? collab.recoverAfterRekey : null,
     });
-    collabRefs.sync = sync;
 
     // Local edits enter Y.Text under "local" so sync queues them.
     core.onInput(function (value) {
@@ -271,17 +204,6 @@
         editor: main,
         key,
         send: sync.sendAwareness,
-      });
-      collabRefs.presence = presence;
-    }
-
-    if (collab) collab.wirePanel();
-
-    if (context.isAuthenticated) {
-      document.querySelectorAll('form[action*="/auth/signout/"]').forEach(function (form) {
-        form.addEventListener("submit", function () {
-          localStorage.removeItem(NOTE_VAULT_KEY_STORAGE);
-        });
       });
     }
 

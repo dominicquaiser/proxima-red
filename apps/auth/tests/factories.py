@@ -7,16 +7,9 @@ constructors. Imported by both the auth and passwd test suites.
 import base64
 import secrets
 
-from apps.auth.constants import PUBLIC_KEY_LENGTH_BYTES, SALT_LENGTH_BYTES
-from apps.auth.models import User, UserKeyPair
+from apps.auth.constants import SALT_LENGTH_BYTES
+from apps.auth.models import User
 from apps.auth.services import create_user_with_auth_secret
-
-# A stand-in for the browser's Base64 SPKI public key: the server only ever
-# checks the decoded byte length (PUBLIC_KEY_LENGTH_BYTES), never the curve
-# math, so a fixed-length blob is a valid fixture.
-VALID_PUBLIC_KEY_B64 = base64.b64encode(b"\x01" * PUBLIC_KEY_LENGTH_BYTES).decode()
-VALID_PRIVATE_KEY_BLOB_B64 = base64.b64encode(b"encryptedpkcs8blob").decode()
-VALID_KEYPAIR_IV_B64 = "AAAAAAAAAAAAAAAA"  # 12 zero bytes, Base64
 
 
 def generate_salt() -> str:
@@ -45,14 +38,3 @@ def create_user_with_password(password: str) -> User:
         auth_salt=generate_salt(),
         vault_salt=generate_salt(),
     )
-
-
-def make_keypair(user: User, **overrides) -> UserKeyPair:
-    """Create a collaboration keypair row for ``user`` with valid fixtures."""
-    fields = {
-        "public_key": VALID_PUBLIC_KEY_B64,
-        "encrypted_private_key": VALID_PRIVATE_KEY_BLOB_B64,
-        "private_key_iv": VALID_KEYPAIR_IV_B64,
-    }
-    fields.update(overrides)
-    return UserKeyPair.objects.create(user=user, **fields)

@@ -18,10 +18,6 @@
   const NOTE_LIST_ENDPOINT = "/vault/notes/";
   const NOTE_MIGRATE_ENDPOINT = "/vault/migrate/";
 
-  // Collaboration keypair endpoint (read the vault-key-encrypted private blob
-  // to re-encrypt it under the new key); normally carried in data-keypair-url.
-  const KEYPAIR_ENDPOINT = "/auth/keypair/";
-
   // Migration batch bounds: each POST must stay under Django's default
   // DATA_UPLOAD_MAX_MEMORY_SIZE (2.5MB). Note ciphertexts are capped at
   // 200,000 chars server-side, so 8 notes / ~1.5M chars leaves ample headroom.
@@ -46,7 +42,9 @@
       return window.AuthCrypto.importKeyFromBase64(storedKeyBase64);
     }
     if (!currentPassword || !currentVaultSalt) {
-      throw new Error("No session key available and cannot derive one to read existing vault data.");
+      throw new Error(
+        "No session key available and cannot derive one to read existing vault data.",
+      );
     }
     return window.AuthCrypto.deriveKeyFromPassword(currentPassword, currentVaultSalt);
   };
@@ -144,35 +142,6 @@
     return { index, notes };
   };
 
-  // Read and decrypt the collaboration private-key blob under the CURRENT key.
-  // Same fail-closed contract as the vault recoveries: a blob that exists but
-  // can't be read throws, aborting the change before any key is rotated (a
-  // partially-migrated keypair would strand every wrapped document key).
-  // Returns the raw PKCS8 bytes to re-encrypt, or null when the account has no
-  // keypair. The bytes never re-import as a key, only the ciphertext moves
-  // between vault keys.
-  const recoverCurrentKeypair = async (keypairUrl, currentPassword, currentVaultSalt) => {
-    const { response, result: blob } = await window.Http.getJson(keypairUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    // Unreadable throws; {success: true, exists: false} is an account that
-    // never generated a collaboration keypair.
-    if (!blob.success) {
-      throw new Error(blob.error || "Could not read the account keypair.");
-    }
-    if (!blob.exists) {
-      return null;
-    }
-    const oldKey = await resolveCurrentVaultKey(currentPassword, currentVaultSalt);
-    const pkcs8 = await window.CryptoCore.decryptBytes(
-      blob.encrypted_private_key,
-      blob.private_key_iv,
-      oldKey,
-    );
-    return { pkcs8 };
-  };
-
   // Split re-encrypted note payloads into POST-sized batches (see the
   // NOTE_MIGRATE_BATCH_* bounds). Always returns at least one batch so the
   // index payload has a final batch to ride in.
@@ -196,10 +165,9 @@
 
   // Re-encrypt the recovered note vault under the new key and save it through
   // the transactional migrate endpoint. Note rows go first (in batches); the
-  // re-encrypted index and keypair blob travel in the FINAL batch because the
-  // index is the client's commit marker (rows before index, always) and the
-  // keypair must land in the same transaction as it. Throws on failure.
-  const remigrateNoteVault = async (noteVault, keypair, newKey, migrateUrl) => {
+  // re-encrypted index travels in the FINAL batch because it is the client's
+  // commit marker (rows before index, always). Throws on failure.
+  const remigrateNoteVault = async (noteVault, newKey, migrateUrl) => {
     const items = [];
     for (const note of noteVault.notes) {
       const encrypted = await window.CryptoCore.encryptWithKey(note.text, newKey);
@@ -212,21 +180,13 @@
       indexPayload = { encrypted_data: encryptedIndex.encryptedData, iv: encryptedIndex.iv };
     }
 
-    let keypairPayload = null;
-    if (keypair) {
-      const rewrapped = await window.CryptoCore.encryptBytesWithKey(keypair.pkcs8, newKey);
-      keypairPayload = { encrypted_private_key: rewrapped.encryptedData, iv: rewrapped.iv };
-    }
-
     const batches = batchNotePayloads(items);
     for (let i = 0; i < batches.length; i++) {
       const isLast = i === batches.length - 1;
-      const carriesFinal = isLast && (indexPayload || keypairPayload);
-      if (batches[i].length === 0 && !carriesFinal) continue;
+      if (batches[i].length === 0 && !(isLast && indexPayload)) continue;
 
       const payload = { notes: batches[i] };
       if (isLast && indexPayload) payload.index = indexPayload;
-      if (isLast && keypairPayload) payload.keypair = keypairPayload;
 
       const { response, result } = await window.Http.postForm(migrateUrl, payload);
       if (!response.ok || !result.success) {
@@ -273,11 +233,6 @@
           currentPassword,
           currentVaultSalt,
         ),
-        keypair: await recoverCurrentKeypair(
-          endpoints.keypairUrl,
-          currentPassword,
-          currentVaultSalt,
-        ),
       };
     } catch (recoveryError) {
       console.error("Could not read existing vault before password change:", recoveryError);
@@ -286,7 +241,7 @@
           "Please check your current password and try again.",
         "error",
       );
-      return { ok: false, vaultData: null, noteVault: null, keypair: null };
+      return { ok: false, vaultData: null, noteVault: null };
     }
   };
 
@@ -327,20 +282,13 @@
   };
 
   // Phase 3b: same contract as resecureVaultAfterChange, for the note vault
-  // and the collaboration keypair (both re-secured through the transactional
-  // migrate endpoint). No-op when the user has neither notes nor a keypair.
-  const resecureNoteVaultAfterChange = async (
-    noteVault,
-    keypair,
-    newPassword,
-    newVaultSalt,
-    migrateUrl,
-  ) => {
-    const noNotes = !noteVault || (noteVault.index === null && noteVault.notes.length === 0);
-    if (noNotes && !keypair) return true;
+  // (re-secured through the transactional migrate endpoint). No-op when the
+  // user has no notes.
+  const resecureNoteVaultAfterChange = async (noteVault, newPassword, newVaultSalt, migrateUrl) => {
+    if (!noteVault || (noteVault.index === null && noteVault.notes.length === 0)) return true;
     try {
       const newKey = await window.AuthCrypto.deriveKeyFromPassword(newPassword, newVaultSalt);
-      await remigrateNoteVault(noteVault || { index: null, notes: [] }, keypair, newKey, migrateUrl);
+      await remigrateNoteVault(noteVault, newKey, migrateUrl);
       return true;
     } catch (migrateError) {
       console.error("Failed to re-secure note vault after password change:", migrateError);
@@ -387,7 +335,6 @@
       const noteIndexUrl = changePasswordForm.dataset.noteIndexUrl || NOTE_INDEX_ENDPOINT;
       const noteListUrl = changePasswordForm.dataset.noteListUrl || NOTE_LIST_ENDPOINT;
       const noteMigrateUrl = changePasswordForm.dataset.noteMigrateUrl || NOTE_MIGRATE_ENDPOINT;
-      const keypairUrl = changePasswordForm.dataset.keypairUrl || KEYPAIR_ENDPOINT;
 
       changePasswordForm.addEventListener("submit", async (event) => {
         if (!window.fetch) return; // allow default form submission as fallback
@@ -412,7 +359,7 @@
           submitButton,
           async () => {
             const recovery = await recoverVaultBeforeChange(
-              { vaultDataUrl, noteIndexUrl, noteListUrl, keypairUrl },
+              { vaultDataUrl, noteIndexUrl, noteListUrl },
               currentPassword,
               authData.vault_salt,
             );
@@ -444,7 +391,6 @@
               passVaultOk &&
               (await resecureNoteVaultAfterChange(
                 recovery.noteVault,
-                recovery.keypair,
                 newPassword,
                 result.vault_salt,
                 noteMigrateUrl,

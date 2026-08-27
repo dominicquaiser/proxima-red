@@ -56,25 +56,5 @@ urlpatterns = [
         views.LiveNoteSnapshotView.as_view(),
         name="live_snapshot",
     ),
-    path(
-        "live/<uuid:pk>/key/",
-        views.LiveNoteKeyView.as_view(),
-        name="live_key",
-    ),
-    path(
-        "live/<uuid:pk>/access/",
-        views.LiveNoteAccessView.as_view(),
-        name="live_access",
-    ),
-    path(
-        "live/<uuid:pk>/collaborators/",
-        views.LiveNoteCollaboratorsView.as_view(),
-        name="live_collaborators",
-    ),
-    path(
-        "live/<uuid:pk>/rekey/",
-        views.LiveNoteRekeyView.as_view(),
-        name="live_rekey",
-    ),
     path("<uuid:pk>/", views.RetrieveNoteView.as_view(), name="retrieve"),
 ]

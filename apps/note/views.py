@@ -5,14 +5,13 @@ All cryptographic operations occur client-side; the server only stores what
 the browser sends. Encrypted notes (the default) are opaque ciphertext;
 plain-text notes are an explicit user choice recorded in ``is_encrypted``.
 
-The module covers four surfaces, in this order:
+The module covers three surfaces, in this order:
 
 1. shared notes: the public markdown editor and the retrieve page;
 2. the note vault: authenticated JSON APIs over the user's encrypted notes
    and index;
 3. live notes: the anonymous JSON sync endpoints and page for editable share
-   links;
-4. named collaborators: owner-managed access control over live notes (M4).
+   links.
 
 Requests reach the shared-note views through the host dispatchers in
 ``apps.core.views`` (``index`` and ``retrieve_dispatch``): the note tool
@@ -26,7 +25,7 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
+from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.generic import View
@@ -53,20 +52,11 @@ from .constants import (
     DUMMY_NOTE_ID,
     ERROR_CREATE_FAILED,
     ERROR_INVALID_JSON,
-    ERROR_LIVE_ALREADY_RESTRICTED,
-    ERROR_LIVE_COLLAB_LIMIT,
-    ERROR_LIVE_COLLAB_NOT_FOUND,
     ERROR_LIVE_COVERS_UNKNOWN,
     ERROR_LIVE_INVALID_SINCE,
     ERROR_LIVE_MISSING_FIELDS,
-    ERROR_LIVE_NOT_OWNER,
-    ERROR_LIVE_NOT_RESTRICTED,
-    ERROR_LIVE_REKEY_EPOCH,
-    ERROR_LIVE_REKEY_STALE,
-    ERROR_LIVE_STALE_EPOCH,
     ERROR_LIVE_STALE_SNAPSHOT,
     ERROR_LIVE_TAIL_FULL,
-    ERROR_LIVE_UNRESTRICT_UNSUPPORTED,
     ERROR_MISSING_FIELDS,
     ERROR_NOTE_NOT_FOUND,
     ERROR_RATE_LIMITED,
@@ -76,16 +66,13 @@ from .constants import (
     LOG_CREATE_FAILED,
     LOG_EXPIRED_DELETED,
     LOG_LIVE_APPEND_FAILED,
-    LOG_LIVE_COLLAB_FAILED,
     LOG_LIVE_CREATE_FAILED,
     LOG_LIVE_EXPIRED_DELETED,
-    LOG_LIVE_REKEY_FAILED,
     LOG_LIVE_SNAPSHOT_FAILED,
     LOG_VAULT_MIGRATE_FAILED,
     LOG_VAULT_SAVE_FAILED,
     MAX_VAULT_NOTES_PER_USER,
     RATE_LIMIT_CREATE,
-    RATE_LIMIT_LIVE_COLLAB,
     RATE_LIMIT_LIVE_CREATE,
     RATE_LIMIT_LIVE_PAGE,
     RATE_LIMIT_LIVE_READ,
@@ -104,7 +91,7 @@ from .constants import (
     TEMPLATE_VAULT,
     VAULT_TRASH_RETENTION_DAYS,
 )
-from .models import LiveNote, LiveNoteCollaborator, SharedNote
+from .models import LiveNote, SharedNote
 
 logger = logging.getLogger(__name__)
 
@@ -750,19 +737,6 @@ class VaultMigrateView(View):
             if error_response:
                 return error_response
 
-        # Optional: the collaboration private-key blob re-encrypted under the
-        # new vault key, riding the final batch with the index so both commit
-        # (or fail) together.
-        keypair_payload = data.get("keypair")
-        if keypair_payload is not None:
-            if not isinstance(keypair_payload, dict):
-                return json_error(ERROR_INVALID_JSON)
-            _values, error_response = _string_fields_or_error(
-                keypair_payload, "encrypted_private_key", "iv"
-            )
-            if error_response:
-                return error_response
-
         user, error_response = _vault_session_user_or_error(request)
         if error_response:
             return error_response
@@ -772,7 +746,6 @@ class VaultMigrateView(View):
                 user,
                 notes=notes,
                 index_payload=index_payload,
-                keypair_payload=keypair_payload,
             )
             return json_ok(SUCCESS_DATA_SAVED, migrated=migrated)
 
@@ -847,60 +820,6 @@ def _non_negative_int(value) -> int | None:
     if not isinstance(value, int) or value < 0:
         return None
     return value
-
-
-def _live_access_or_error(request: HttpRequest, note: LiveNote):
-    """Gate a live-note JSON endpoint by the note's access mode.
-
-    Link mode is anonymous (holding the link is the capability). Restricted
-    mode requires a session (JSON 401) and a collaborator row (JSON 404, so a
-    non-collaborator can't distinguish a restricted note from a missing one).
-    Owner-only actions layer their own check on top of this.
-
-    Args:
-        request (HttpRequest): The incoming request.
-        note (LiveNote): The already-fetched live note.
-
-    Returns:
-        tuple[str | None, JsonResponse | None]: ``(user_id, None)`` when
-        allowed, where ``user_id`` identifies the collaborator (``None`` for
-        link mode), or ``(None, error_response)`` when denied.
-    """
-    if note.access_mode != LiveNote.ACCESS_RESTRICTED:
-        return None, None
-    user_id = get_authenticated_user_id(request)
-    if not user_id:
-        return None, json_error(ERROR_NOTE_NOT_FOUND, status=401)
-    if services.get_live_collaborator(note, user_id) is None:
-        return None, json_error(ERROR_NOTE_NOT_FOUND, status=404)
-    return user_id, None
-
-
-def _live_owner_or_error(request: HttpRequest, note: LiveNote):
-    """Resolve the session user and require they own the note (owner role).
-
-    Restrict is a special case handled by its own view (there is no owner row
-    yet, so ``created_by`` is the authority); every other management action
-    goes through here.
-
-    Args:
-        request (HttpRequest): The incoming request.
-        note (LiveNote): The already-fetched live note.
-
-    Returns:
-        tuple[User | None, JsonResponse | None]: ``(user, None)`` when the
-        session user owns the note, else ``(None, error_response)``.
-    """
-    user_id = get_authenticated_user_id(request)
-    if not user_id:
-        return None, json_error(ERROR_NOTE_NOT_FOUND, status=401)
-    user = get_user_by_id(user_id)
-    if user is None:
-        return None, json_error(ERROR_NOTE_NOT_FOUND, status=401)
-    owner_row = services.get_live_collaborator(note, user_id)
-    if owner_row is None or owner_row.role != LiveNoteCollaborator.ROLE_OWNER:
-        return None, json_error(ERROR_LIVE_NOT_OWNER, status=403)
-    return user, None
 
 
 @method_decorator(
@@ -979,60 +898,21 @@ class LiveNotePageView(View):
             logger.info(LOG_LIVE_EXPIRED_DELETED, pk)
             return render(request, TEMPLATE_EXPIRED)
 
-        # Restricted-access gating for the HTML page: an unauthenticated
-        # visitor is sent to sign in (returning here); an authenticated
-        # non-collaborator 404s (indistinguishable from a missing note).
-        session_user_id = get_authenticated_user_id(request)
-        is_restricted = note.access_mode == LiveNote.ACCESS_RESTRICTED
-        collaborator = (
-            services.get_live_collaborator(note, session_user_id)
-            if (is_restricted and session_user_id)
-            else None
-        )
-        if is_restricted:
-            if not session_user_id:
-                signin = (
-                    f"{reverse('auth:signin')}?tool=note"
-                    f"&next={request.get_full_path()}"
-                )
-                return redirect(signin)
-            if collaborator is None:
-                raise Http404
-
         services.register_live_note_access(pk)
 
-        # Owner = the restricted note's owner-role collaborator, or (before
-        # restriction) the link note's creator: the only session that may
-        # restrict/invite/revoke. The client gates its management UI on this;
-        # the server re-checks it on every management endpoint regardless.
-        created_by_user_id = note.created_by.user_id if note.created_by else None
-        if is_restricted:
-            is_owner = bool(
-                collaborator and collaborator.role == LiveNoteCollaborator.ROLE_OWNER
-            )
-        else:
-            is_owner = bool(session_user_id) and session_user_id == created_by_user_id
+        # Only for the header chrome (Vault vs Sign In); the live document
+        # itself is anonymous.
+        session_user_id = get_authenticated_user_id(request)
 
         context = {
             "live_note_id": str(note.id),
             "state_url": reverse("note:live_state", args=[note.id]),
             "updates_url": reverse("note:live_updates", args=[note.id]),
             "snapshot_url": reverse("note:live_snapshot", args=[note.id]),
-            "key_url": reverse("note:live_key", args=[note.id]),
-            "access_url": reverse("note:live_access", args=[note.id]),
-            "collaborators_url": reverse("note:live_collaborators", args=[note.id]),
-            "rekey_url": reverse("note:live_rekey", args=[note.id]),
-            "keypair_url": reverse("auth:keypair"),
-            "pubkey_url": reverse("auth:pubkey"),
             # Not reverse(): websocket routes live in apps/note/routing.py,
             # outside the HTTP URLconf. The literal must match its pattern.
             "ws_path": f"/ws/live/{note.id}/",
-            "access_mode": note.access_mode,
-            "is_owner": is_owner,
             "is_authenticated": bool(session_user_id),
-            # For the unlock modal (restricted-note key recovery); blank when
-            # anonymous, in which case the modal is not rendered.
-            "user_id": session_user_id or "",
             "expires_at": note.expires_at.isoformat(),
         }
         return render(request, TEMPLATE_LIVE, context)
@@ -1054,9 +934,6 @@ class LiveNoteStateView(View):
         note, error_response = _live_note_or_404_json(pk)
         if error_response:
             return error_response
-        _user_id, access_error = _live_access_or_error(request, note)
-        if access_error:
-            return access_error
         return json_ok(**services.live_note_state(note))
 
 
@@ -1076,10 +953,6 @@ class LiveNoteUpdatesView(View):
         note, error_response = _live_note_or_404_json(pk)
         if error_response:
             return error_response
-        _user_id, access_error = _live_access_or_error(request, note)
-        if access_error:
-            return access_error
-
         since = _non_negative_int(request.GET.get("since"))
         if since is None:
             return json_error(ERROR_LIVE_INVALID_SINCE)
@@ -1099,10 +972,6 @@ class LiveNoteUpdatesView(View):
         note, error_response = _live_note_or_404_json(pk)
         if error_response:
             return error_response
-        _user_id, access_error = _live_access_or_error(request, note)
-        if access_error:
-            return access_error
-
         data, error_response = _json_body_or_error(request)
         if error_response:
             return error_response
@@ -1113,14 +982,9 @@ class LiveNoteUpdatesView(View):
             return error_response
         payload, iv = values
 
-        # Absent key_epoch defaults to 0 (link-mode and pre-M4 clients); a
-        # bad type is treated as 0 rather than an error, since a genuine
-        # mismatch surfaces as stale_epoch below.
-        key_epoch = _non_negative_int(data.get("key_epoch", 0)) or 0
-
         try:
             row, pending, prev_seq = services.append_live_update(
-                pk, payload=payload, iv=iv, key_epoch=key_epoch
+                pk, payload=payload, iv=iv
             )
         except LiveNote.DoesNotExist:
             # The expiry sweep can delete the note between the fetch above and
@@ -1130,10 +994,6 @@ class LiveNoteUpdatesView(View):
             if e.code == "pending_tail_full":
                 return json_error(
                     ERROR_LIVE_TAIL_FULL, status=409, code="pending_tail_full"
-                )
-            if e.code == "stale_epoch":
-                return json_error(
-                    ERROR_LIVE_STALE_EPOCH, status=409, code="stale_epoch"
                 )
             return json_error(_validation_error_message(e))
         except Exception as e:
@@ -1161,10 +1021,6 @@ class LiveNoteSnapshotView(View):
         note, error_response = _live_note_or_404_json(pk)
         if error_response:
             return error_response
-        _user_id, access_error = _live_access_or_error(request, note)
-        if access_error:
-            return access_error
-
         data, error_response = _json_body_or_error(request)
         if error_response:
             return error_response
@@ -1179,25 +1035,16 @@ class LiveNoteSnapshotView(View):
         if covers_seq is None:
             return json_error(ERROR_INVALID_JSON)
 
-        # Same convention as the append path: absent reads as 0 (link-mode and
-        # pre-M4 clients), and a genuine mismatch surfaces as stale_epoch.
-        key_epoch = _non_negative_int(data.get("key_epoch", 0)) or 0
-
         try:
             deleted = services.save_live_snapshot(
                 pk,
                 snapshot=snapshot,
                 snapshot_iv=snapshot_iv,
                 covers_seq=covers_seq,
-                key_epoch=key_epoch,
             )
         except LiveNote.DoesNotExist:
             return json_error(ERROR_NOTE_NOT_FOUND, status=404)
         except ValidationError as e:
-            if e.code == "stale_epoch":
-                return json_error(
-                    ERROR_LIVE_STALE_EPOCH, status=409, code="stale_epoch"
-                )
             if e.code == "stale_snapshot":
                 return json_error(ERROR_LIVE_STALE_SNAPSHOT, status=409)
             if e.code == "covers_unknown_updates":
@@ -1208,419 +1055,3 @@ class LiveNoteSnapshotView(View):
             return json_error(ERROR_UNEXPECTED, status=500)
 
         return json_ok(snapshot_seq=covers_seq, deleted_updates=deleted)
-
-
-# ── Named collaborators (restricted live notes, M4) ─────────────────────────
-#
-# Owner-managed access control layered on top of the anonymous editable-share
-# flow. Restricting a note wraps its document key to the owner's public key
-# and gates every endpoint on a collaborator row; inviting wraps the key to
-# each collaborator; revoking rotates the key (the atomic rekey endpoint) so a
-# removed collaborator can read nothing written afterward. All owner actions
-# require a session; the invite/rekey wrap math is entirely client-side.
-
-
-def _live_note_for_collab_or_error(request: HttpRequest, pk):
-    """Fetch a live note for the collaboration endpoints (JSON 404 if gone).
-
-    A thin alias for :func:`_live_note_or_404_json`. ``request`` is accepted
-    but unused: the collaboration endpoints authorize separately (via
-    ``_live_owner_or_error``), and keeping the parameter lets them read
-    uniformly at the call site.
-
-    Args:
-        request (HttpRequest): Unused; see above.
-        pk (uuid.UUID | str): Primary key of the requested live note.
-
-    Returns:
-        tuple[LiveNote | None, JsonResponse | None]: The active note, or a
-        JSON 404.
-    """
-    return _live_note_or_404_json(pk)
-
-
-class LiveNoteKeyView(View):
-    """Return the requesting collaborator's current wrapped document key.
-
-    How an invited user with no fragment key opens a restricted note: unwrap
-    this with their account private key (after unlocking the vault) to recover
-    the document key. A stale wrap (their epoch < the note's, e.g. read
-    between a revoke and their re-fetch) reads as no access: 404, same as a
-    non-collaborator.
-    """
-
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_READ, method="GET", block=False
-        )
-    )
-    @method_decorator(require_session_auth_api)
-    def get(self, request: HttpRequest, pk) -> JsonResponse:
-        """Return this collaborator's wrap, or 404 if they hold no current one.
-
-        Args:
-            request (HttpRequest): Authenticated GET request.
-            pk (uuid.UUID): UUID of the live note.
-
-        Returns:
-            JsonResponse: The wrap triple plus ``key_epoch``, a 400 when the
-            note is not restricted, or a 404 when the caller has no current
-            wrap.
-        """
-        limited = _rate_limited_json(request)
-        if limited:
-            return limited
-        note, error_response = _live_note_for_collab_or_error(request, pk)
-        if error_response:
-            return error_response
-        if note.access_mode != LiveNote.ACCESS_RESTRICTED:
-            return json_error(ERROR_LIVE_NOT_RESTRICTED, status=400)
-
-        user_id = get_authenticated_user_id(request)
-        wrap = services.get_live_note_wrap(note, user_id)
-        if wrap is None:
-            return json_error(ERROR_NOTE_NOT_FOUND, status=404)
-        return json_ok(**wrap)
-
-
-@method_decorator(
-    ratelimit(
-        key=client_ip_key, rate=RATE_LIMIT_LIVE_COLLAB, method="POST", block=False
-    ),
-    name="dispatch",
-)
-class LiveNoteAccessView(View):
-    """Switch a live note from link to restricted access (owner-only).
-
-    One-way on purpose. Reverting would have to drop every collaborator row,
-    and after a rekey those rows hold the only copies of the current document
-    key, so it would publish the note while destroying the means of reading it
-    (see the note where ``unrestrict_live_note`` used to live in
-    ``apps.note.services``). ``{"restrict": false}`` is refused rather than
-    ignored, so a client asking for it is told why.
-    """
-
-    @method_decorator(require_session_auth_api)
-    def post(self, request: HttpRequest, pk) -> JsonResponse:
-        """Restrict the note, seeding the owner's wrap of the current key.
-
-        The wrap is required: restricting rotates no key, so the owner's
-        browser wraps the document key it already holds to its own public key.
-
-        Args:
-            request (HttpRequest): Authenticated POST request.
-            pk (uuid.UUID): UUID of the live note.
-
-        Returns:
-            JsonResponse: The resulting ``access_mode``, a 400 when the body
-            asks to unrestrict, or a mapped collaboration error (403
-            non-owner, 409 already restricted, ...).
-        """
-        limited = _rate_limited_json(request)
-        if limited:
-            return limited
-        note, error_response = _live_note_for_collab_or_error(request, pk)
-        if error_response:
-            return error_response
-
-        data, error_response = _json_body_or_error(request)
-        if error_response:
-            return error_response
-
-        # Absent means restrict (the only thing this endpoint does). Anything
-        # else must be exactly `true`: a truthiness test would read the string
-        # "false" as a request to restrict.
-        restrict = data.get("restrict", True)
-        if restrict is not True:
-            return json_error(ERROR_LIVE_UNRESTRICT_UNSUPPORTED, status=400)
-
-        user_id = get_authenticated_user_id(request)
-        user = get_user_by_id(user_id)
-        if user is None:
-            return json_error(ERROR_NOTE_NOT_FOUND, status=401)
-
-        wrap_values, wrap_error = _string_fields_or_error(
-            data,
-            "wrapped_key",
-            "wrap_iv",
-            "ephemeral_public_key",
-            missing_message=ERROR_LIVE_MISSING_FIELDS,
-        )
-        if wrap_error:
-            return wrap_error
-
-        try:
-            services.restrict_live_note(
-                pk,
-                owner_user=user,
-                wrap={
-                    "wrapped_key": wrap_values[0],
-                    "wrap_iv": wrap_values[1],
-                    "ephemeral_public_key": wrap_values[2],
-                },
-            )
-        except LiveNote.DoesNotExist:
-            return json_error(ERROR_NOTE_NOT_FOUND, status=404)
-        except ValidationError as e:
-            return _collab_validation_response(e)
-        except Exception as e:
-            logger.error(LOG_LIVE_COLLAB_FAILED, exception_type(e))
-            return json_error(ERROR_UNEXPECTED, status=500)
-
-        return json_ok(access_mode=LiveNote.ACCESS_RESTRICTED)
-
-
-class LiveNoteCollaboratorsView(View):
-    """List collaborators (GET) or invite one (POST); owner-only."""
-
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_READ, method="GET", block=False
-        )
-    )
-    @method_decorator(require_session_auth_api)
-    def get(self, request: HttpRequest, pk) -> JsonResponse:
-        """List the note's collaborators for the owner's management panel.
-
-        Args:
-            request (HttpRequest): Authenticated GET request.
-            pk (uuid.UUID): UUID of the live note.
-
-        Returns:
-            JsonResponse: ``collaborators`` (user ids + roles, no key
-            material), or a 403 when the caller is not the owner.
-        """
-        limited = _rate_limited_json(request)
-        if limited:
-            return limited
-        note, error_response = _live_note_for_collab_or_error(request, pk)
-        if error_response:
-            return error_response
-        _owner, owner_error = _live_owner_or_error(request, note)
-        if owner_error:
-            return owner_error
-        return json_ok(collaborators=services.serialize_collaborators(note))
-
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_COLLAB, method="POST", block=False
-        )
-    )
-    @method_decorator(require_session_auth_api)
-    def post(self, request: HttpRequest, pk) -> JsonResponse:
-        """Invite a collaborator, storing the doc key wrapped to them.
-
-        The wrap arrives ready-made: the owner's browser fetched the invitee's
-        public key and did the ECDH itself, so the server never handles an
-        openable key.
-
-        Args:
-            request (HttpRequest): Authenticated POST request.
-            pk (uuid.UUID): UUID of the live note.
-
-        Returns:
-            JsonResponse: The refreshed ``collaborators`` list, a 404 for an
-            unknown invitee, or a mapped collaboration error (403 non-owner,
-            409 collaborator limit, ...).
-        """
-        limited = _rate_limited_json(request)
-        if limited:
-            return limited
-        note, error_response = _live_note_for_collab_or_error(request, pk)
-        if error_response:
-            return error_response
-        owner, owner_error = _live_owner_or_error(request, note)
-        if owner_error:
-            return owner_error
-
-        data, error_response = _json_body_or_error(request)
-        if error_response:
-            return error_response
-        values, missing = _string_fields_or_error(
-            data,
-            "user_id",
-            "wrapped_key",
-            "wrap_iv",
-            "ephemeral_public_key",
-            missing_message=ERROR_LIVE_MISSING_FIELDS,
-        )
-        if missing:
-            return missing
-        invitee_user_id, wrapped_key, wrap_iv, ephemeral_public_key = values
-
-        try:
-            services.add_live_collaborator(
-                pk,
-                owner_user=owner,
-                invitee_user_id=invitee_user_id,
-                wrap={
-                    "wrapped_key": wrapped_key,
-                    "wrap_iv": wrap_iv,
-                    "ephemeral_public_key": ephemeral_public_key,
-                },
-            )
-        except LiveNote.DoesNotExist:
-            return json_error(ERROR_NOTE_NOT_FOUND, status=404)
-        except User.DoesNotExist:
-            return json_error(ERROR_USER_NOT_FOUND, status=404)
-        except ValidationError as e:
-            return _collab_validation_response(e)
-        except Exception as e:
-            logger.error(LOG_LIVE_COLLAB_FAILED, exception_type(e))
-            return json_error(ERROR_UNEXPECTED, status=500)
-
-        return json_ok(collaborators=services.serialize_collaborators(note))
-
-
-@method_decorator(
-    ratelimit(
-        key=client_ip_key, rate=RATE_LIMIT_LIVE_COLLAB, method="POST", block=False
-    ),
-    name="dispatch",
-)
-class LiveNoteRekeyView(View):
-    """Rotate the document key and re-wrap to survivors (owner-only).
-
-    The single atomic revocation path: revoke a collaborator (or plain
-    rotate), write the whole document as a fresh snapshot under the new key,
-    delete the old-key tail, and re-wrap to everyone remaining. See
-    ``services.rekey_live_note``.
-    """
-
-    @method_decorator(require_session_auth_api)
-    def post(self, request: HttpRequest, pk) -> JsonResponse:
-        """Apply an owner's re-key: new snapshot, new epoch, new wraps.
-
-        Args:
-            request (HttpRequest): Authenticated POST request.
-            pk (uuid.UUID): UUID of the live note.
-
-        Returns:
-            JsonResponse: The new ``key_epoch`` and the surviving
-            ``collaborators``, or a mapped collaboration error. Codes
-            ``rekey_stale``/``rekey_epoch`` (409) mean an edit or another
-            re-key landed first and the client should flush and retry.
-        """
-        limited = _rate_limited_json(request)
-        if limited:
-            return limited
-        note, error_response = _live_note_for_collab_or_error(request, pk)
-        if error_response:
-            return error_response
-        owner, owner_error = _live_owner_or_error(request, note)
-        if owner_error:
-            return owner_error
-
-        data, error_response = _json_body_or_error(request)
-        if error_response:
-            return error_response
-        values, missing = _string_fields_or_error(
-            data, "snapshot", "snapshot_iv", missing_message=ERROR_LIVE_MISSING_FIELDS
-        )
-        if missing:
-            return missing
-        snapshot, snapshot_iv = values
-
-        covers_seq = _non_negative_int(data.get("covers_seq"))
-        key_epoch = _non_negative_int(data.get("key_epoch"))
-        if covers_seq is None or key_epoch is None:
-            return json_error(ERROR_INVALID_JSON)
-
-        wraps, wraps_error = _parse_wraps(data.get("wraps"))
-        if wraps_error:
-            return wraps_error
-        remove_user_id = data.get("remove_user_id")
-        if remove_user_id is not None and not isinstance(remove_user_id, str):
-            return json_error(ERROR_INVALID_JSON)
-
-        try:
-            new_epoch = services.rekey_live_note(
-                pk,
-                owner_user=owner,
-                snapshot=snapshot,
-                snapshot_iv=snapshot_iv,
-                covers_seq=covers_seq,
-                key_epoch=key_epoch,
-                remove_user_id=remove_user_id,
-                wraps=wraps,
-            )
-        except LiveNote.DoesNotExist:
-            return json_error(ERROR_NOTE_NOT_FOUND, status=404)
-        except ValidationError as e:
-            return _collab_validation_response(e)
-        except Exception as e:
-            logger.error(LOG_LIVE_REKEY_FAILED, exception_type(e))
-            return json_error(ERROR_UNEXPECTED, status=500)
-
-        return json_ok(
-            key_epoch=new_epoch, collaborators=services.serialize_collaborators(note)
-        )
-
-
-def _parse_wraps(raw):
-    """Validate the rekey ``wraps`` list into service-ready dicts.
-
-    Shape only. Whether the wraps cover exactly the surviving collaborators is
-    the service's call, made under the row lock where the answer can't change.
-
-    Args:
-        raw (Any): The request body's ``wraps`` value, expected to be a list of
-            dicts with ``user_id`` and the wrap triple.
-
-    Returns:
-        tuple[list[dict] | None, JsonResponse | None]: The normalized wraps, or
-        a JSON 400 describing the first malformed entry.
-    """
-    if not isinstance(raw, list):
-        return None, json_error(ERROR_INVALID_JSON)
-    wraps = []
-    for item in raw:
-        if not isinstance(item, dict):
-            return None, json_error(ERROR_INVALID_JSON)
-        values, missing = _string_fields_or_error(
-            item,
-            "user_id",
-            "wrapped_key",
-            "wrap_iv",
-            "ephemeral_public_key",
-            missing_message=ERROR_LIVE_MISSING_FIELDS,
-        )
-        if missing:
-            return None, missing
-        wraps.append(
-            {
-                "user_id": values[0],
-                "wrapped_key": values[1],
-                "wrap_iv": values[2],
-                "ephemeral_public_key": values[3],
-            }
-        )
-    return wraps, None
-
-
-def _collab_validation_response(error: ValidationError) -> JsonResponse:
-    """Map a collaboration ValidationError code to its JSON response.
-
-    Keeps the service layer's vocabulary (its error codes) as the single source
-    of truth for what went wrong, leaving the HTTP status to this table. An
-    unrecognized code falls back to the error's own message with a 400.
-
-    Args:
-        error (ValidationError): Error raised by a collaboration service.
-
-    Returns:
-        JsonResponse: The mapped message and status.
-    """
-    mapping = {
-        "not_owner": (ERROR_LIVE_NOT_OWNER, 403),
-        "already_restricted": (ERROR_LIVE_ALREADY_RESTRICTED, 409),
-        "not_restricted": (ERROR_LIVE_NOT_RESTRICTED, 400),
-        "collab_limit": (ERROR_LIVE_COLLAB_LIMIT, 409),
-        "rekey_epoch": (ERROR_LIVE_REKEY_EPOCH, 409),
-        "rekey_stale": (ERROR_LIVE_REKEY_STALE, 409),
-        "wraps_mismatch": (ERROR_LIVE_COLLAB_NOT_FOUND, 400),
-    }
-    message, status = mapping.get(
-        getattr(error, "code", None), (_validation_error_message(error), 400)
-    )
-    return json_error(message, status=status)

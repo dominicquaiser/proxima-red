@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('note', '0004_livenote_access_mode_livenote_key_epoch_and_more'),
+        ('note', '0003_livenote_livenoteupdate'),
     ]
 
     operations = [

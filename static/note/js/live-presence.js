@@ -19,9 +19,30 @@
   const ZERO_WIDTH_SPACE = "\u200b";
 
   const GREEK_NAMES = [
-    "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
-    "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Omicron", "Pi", "Rho",
-    "Sigma", "Tau", "Upsilon", "Phi", "Chi", "Psi", "Omega",
+    "Alpha",
+    "Beta",
+    "Gamma",
+    "Delta",
+    "Epsilon",
+    "Zeta",
+    "Eta",
+    "Theta",
+    "Iota",
+    "Kappa",
+    "Lambda",
+    "Mu",
+    "Nu",
+    "Xi",
+    "Omicron",
+    "Pi",
+    "Rho",
+    "Sigma",
+    "Tau",
+    "Upsilon",
+    "Phi",
+    "Chi",
+    "Psi",
+    "Omega",
   ];
   const PALETTE_SIZE = 8;
 
@@ -87,8 +108,7 @@
   /** Wire presence for one live-note session. */
   function create(opts) {
     const { doc, ytext, textarea, editor, send } = opts;
-    // Mutable so a rekey can swap awareness encryption keys.
-    let key = opts.key;
+    const key = opts.key;
 
     const awareness = new window.Y.awareness.Awareness(doc);
     const identity = identityFor(doc.clientID);
@@ -281,9 +301,7 @@
     }
 
     function normalizeColorIndex(color) {
-      return typeof color === "number"
-        ? ((color % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE
-        : 0;
+      return typeof color === "number" ? ((color % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE : 0;
     }
 
     function onSelectionChange() {
@@ -346,15 +364,6 @@
       announce: announce,
       shutdown: shutdown,
       destroy: destroy,
-      /**
-       * Swap the document key after a rekey and re-announce under it.
-       *
-       * @param {CryptoKey} newKey
-       */
-      setKey: function (newKey) {
-        key = newKey;
-        announce();
-      },
     };
   }
 

@@ -6,11 +6,10 @@ connections (the live-note sync hot path, /ws/...) go to apps.note.routing.
 Notes on the websocket stack:
 - AllowedHostsOriginValidator rejects cross-site socket opens (browsers always
   send Origin on WebSocket handshakes), keyed off ALLOWED_HOSTS.
-- SessionMiddlewareStack (cookie + session only) is used instead of Channels'
-  AuthMiddlewareStack because django.contrib.auth is intentionally not
-  installed (see config/settings/base.py). Consumers that need auth read the
-  custom session keys from scope["session"] directly, mirroring
-  apps.auth.utils.require_session_auth_api.
+- The live-note socket is anonymous (holding the link is the capability), so
+  the stack carries no session or auth middleware. Channels' AuthMiddlewareStack
+  would be unusable here regardless: django.contrib.auth is intentionally not
+  installed (see config/settings/base.py).
 """
 
 import os
@@ -27,7 +26,6 @@ from django.conf import settings  # noqa: E402
 
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E402
-from channels.sessions import SessionMiddlewareStack  # noqa: E402
 
 from apps.note.routing import websocket_urlpatterns  # noqa: E402
 
@@ -42,8 +40,6 @@ if settings.DEBUG:
 application = ProtocolTypeRouter(
     {
         "http": http_app,
-        "websocket": AllowedHostsOriginValidator(
-            SessionMiddlewareStack(URLRouter(websocket_urlpatterns))
-        ),
+        "websocket": AllowedHostsOriginValidator(URLRouter(websocket_urlpatterns)),
     }
 )

@@ -111,13 +111,6 @@ RATE_LIMIT_LIVE_PAGE: Final[str] = "120/h"
 RATE_LIMIT_LIVE_READ: Final[str] = "240/m"
 RATE_LIMIT_LIVE_WRITE: Final[str] = "120/m"
 RATE_LIMIT_LIVE_SNAPSHOT: Final[str] = "12/m"
-# Restricting/inviting/revoking are owner-initiated one-at-a-time actions.
-RATE_LIMIT_LIVE_COLLAB: Final[str] = "30/m"
-
-# ── Named collaborators (restricted live notes, M4) ─────────────────────────
-# Per-note collaborator cap: revocation re-wraps the doc key to every
-# remaining collaborator in one request, so this also bounds the rekey body.
-MAX_COLLABORATORS_PER_NOTE: Final[int] = 16
 
 # ── Live-note WebSocket transport (apps/note/consumers.py) ─────────────────
 
@@ -143,11 +136,8 @@ WS_ABUSE_STREAK: Final[int] = 120  # consecutive over-budget frames before close
 
 # Close codes (4xxx = application-defined). NOT_FOUND covers unknown and
 # expired alike (indistinguishable on purpose, mirroring the HTTP 404) and is
-# terminal client-side. AUTH_REQUIRED/FORBIDDEN gate restricted documents
-# (named collaborators). ABUSE means the client should not reconnect.
+# terminal client-side. ABUSE means the client should not reconnect.
 WS_CLOSE_NOT_FOUND: Final[int] = 4404
-WS_CLOSE_AUTH_REQUIRED: Final[int] = 4401
-WS_CLOSE_FORBIDDEN: Final[int] = 4403
 WS_CLOSE_ABUSE: Final[int] = 4429
 
 # Error-frame codes ({"type": "error", "code": ...}); recoverable conditions
@@ -156,7 +146,6 @@ WS_ERROR_INVALID_FRAME: Final[str] = "invalid_frame"
 WS_ERROR_UPDATE_TOO_LARGE: Final[str] = "update_too_large"
 WS_ERROR_AWARENESS_TOO_LARGE: Final[str] = "awareness_too_large"
 WS_ERROR_TAIL_FULL: Final[str] = "pending_tail_full"
-WS_ERROR_STALE_EPOCH: Final[str] = "stale_epoch"
 WS_ERROR_RATE_LIMITED: Final[str] = "rate_limited"
 WS_ERROR_SERVER: Final[str] = "server_error"
 
@@ -196,26 +185,6 @@ ERROR_LIVE_STALE_SNAPSHOT: Final[str] = (
 ERROR_LIVE_COVERS_UNKNOWN: Final[str] = (
     "The snapshot claims to cover updates that do not exist."
 )
-ERROR_LIVE_STALE_EPOCH: Final[str] = (
-    "This document was re-keyed. Reload to continue editing."
-)
-ERROR_LIVE_NOT_OWNER: Final[str] = "Only the owner can manage collaborators."
-ERROR_LIVE_ALREADY_RESTRICTED: Final[str] = "This note is already restricted."
-ERROR_LIVE_NOT_RESTRICTED: Final[str] = "This note is not restricted."
-# Restricting is one-way: see the comment where unrestrict_live_note used to
-# live in apps/note/services.py.
-ERROR_LIVE_UNRESTRICT_UNSUPPORTED: Final[str] = (
-    "Restricting a note cannot be undone. To share an open document, create a "
-    "new editable link from its text."
-)
-ERROR_LIVE_COLLAB_LIMIT: Final[str] = (
-    "This note already has the maximum number of collaborators."
-)
-ERROR_LIVE_REKEY_STALE: Final[str] = (
-    "The re-key did not cover the latest edits. Please retry."
-)
-ERROR_LIVE_REKEY_EPOCH: Final[str] = "Unexpected key generation for the re-key."
-ERROR_LIVE_COLLAB_NOT_FOUND: Final[str] = "No such collaborator on this note."
 
 # Success messages
 SUCCESS_DATA_SAVED: Final[str] = "Data saved successfully."
@@ -230,10 +199,3 @@ LOG_LIVE_EXPIRED_DELETED: Final[str] = "Deleted expired live note: %s"
 LOG_LIVE_APPEND_FAILED: Final[str] = "Failed to append live note update (%s)"
 LOG_LIVE_SNAPSHOT_FAILED: Final[str] = "Failed to save live note snapshot (%s)"
 LOG_LIVE_WS_APPEND_FAILED: Final[str] = "Failed to append live note update over WS (%s)"
-LOG_LIVE_REKEY_FAILED: Final[str] = "Failed to rekey live note (%s)"
-# A warning, not an error: the access change itself committed, only the
-# socket eviction was missed (see services.broadcast_live_access_change).
-LOG_LIVE_ACCESS_BROADCAST_FAILED: Final[str] = (
-    "Failed to broadcast live note access change (%s)"
-)
-LOG_LIVE_COLLAB_FAILED: Final[str] = "Failed to update live note collaborators (%s)"

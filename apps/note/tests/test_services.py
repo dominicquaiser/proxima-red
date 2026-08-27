@@ -1,6 +1,5 @@
 """Tests for the note app service layer."""
 
-import json
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -21,11 +20,9 @@ from apps.note.models import LiveNote, LiveNoteUpdate, SharedNote, VaultIndex, V
 from .factories import (
     VALID_CONTENT_B64,
     VALID_IV_B64,
-    make_live_collaborator,
     make_live_note,
     make_live_update,
     make_note,
-    make_restricted_live_note,
     make_vault_index,
     make_vault_note,
 )
@@ -435,71 +432,6 @@ class SaveLiveSnapshotTests(TestCase):
         self.assertEqual(self.note.snapshot_seq, 0)
         self.assertEqual(self.note.updates.count(), 1)
 
-    def test_stale_key_epoch_cannot_replace_the_snapshot(self):
-        """A client on a pre-rekey key must not overwrite the document.
-
-        The append path rejects a stale epoch because the row would be
-        unreadable; here the stakes are higher, since a snapshot *replaces*
-        the document and prunes the tail with it.
-        """
-        rekeyed = make_live_note(key_epoch=3)
-        newest = make_live_update(rekeyed)
-
-        with self.assertRaises(ValidationError) as ctx:
-            services.save_live_snapshot(
-                rekeyed.pk,
-                snapshot="b2xka2V5c25hcHNob3Q=",
-                snapshot_iv=VALID_IV_B64,
-                covers_seq=newest.pk,
-                key_epoch=0,
-            )
-
-        self.assertEqual(ctx.exception.code, "stale_epoch")
-        rekeyed.refresh_from_db()
-        self.assertEqual(rekeyed.snapshot, VALID_CONTENT_B64)
-        self.assertEqual(rekeyed.snapshot_seq, 0)
-        self.assertEqual(rekeyed.updates.count(), 1)
-
-    def test_stale_epoch_is_reported_before_a_lost_race(self):
-        """stale_epoch outranks stale_snapshot: the client must recover, not retry."""
-        rekeyed = make_live_note(key_epoch=2)
-        newest = make_live_update(rekeyed)
-        services.save_live_snapshot(
-            rekeyed.pk,
-            snapshot="Y29tcGFjdGVk",
-            snapshot_iv=VALID_IV_B64,
-            covers_seq=newest.pk,
-            key_epoch=2,
-        )
-
-        with self.assertRaises(ValidationError) as ctx:
-            services.save_live_snapshot(
-                rekeyed.pk,
-                snapshot=VALID_CONTENT_B64,
-                snapshot_iv=VALID_IV_B64,
-                covers_seq=newest.pk,
-                key_epoch=0,
-            )
-
-        self.assertEqual(ctx.exception.code, "stale_epoch")
-
-    def test_current_key_epoch_compacts_normally(self):
-        rekeyed = make_live_note(key_epoch=5)
-        newest = make_live_update(rekeyed)
-
-        deleted = services.save_live_snapshot(
-            rekeyed.pk,
-            snapshot="Y29tcGFjdGVk",
-            snapshot_iv=VALID_IV_B64,
-            covers_seq=newest.pk,
-            key_epoch=5,
-        )
-
-        self.assertEqual(deleted, 1)
-        rekeyed.refresh_from_db()
-        self.assertEqual(rekeyed.snapshot, "Y29tcGFjdGVk")
-        self.assertEqual(rekeyed.key_epoch, 5)
-
 
 class ExpiredLiveNoteCleanupTests(TestCase):
     """services.expired_live_notes / delete_expired_live_notes."""
@@ -845,7 +777,6 @@ class BuildNoteExportTests(TestCase):
         export = services.build_note_export(self.user)
         self.assertEqual(export["shared_notes"], [])
         self.assertEqual(export["live_notes"], [])
-        self.assertEqual(export["live_note_collaborations"], [])
 
     def test_includes_shared_notes_with_ciphertext(self):
         note = make_note(created_by=self.user)
@@ -875,36 +806,6 @@ class BuildNoteExportTests(TestCase):
         self.assertEqual(
             [u["seq"] for u in row["pending_updates"]], [first.pk, second.pk]
         )
-
-    def test_collaboration_grants_include_this_users_own_wrap(self):
-        owner = create_user_with_password("owner secret")
-        note = make_restricted_live_note(owner)
-        make_live_collaborator(note, self.user)
-
-        export = services.build_note_export(self.user)
-
-        self.assertEqual(len(export["live_note_collaborations"]), 1)
-        grant = export["live_note_collaborations"][0]
-        self.assertEqual(grant["note_id"], str(note.id))
-        self.assertEqual(grant["role"], "editor")
-        self.assertEqual(grant["wrapped_key"], VALID_CONTENT_B64)
-
-    def test_other_collaborators_ids_are_not_disclosed_to_the_owner(self):
-        """Art. 15(4): an export must not hand over other people's data.
-
-        The owner can see collaborator ids live in the management panel, but a
-        downloadable file is a different distribution surface.
-        """
-        someone_else = create_user_with_password("editor secret")
-        note = make_restricted_live_note(self.user)
-        make_live_collaborator(note, someone_else)
-
-        export = services.build_note_export(self.user)
-
-        serialized = json.dumps(export)
-        self.assertNotIn(someone_else.user_id, serialized)
-        # The owner's own grant on that note is still theirs to have.
-        self.assertEqual(len(export["live_note_collaborations"]), 1)
 
     def test_anonymous_and_foreign_rows_are_excluded(self):
         make_note()  # anonymous

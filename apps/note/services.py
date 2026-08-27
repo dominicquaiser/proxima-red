@@ -6,18 +6,17 @@ operations happen client-side; these functions only move note bodies in and
 out of the database. Encrypted notes are opaque ciphertext to the server;
 plain-text notes are stored as-is, which the user explicitly opted into.
 
-Grouped into four sections, in this order: shared notes (create, expire,
+Grouped into three sections, in this order: shared notes (create, expire,
 count accesses), live notes (the CRDT snapshot/update-log sync backing
-editable share links), named collaborators (restricted live notes, M4), and
-the authenticated note vault.
+editable share links), and the authenticated note vault.
 
-Two conventions run through the live-note and collaboration functions:
+Two conventions run through the live-note functions:
 
-- Anything that mutates a live note's log or key takes ``select_for_update()``
-  on the ``LiveNote`` row. That single lock is what makes update ids a usable
-  sync cursor, the tail caps sound, and re-keys atomic.
-- Rejections raise ``ValidationError`` with a stable ``code`` (``stale_epoch``,
-  ``pending_tail_full``, ``rekey_stale``, ...). The codes are this layer's
+- Anything that mutates a live note's log takes ``select_for_update()`` on the
+  ``LiveNote`` row. That single lock is what makes update ids a usable sync
+  cursor and the tail caps sound.
+- Rejections raise ``ValidationError`` with a stable ``code``
+  (``pending_tail_full``, ``snapshot_stale``, ...). The codes are this layer's
   vocabulary for what went wrong; ``apps.note.views`` maps them to HTTP
   statuses and the consumer maps them to frames, so neither transport needs to
   re-derive the reason.
@@ -35,17 +34,12 @@ from django.db.models.functions import Length
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
-
-from apps.auth.models import User, UserKeyPair
+from apps.auth.models import User
 
 from .constants import (
     DEFAULT_EXPIRY,
     EXPIRY_MAP,
-    LOG_LIVE_ACCESS_BROADCAST_FAILED,
     LOG_LIVE_EXPIRED_DELETED,
-    MAX_COLLABORATORS_PER_NOTE,
     MAX_LIVE_PENDING_LENGTH,
     MAX_LIVE_PENDING_UPDATES,
     MAX_VAULT_NOTES_PER_USER,
@@ -53,7 +47,6 @@ from .constants import (
 )
 from .models import (
     LiveNote,
-    LiveNoteCollaborator,
     LiveNoteUpdate,
     SharedNote,
     VaultIndex,
@@ -304,7 +297,6 @@ def live_note_state(note: LiveNote) -> dict[str, Any]:
         "updates": _serialize_live_updates(rows),
         "seq": rows[-1].pk if rows else note.snapshot_seq,
         "pending": len(rows),
-        "key_epoch": note.key_epoch,
         "expires_at": note.expires_at.isoformat(),
     }
 
@@ -342,7 +334,6 @@ def live_updates_since(note: LiveNote, since: int) -> dict[str, Any]:
         "updates": _serialize_live_updates(rows),
         "seq": seq,
         "pending": len(rows) if resync else note.updates.count(),
-        "key_epoch": note.key_epoch,
     }
     if resync:
         payload["snapshot"] = note.snapshot
@@ -350,9 +341,7 @@ def live_updates_since(note: LiveNote, since: int) -> dict[str, Any]:
     return payload
 
 
-def append_live_update(
-    pk, *, payload: str, iv: str, key_epoch: int = 0
-) -> tuple[LiveNoteUpdate, int, int]:
+def append_live_update(pk, *, payload: str, iv: str) -> tuple[LiveNoteUpdate, int, int]:
     """Append one encrypted Yjs update to a live note's log.
 
     Runs inside a transaction holding a row lock on the parent note. The lock
@@ -374,12 +363,6 @@ def append_live_update(
         pk (uuid.UUID | str): Primary key of the live note.
         payload (str): Base64 ciphertext of one merged Yjs update.
         iv (str): Base64-encoded initialization vector.
-        key_epoch (int): The document-key generation the client encrypted
-            under. Must match the note's current ``key_epoch`` (both 0 for
-            link-mode and pre-M4 clients, so the check is invisible there);
-            a mismatch means a rekey happened and the client is on a stale
-            key, so reject rather than store ciphertext no current reader can
-            decrypt.
 
     Returns:
         tuple[LiveNoteUpdate, int, int]: The persisted row, the pending tail
@@ -388,18 +371,12 @@ def append_live_update(
     Raises:
         LiveNote.DoesNotExist: If the note is unknown (or was deleted by the
             expiry sweep between the caller's fetch and the lock).
-        ValidationError: Code ``stale_epoch`` when the note was re-keyed,
-            code ``pending_tail_full`` when the tail is at capacity (the
-            client must compact first), or if the fields fail model
-            validation.
+        ValidationError: Code ``pending_tail_full`` when the tail is at
+            capacity (the client must compact first), or if the fields fail
+            model validation.
     """
     with transaction.atomic():
         note = LiveNote.objects.select_for_update().get(pk=pk)
-
-        if key_epoch != note.key_epoch:
-            raise ValidationError(
-                _("The document key has changed (stale epoch)."), code="stale_epoch"
-            )
 
         pending_count = note.updates.count()
         if pending_count >= MAX_LIVE_PENDING_UPDATES:
@@ -428,7 +405,7 @@ def append_live_update(
 
 
 def save_live_snapshot(
-    pk, *, snapshot: str, snapshot_iv: str, covers_seq: int, key_epoch: int = 0
+    pk, *, snapshot: str, snapshot_iv: str, covers_seq: int
 ) -> int:
     """Replace a live note's snapshot with a client's compaction and prune the log.
 
@@ -451,34 +428,18 @@ def save_live_snapshot(
         snapshot_iv (str): Base64-encoded initialization vector.
         covers_seq (int): The compacting client's applied cursor: every update
             row with an id at or below it is folded into the snapshot.
-        key_epoch (int): The document-key generation the client encrypted the
-            snapshot under. Must match the note's current ``key_epoch``, for
-            the same reason :func:`append_live_update` checks it, and more
-            urgently: an append under a stale key only adds a row others skip,
-            whereas a stale-key *snapshot* replaces the document and prunes
-            the tail, so accepting one would leave every current reader with
-            ciphertext no live key opens.
 
     Returns:
         int: Number of pruned update rows.
 
     Raises:
         LiveNote.DoesNotExist: If the note is unknown or already deleted.
-        ValidationError: Codes ``stale_epoch`` (the note was re-keyed),
-            ``stale_snapshot`` (lost compaction race) or
+        ValidationError: Codes ``stale_snapshot`` (lost compaction race) or
             ``covers_unknown_updates`` (cursor beyond the newest row), or if
             the fields fail model validation. Nothing is persisted.
     """
     with transaction.atomic():
         note = LiveNote.objects.select_for_update().get(pk=pk)
-
-        # Before the race guards: a stale-key compactor must not be told it
-        # merely lost a race, or the client would retry instead of recovering
-        # the new key.
-        if key_epoch != note.key_epoch:
-            raise ValidationError(
-                _("The document key has changed (stale epoch)."), code="stale_epoch"
-            )
 
         if covers_seq <= note.snapshot_seq:
             raise ValidationError(
@@ -544,14 +505,11 @@ def delete_expired_live_notes(*, now=None, batch_size=None) -> int:
     return _delete_in_batches(queryset, batch_size)
 
 
-# ── Named collaborators (restricted live notes, M4) ─────────────────────────
-
-
 def live_group_name(pk) -> str:
     """Return the channel-layer group broadcasting one live note.
 
-    Single source of truth for the group string, shared by the consumer (which
-    joins it) and :func:`broadcast_live_access_change` (which publishes to it).
+    Single source of truth for the group string: the consumer joins it and
+    broadcasts each committed update row to it.
 
     Args:
         pk (uuid.UUID | str): Primary key of the live note.
@@ -560,423 +518,6 @@ def live_group_name(pk) -> str:
         str: The group name.
     """
     return f"live.{pk}"
-
-
-def broadcast_live_access_change(pk) -> None:
-    """Tell every open socket on a note to re-run its access gate.
-
-    The consumer's gate runs once, at connect, so without this a socket
-    outlives the grant that admitted it: a revoked collaborator keeps
-    receiving the group's traffic and keeps relaying awareness frames into it,
-    and an anonymous editor keeps writing to a note that just became
-    collaborators-only. Only the two paths that *narrow* access publish here
-    (:func:`restrict_live_note` and :func:`rekey_live_note`); widening access
-    strands nobody.
-
-    Always call this through ``transaction.on_commit``: the consumers re-read
-    their gate from the database, so publishing mid-transaction would race
-    them against state that is not visible yet (or that a rollback undoes).
-
-    Fails open, matching the consumer's posture on cache trouble. A
-    channel-layer outage must never fail a revocation: the key rotation is
-    what actually enforces it, and this only closes the socket that would
-    otherwise keep relaying ciphertext it can no longer read.
-
-    Args:
-        pk (uuid.UUID | str): Primary key of the live note.
-
-    Returns:
-        None: Delivery is best-effort.
-    """
-    try:
-        channel_layer = get_channel_layer()
-        if channel_layer is None:
-            return
-        async_to_sync(channel_layer.group_send)(
-            live_group_name(pk), {"type": "live.access"}
-        )
-    except Exception as exc:
-        logger.warning(LOG_LIVE_ACCESS_BROADCAST_FAILED, exc.__class__.__name__)
-
-
-def get_live_collaborator(note: LiveNote, user_id: str) -> LiveNoteCollaborator | None:
-    """Return a user's collaborator row on a note, if any.
-
-    Args:
-        note (LiveNote): The live note.
-        user_id (str): The public 8-digit user id.
-
-    Returns:
-        LiveNoteCollaborator | None: The grant row, or ``None``.
-    """
-    return (
-        note.collaborators.filter(user__user_id=user_id).select_related("user").first()
-    )
-
-
-def serialize_collaborators(note: LiveNote) -> list[dict[str, Any]]:
-    """Return a note's collaborators for the management UI (no key material).
-
-    Args:
-        note (LiveNote): The restricted live note.
-
-    Returns:
-        list[dict[str, Any]]: ``user_id`` and ``role`` per collaborator.
-    """
-    return [
-        {"user_id": c.user.user_id, "role": c.role}
-        for c in note.collaborators.select_related("user").all()
-    ]
-
-
-def get_live_note_wrap(note: LiveNote, user_id: str) -> dict[str, Any] | None:
-    """Return the current-epoch wrapped document key for a collaborator.
-
-    Args:
-        note (LiveNote): The restricted live note.
-        user_id (str): The requesting collaborator's user id.
-
-    Returns:
-        dict[str, Any] | None: The wrap triple plus ``key_epoch``, or ``None``
-        when the user is not a collaborator or holds only a stale wrap (which
-        can happen briefly if they read between a revoke and their re-fetch;
-        a stale wrap is treated as no access).
-    """
-    row = get_live_collaborator(note, user_id)
-    if row is None or row.key_epoch != note.key_epoch:
-        return None
-    return {
-        "wrapped_key": row.wrapped_key,
-        "wrap_iv": row.wrap_iv,
-        "ephemeral_public_key": row.ephemeral_public_key,
-        "key_epoch": row.key_epoch,
-    }
-
-
-def restrict_live_note(pk, *, owner_user: User, wrap: dict) -> LiveNoteCollaborator:
-    """Switch a link note to restricted access, seeding the owner's wrap.
-
-    Only the note's creator may restrict it (there are no collaborator rows
-    yet, so ``created_by`` is the authority). The current document key is
-    wrapped to the owner's own public key. There is no key rotation, so
-    existing tabs holding the fragment key keep working; the gate is what
-    changes.
-
-    Args:
-        pk: Primary key of the live note.
-        owner_user (User): The authenticated creator.
-        wrap (dict): ``wrapped_key``, ``wrap_iv``, ``ephemeral_public_key``:
-            the current doc key wrapped to ``owner_user``'s public key.
-
-    Returns:
-        LiveNoteCollaborator: The owner's grant row.
-
-    Raises:
-        LiveNote.DoesNotExist: Unknown note.
-        ValidationError: Codes ``not_owner`` (not the creator) or
-            ``already_restricted``.
-    """
-    with transaction.atomic():
-        note = LiveNote.objects.select_for_update().get(pk=pk)
-        if note.created_by_id != owner_user.id:
-            raise ValidationError(_("Only the owner can restrict."), code="not_owner")
-        if note.access_mode == LiveNote.ACCESS_RESTRICTED:
-            raise ValidationError(_("Already restricted."), code="already_restricted")
-
-        note.access_mode = LiveNote.ACCESS_RESTRICTED
-        note.save(update_fields=["access_mode", "updated_at"])
-        grant = LiveNoteCollaborator.objects.create(
-            note=note,
-            user=owner_user,
-            role=LiveNoteCollaborator.ROLE_OWNER,
-            wrapped_key=wrap["wrapped_key"],
-            wrap_iv=wrap["wrap_iv"],
-            ephemeral_public_key=wrap["ephemeral_public_key"],
-            key_epoch=note.key_epoch,
-        )
-        # Anonymous editors already inside the group would otherwise keep
-        # writing: this is a gate change with no key rotation behind it, so
-        # the socket is the only thing that stops them.
-        transaction.on_commit(lambda: broadcast_live_access_change(note.pk))
-        return grant
-
-
-# There is deliberately no `unrestrict_live_note`. Reverting to link access
-# means dropping every collaborator row, and after a rekey those rows hold the
-# only copies of the current document key. Unrestricting such a note would
-# therefore publish it to anyone with the link while destroying the last means
-# of reading it. Doing it safely requires rotating back to a fresh fragment
-# key and handing the owner the new link, which is a feature (with its own
-# "save this link or lose the document" hazard), not a gate flip. Until then,
-# restricting is# one-way and the panel copy says so; the way to get an open
-# document is to create a new editable link from the current text.
-
-
-def add_live_collaborator(pk, *, owner_user: User, invitee_user_id: str, wrap: dict):
-    """Grant a named collaborator access by wrapping the doc key to them.
-
-    Owner-only. Idempotent-ish: re-inviting an existing collaborator refreshes
-    their wrap. Capped at ``MAX_COLLABORATORS_PER_NOTE`` (which also bounds the
-    revocation rekey body, since that re-wraps to everyone remaining).
-
-    Args:
-        pk: Primary key of the live note.
-        owner_user (User): The authenticated owner.
-        invitee_user_id (str): The invitee's public user id.
-        wrap (dict): The current doc key wrapped to the invitee's public key.
-
-    Returns:
-        LiveNoteCollaborator: The created or refreshed grant.
-
-    Raises:
-        LiveNote.DoesNotExist: Unknown note.
-        User.DoesNotExist: Unknown invitee.
-        ValidationError: Codes ``not_owner``, ``not_restricted``, or
-            ``collab_limit``.
-    """
-    with transaction.atomic():
-        note = LiveNote.objects.select_for_update().get(pk=pk)
-        _require_owner(note, owner_user)
-        if note.access_mode != LiveNote.ACCESS_RESTRICTED:
-            raise ValidationError(_("Not restricted."), code="not_restricted")
-
-        invitee = User.objects.get(user_id=invitee_user_id)
-        existing = note.collaborators.filter(user=invitee).first()
-        if (
-            existing is None
-            and note.collaborators.count() >= MAX_COLLABORATORS_PER_NOTE
-        ):
-            raise ValidationError(_("Collaborator limit reached."), code="collab_limit")
-
-        collaborator, _created = LiveNoteCollaborator.objects.update_or_create(
-            note=note,
-            user=invitee,
-            defaults={
-                "wrapped_key": wrap["wrapped_key"],
-                "wrap_iv": wrap["wrap_iv"],
-                "ephemeral_public_key": wrap["ephemeral_public_key"],
-                "key_epoch": note.key_epoch,
-                # Never demote an existing owner; a fresh invite is an editor.
-                "role": existing.role if existing else LiveNoteCollaborator.ROLE_EDITOR,
-            },
-        )
-        return collaborator
-
-
-def rekey_live_note(
-    pk,
-    *,
-    owner_user: User,
-    snapshot: str,
-    snapshot_iv: str,
-    covers_seq: int,
-    key_epoch: int,
-    remove_user_id: str | None,
-    wraps: list[dict],
-) -> int:
-    """Rotate a restricted note's document key: the atomic revocation path.
-
-    One transaction under the append/snapshot row lock does everything a
-    revocation needs, so no collaborator is ever stranded between steps:
-
-    1. verify the caller owns the note and ``key_epoch`` is exactly the next
-       generation;
-    2. verify ``covers_seq`` equals the newest update id, **strictly**,
-       unlike ``save_live_snapshot`` (which permits a superset): a mixed-key
-       log is not allowed, so the new snapshot must fold in the entire tail;
-    3. write the snapshot under the new key, bump ``key_epoch``, delete the
-       whole tail (all under the old key);
-    4. delete the revoked collaborator (if any);
-    5. re-wrap the new doc key to every remaining collaborator (the ``wraps``
-       must cover exactly them: a missing wrap would strand someone, an extra
-       one references a non-collaborator).
-
-    A racing ``append`` bumps the newest id, so step 2 fails with 409 and the
-    client flushes and retries; the rekey never half-applies.
-
-    Args:
-        pk: Primary key of the live note.
-        owner_user (User): The authenticated owner.
-        snapshot / snapshot_iv (str): The full state re-encrypted under the
-            new key.
-        covers_seq (int): Must equal the newest tail id (or ``snapshot_seq``
-            for an empty tail).
-        key_epoch (int): Must equal the note's current epoch + 1.
-        remove_user_id (str | None): Collaborator to revoke, or ``None`` for a
-            plain rotation.
-        wraps (list[dict]): ``user_id`` + wrap triple for every remaining
-            collaborator.
-
-    Returns:
-        int: The new ``key_epoch``.
-
-    Raises:
-        LiveNote.DoesNotExist: Unknown note.
-        ValidationError: Codes ``not_owner``, ``not_restricted``,
-            ``rekey_epoch``, ``rekey_stale``, or ``wraps_mismatch``.
-    """
-    with transaction.atomic():
-        note = LiveNote.objects.select_for_update().get(pk=pk)
-
-        # Guards (all under the row lock, cheapest first): only the owner may
-        # rekey, only a restricted note has keys to rotate, the epoch must be
-        # exactly the next generation, and the snapshot must fold in the whole
-        # tail (strict equality: a mixed-key log is forbidden).
-        _require_owner(note, owner_user)
-        if note.access_mode != LiveNote.ACCESS_RESTRICTED:
-            raise ValidationError(_("Not restricted."), code="not_restricted")
-        if key_epoch != note.key_epoch + 1:
-            raise ValidationError(_("Unexpected key epoch."), code="rekey_epoch")
-
-        newest = note.updates.aggregate(newest=Max("id"))["newest"]
-        expected = newest if newest is not None else note.snapshot_seq
-        if covers_seq != expected:
-            raise ValidationError(
-                _("The rekey snapshot must cover the whole tail."), code="rekey_stale"
-            )
-
-        # Work (order matters): validate the wrap set against the survivors,
-        # swap in the new-key snapshot and drop the old-key tail, remove the
-        # revoked row, then re-wrap the new key to the survivors.
-        survivors = _rekey_survivors(note, remove_user_id, wraps)
-        _write_rekeyed_snapshot(
-            note,
-            snapshot=snapshot,
-            snapshot_iv=snapshot_iv,
-            covers_seq=covers_seq,
-            key_epoch=key_epoch,
-        )
-        if remove_user_id is not None:
-            note.collaborators.filter(user__user_id=remove_user_id).delete()
-        _rewrap_collaborators(survivors, wraps, key_epoch)
-        # The new epoch already locks the revoked user out of reading and
-        # writing; this closes the socket they would otherwise keep holding
-        # open on the group, relaying awareness frames into it.
-        transaction.on_commit(lambda: broadcast_live_access_change(note.pk))
-        return key_epoch
-
-
-def _rekey_survivors(
-    note: LiveNote, remove_user_id: str | None, wraps: list[dict]
-) -> list[LiveNoteCollaborator]:
-    """Return the collaborators a rekey must re-wrap, validating the wrap set.
-
-    Called under the ``LiveNote`` row lock by :func:`rekey_live_note`, before
-    anything is written. The survivors are every current collaborator except
-    the revoked one; ``wraps`` must carry a new wrap for exactly them.
-
-    Args:
-        note (LiveNote): The locked live note.
-        remove_user_id (str | None): Collaborator being revoked, or ``None``
-            for a plain rotation.
-        wraps (list[dict]): ``user_id`` + wrap triple per intended survivor.
-
-    Returns:
-        list[LiveNoteCollaborator]: The survivor rows (revoked user excluded).
-
-    Raises:
-        ValidationError: Code ``wraps_mismatch`` when ``wraps`` does not cover
-            exactly the survivors.
-    """
-    remaining = list(note.collaborators.select_related("user").all())
-    if remove_user_id is not None:
-        remaining = [c for c in remaining if c.user.user_id != remove_user_id]
-    if {w["user_id"] for w in wraps} != {c.user.user_id for c in remaining}:
-        raise ValidationError(
-            _("Wraps must cover exactly the remaining collaborators."),
-            code="wraps_mismatch",
-        )
-    return remaining
-
-
-def _write_rekeyed_snapshot(
-    note: LiveNote,
-    *,
-    snapshot: str,
-    snapshot_iv: str,
-    covers_seq: int,
-    key_epoch: int,
-) -> None:
-    """Store the new-key snapshot, bump the epoch, and drop the whole tail.
-
-    Called under the ``LiveNote`` row lock by :func:`rekey_live_note` once the
-    guards pass. Every existing update row is under the old key; the strict
-    ``covers_seq`` check guarantees the snapshot folds in the entire tail, so
-    the rows are pruned wholesale rather than mixed with the new key.
-
-    Args:
-        note (LiveNote): The locked live note.
-        snapshot (str): Full state re-encrypted under the new key.
-        snapshot_iv (str): Base64-encoded initialization vector.
-        covers_seq (int): The new ``snapshot_seq`` (the whole tail).
-        key_epoch (int): The new key generation.
-    """
-    note.snapshot = snapshot
-    note.snapshot_iv = snapshot_iv
-    note.snapshot_seq = covers_seq
-    note.key_epoch = key_epoch
-    note.full_clean()
-    note.save()
-    note.updates.all().delete()
-
-
-def _rewrap_collaborators(
-    survivors: list[LiveNoteCollaborator], wraps: list[dict], key_epoch: int
-) -> None:
-    """Re-wrap the new document key to each surviving collaborator.
-
-    Called under the ``LiveNote`` row lock by :func:`rekey_live_note`. The
-    caller has already verified ``wraps`` covers exactly ``survivors`` (see
-    :func:`_rekey_survivors`), so every survivor has a matching wrap.
-
-    Args:
-        survivors (list[LiveNoteCollaborator]): Rows to re-wrap.
-        wraps (list[dict]): ``user_id`` + wrap triple per survivor.
-        key_epoch (int): The new key generation stamped on each row.
-    """
-    wraps_by_id = {w["user_id"]: w for w in wraps}
-    for collaborator in survivors:
-        wrap = wraps_by_id[collaborator.user.user_id]
-        collaborator.wrapped_key = wrap["wrapped_key"]
-        collaborator.wrap_iv = wrap["wrap_iv"]
-        collaborator.ephemeral_public_key = wrap["ephemeral_public_key"]
-        collaborator.key_epoch = key_epoch
-        collaborator.save(
-            update_fields=[
-                "wrapped_key",
-                "wrap_iv",
-                "ephemeral_public_key",
-                "key_epoch",
-            ]
-        )
-
-
-def _require_owner(note: LiveNote, user: User) -> None:
-    """Raise ``ValidationError(code="not_owner")`` unless ``user`` owns ``note``.
-
-    Ownership is the ``owner``-role collaborator row (created at restrict); a
-    plain editor or a non-collaborator cannot manage access. Note that
-    :func:`restrict_live_note` cannot use this, since it runs before any
-    collaborator row exists and checks ``created_by`` instead.
-
-    Args:
-        note (LiveNote): The restricted live note.
-        user (User): The user whose ownership is asserted.
-
-    Returns:
-        None: The user owns the note.
-
-    Raises:
-        ValidationError: Code ``not_owner`` when the user holds no owner-role
-            collaborator row on the note.
-    """
-    owner = note.collaborators.filter(
-        user=user, role=LiveNoteCollaborator.ROLE_OWNER
-    ).exists()
-    if not owner:
-        raise ValidationError(
-            _("Only the owner can manage collaborators."), code="not_owner"
-        )
 
 
 # ── Note vault (authenticated) ─────────────────────────────────────────────
@@ -1267,7 +808,6 @@ def migrate_vault_data(
     *,
     notes: list[dict],
     index_payload: dict | None = None,
-    keypair_payload: dict | None = None,
 ) -> int:
     """Re-write vault note ciphertexts (and optionally the index) atomically.
 
@@ -1282,21 +822,13 @@ def migrate_vault_data(
         index_payload (dict | None): Optional ``{"encrypted_data", "iv"}`` to
             save after the notes (the index is the client's commit marker, so
             it travels in the final batch).
-        keypair_payload (dict | None): Optional
-            ``{"encrypted_private_key", "iv"}``, the collaboration private
-            key re-encrypted under the new vault key. Rides the final batch
-            with the index (same transaction), so an interrupted migration
-            can never leave "index new-key, keypair old-key". The public key
-            never changes here.
 
     Returns:
         int: Number of migrated note rows.
 
     Raises:
-        ValidationError: If any id is unknown/foreign (code ``unknown_note``),
-            a keypair payload arrives for an account without one (code
-            ``unknown_keypair``), or any payload fails model validation.
-            Nothing is persisted.
+        ValidationError: If any id is unknown/foreign (code ``unknown_note``)
+            or any payload fails model validation. Nothing is persisted.
     """
     with transaction.atomic():
         migrated = 0
@@ -1313,16 +845,6 @@ def migrate_vault_data(
             migrated += 1
         if index_payload is not None:
             save_vault_index(user, index_payload["encrypted_data"], index_payload["iv"])
-        if keypair_payload is not None:
-            keypair = UserKeyPair.objects.filter(user=user).first()
-            if keypair is None:
-                raise ValidationError(
-                    _("No keypair exists for this account."), code="unknown_keypair"
-                )
-            keypair.encrypted_private_key = keypair_payload["encrypted_private_key"]
-            keypair.private_key_iv = keypair_payload["iv"]
-            keypair.full_clean()
-            keypair.save()
         return migrated
 
 
@@ -1330,26 +852,20 @@ def build_note_export(user: User) -> dict[str, Any]:
     """Build every note-app section of the account's GDPR data export.
 
     Covers what the note tool holds *about the account* beyond the vault: the
-    shared notes and live notes it created, and its collaboration grants. All
-    payloads are ciphertext the server cannot read; they are included anyway
-    because they are the user's own data and only they hold the keys.
+    shared notes and live notes it created. All payloads are ciphertext the
+    server cannot read; they are included anyway because they are the user's
+    own data and only they hold the keys.
 
     Live notes carry their pending update tail as well as the snapshot. The
     snapshot alone is the document as of the last compaction, so shipping it
     on its own would hand the user a knowingly stale copy. Both are bounded
     per note by ``MAX_LIVE_SNAPSHOT_LENGTH`` and ``MAX_LIVE_PENDING_LENGTH``.
 
-    Collaboration grants are limited to this user's own rows. An owner can
-    already see their collaborators' ids in the management panel, but an
-    export file is a different distribution surface, and those ids are other
-    people's personal data (GDPR Art. 15(4)).
-
     Args:
         user (User): The user whose data should be exported.
 
     Returns:
-        dict[str, Any]: ``shared_notes``, ``live_notes`` and
-        ``live_note_collaborations``.
+        dict[str, Any]: ``shared_notes`` and ``live_notes``.
     """
     return {
         "shared_notes": [
@@ -1370,8 +886,6 @@ def build_note_export(user: User) -> dict[str, Any]:
                 "snapshot": note.snapshot,
                 "snapshot_iv": note.snapshot_iv,
                 "snapshot_seq": note.snapshot_seq,
-                "access_mode": note.access_mode,
-                "key_epoch": note.key_epoch,
                 "created_at": note.created_at.isoformat(),
                 "updated_at": note.updated_at.isoformat(),
                 "expires_at": note.expires_at.isoformat(),
@@ -1379,20 +893,6 @@ def build_note_export(user: User) -> dict[str, Any]:
                 "pending_updates": _serialize_live_updates(list(note.updates.all())),
             }
             for note in user.live_notes.prefetch_related("updates")
-        ],
-        "live_note_collaborations": [
-            {
-                "note_id": str(row.note_id),
-                "role": row.role,
-                # This user's own wrap: the doc key encrypted to their public
-                # key, openable only with the private key in `keypair`.
-                "wrapped_key": row.wrapped_key,
-                "wrap_iv": row.wrap_iv,
-                "ephemeral_public_key": row.ephemeral_public_key,
-                "key_epoch": row.key_epoch,
-                "created_at": row.created_at.isoformat(),
-            }
-            for row in user.live_collaborations.all()
         ],
     }
 

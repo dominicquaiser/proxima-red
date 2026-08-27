@@ -15,12 +15,7 @@ from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from apps.auth.models import UserKeyPair
-from apps.auth.tests.factories import (
-    VALID_PUBLIC_KEY_B64,
-    create_user_with_password,
-    make_keypair,
-)
+from apps.auth.tests.factories import create_user_with_password
 from apps.note.constants import (
     MAX_VAULT_INDEX_LENGTH,
     MAX_VAULT_NOTE_CONTENT_LENGTH,
@@ -633,78 +628,6 @@ class VaultMigrateViewTests(VaultTestCase):
         self.assertEqual(response.status_code, 400)
         own.refresh_from_db()
         self.assertEqual(own.content, VALID_CONTENT_B64)
-
-    def test_migrates_keypair_blob_with_index(self):
-        """The re-encrypted private-key blob rides the final batch atomically."""
-        make_keypair(self.user)
-        make_vault_index(self.user)
-        self._authenticate()
-        response = self._post_json(
-            reverse("note:vault_migrate"),
-            {
-                "notes": [],
-                "index": {"encrypted_data": "bmV3aW5kZXg=", "iv": VALID_IV_B64},
-                "keypair": {
-                    "encrypted_private_key": "cmVrZXlwZWQ=",
-                    "iv": VALID_IV_B64,
-                },
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        keypair = UserKeyPair.objects.get(user=self.user)
-        # Only the blob rotates; the public key is unchanged.
-        self.assertEqual(keypair.encrypted_private_key, "cmVrZXlwZWQ=")
-        self.assertEqual(keypair.public_key, VALID_PUBLIC_KEY_B64)
-
-    def test_keypair_only_migration(self):
-        make_keypair(self.user)
-        self._authenticate()
-        response = self._post_json(
-            reverse("note:vault_migrate"),
-            {
-                "notes": [],
-                "keypair": {
-                    "encrypted_private_key": "b25seWtleQ==",
-                    "iv": VALID_IV_B64,
-                },
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            UserKeyPair.objects.get(user=self.user).encrypted_private_key,
-            "b25seWtleQ==",
-        )
-
-    def test_keypair_payload_without_a_keypair_rolls_back(self):
-        """A keypair blob for an account that has none fails the whole batch."""
-        note = make_vault_note(self.user)
-        self._authenticate()
-        response = self._post_json(
-            reverse("note:vault_migrate"),
-            {
-                "notes": [
-                    {"id": str(note.id), "content": "bmV3b3du", "iv": VALID_IV_B64}
-                ],
-                "keypair": {"encrypted_private_key": "b3JwaGFu", "iv": VALID_IV_B64},
-            },
-        )
-        self.assertEqual(response.status_code, 400)
-        note.refresh_from_db()
-        self.assertEqual(note.content, VALID_CONTENT_B64)  # rolled back
-
-    def test_malformed_keypair_payload_rejected(self):
-        make_keypair(self.user)
-        self._authenticate()
-        for keypair_payload in (
-            "not a dict",
-            {"encrypted_private_key": "eA=="},
-            {"iv": VALID_IV_B64},
-        ):
-            response = self._post_json(
-                reverse("note:vault_migrate"),
-                {"notes": [], "keypair": keypair_payload},
-            )
-            self.assertEqual(response.status_code, 400, keypair_payload)
 
 
 class VaultLifecycleTests(VaultTestCase):

@@ -6,7 +6,6 @@ from django.utils import timezone
 
 from apps.note.models import (
     LiveNote,
-    LiveNoteCollaborator,
     LiveNoteUpdate,
     SharedNote,
     VaultIndex,
@@ -16,8 +15,6 @@ from apps.note.models import (
 # "encrypted" in Base64 and a 12-byte all-zero IV, mirroring the passwd tests.
 VALID_CONTENT_B64 = "ZW5jcnlwdGVk"
 VALID_IV_B64 = "AAAAAAAAAAAAAAAA"
-# A stand-in SPKI ephemeral key for wrap fixtures (server never checks EC math).
-VALID_EPHEMERAL_KEY_B64 = "ZXBoZW1lcmFscHVibGlja2V5"
 
 
 def make_note(**overrides):
@@ -64,30 +61,6 @@ def make_live_update(note, **overrides):
     }
     data.update(overrides)
     return LiveNoteUpdate.objects.create(**data)
-
-
-def make_live_collaborator(note, user, **overrides):
-    """Create a LiveNoteCollaborator grant with valid wrap fixtures."""
-    data = {
-        "note": note,
-        "user": user,
-        "role": LiveNoteCollaborator.ROLE_EDITOR,
-        "wrapped_key": VALID_CONTENT_B64,
-        "wrap_iv": VALID_IV_B64,
-        "ephemeral_public_key": VALID_EPHEMERAL_KEY_B64,
-        "key_epoch": note.key_epoch,
-    }
-    data.update(overrides)
-    return LiveNoteCollaborator.objects.create(**data)
-
-
-def make_restricted_live_note(owner, **overrides):
-    """Create a restricted LiveNote owned by ``owner`` (with the owner grant)."""
-    note = make_live_note(
-        created_by=owner, access_mode=LiveNote.ACCESS_RESTRICTED, **overrides
-    )
-    make_live_collaborator(note, owner, role=LiveNoteCollaborator.ROLE_OWNER)
-    return note
 
 
 def make_vault_note(user, **overrides):

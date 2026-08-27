@@ -14,9 +14,6 @@
     const authSecretInput = document.getElementById("id_auth_secret");
     const authSaltInput = document.getElementById("id_auth_salt");
     const vaultSaltInput = document.getElementById("id_vault_salt");
-    const publicKeyInput = document.getElementById("id_public_key");
-    const encryptedPrivateKeyInput = document.getElementById("id_encrypted_private_key");
-    const privateKeyIvInput = document.getElementById("id_private_key_iv");
     const submitButton = document.getElementById("signup-btn");
     const signupCard = document.getElementById("signup-card");
     const successContainer = document.getElementById("success-container");
@@ -48,12 +45,6 @@
           authSecretInput.value = await window.AuthCrypto.deriveAuthSecret(password, authSalt);
           authSaltInput.value = authSalt;
           vaultSaltInput.value = vaultSalt;
-
-          // Generate the collaboration keypair now, while the fresh vault key
-          // is in hand: the private key is stored encrypted under it. Best
-          // effort — if this fails (or KeyWrap is unavailable), signup still
-          // proceeds and the keypair is created lazily at first collaboration.
-          await fillKeypairFields(password, vaultSalt);
 
           const { result } = await window.Http.postForm(form.action, form);
 
@@ -93,27 +84,6 @@
         },
       );
     });
-
-    // Generate an ECDH keypair and write the public key + vault-key-encrypted
-    // private blob into the hidden fields. All-or-nothing: on any failure the
-    // fields are cleared so the server sees no partial triple (SignupForm
-    // rejects a partial one) and the keypair is created lazily later.
-    async function fillKeypairFields(password, vaultSalt) {
-      if (!window.KeyWrap || !publicKeyInput) return;
-      try {
-        const vaultKey = await window.AuthCrypto.deriveKeyFromPassword(password, vaultSalt);
-        const pair = await window.KeyWrap.generateKeyPair();
-        const blob = await window.KeyWrap.encryptPrivateKeyBlob(pair.privateKey, vaultKey);
-        publicKeyInput.value = pair.publicKeyBase64;
-        encryptedPrivateKeyInput.value = blob.encryptedPrivateKey;
-        privateKeyIvInput.value = blob.iv;
-      } catch (error) {
-        console.error("Keypair generation failed; continuing without it:", error);
-        publicKeyInput.value = "";
-        encryptedPrivateKeyInput.value = "";
-        privateKeyIvInput.value = "";
-      }
-    }
 
     function handleFormErrors(errors) {
       clearFieldErrors();
