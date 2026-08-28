@@ -1,7 +1,9 @@
 /**
  * Tests for the pure helpers of static/note/js/live-sync.js
  * (window.NoteLiveSync): backoff schedule, poll jitter, the compaction
- * predicate, the WebSocket cursor-advance rule, and the ws URL builder. The
+ * predicate, the WebSocket cursor-advance rule, the permanent/transient
+ * failure split that decides whether a flush is retried, and the ws URL
+ * builder. The
  * networked sync loop itself is exercised end-to-end in the browser; only
  * the deterministic logic is unit-tested here.
  *
@@ -93,6 +95,46 @@ describe("advanceCursor", () => {
 
   test("fresh doc: first row after the seed snapshot (prev_seq 0)", () => {
     assert.deepEqual(Sync.advanceCursor(0, 0, 1), { cursor: 1, gap: false, stale: false });
+  });
+});
+
+describe("isPermanentStatus", () => {
+  test("treats client errors as permanent", () => {
+    // A body the server calls malformed or oversized (400), or a rejected
+    // CSRF token (403), is refused identically on every retry.
+    assert.equal(Sync.isPermanentStatus(400), true);
+    assert.equal(Sync.isPermanentStatus(403), true);
+    assert.equal(Sync.isPermanentStatus(413), true);
+  });
+
+  test("treats rate limits, timeouts and server errors as transient", () => {
+    // These are exactly the ones worth a backoff: retrying does work.
+    assert.equal(Sync.isPermanentStatus(408), false);
+    assert.equal(Sync.isPermanentStatus(429), false);
+    assert.equal(Sync.isPermanentStatus(500), false);
+    assert.equal(Sync.isPermanentStatus(502), false);
+    assert.equal(Sync.isPermanentStatus(503), false);
+  });
+
+  test("does not claim success responses are permanent failures", () => {
+    assert.equal(Sync.isPermanentStatus(200), false);
+    assert.equal(Sync.isPermanentStatus(204), false);
+  });
+});
+
+describe("isPermanentErrorCode", () => {
+  test("a payload the server cannot store is permanent", () => {
+    assert.equal(Sync.isPermanentErrorCode("update_too_large"), true);
+    assert.equal(Sync.isPermanentErrorCode("invalid_frame"), true);
+  });
+
+  test("rate limits and server faults stay retryable", () => {
+    assert.equal(Sync.isPermanentErrorCode("rate_limited"), false);
+    assert.equal(Sync.isPermanentErrorCode("server_error"), false);
+  });
+
+  test("pending_tail_full is not permanent: compaction is its recovery", () => {
+    assert.equal(Sync.isPermanentErrorCode("pending_tail_full"), false);
   });
 });
 

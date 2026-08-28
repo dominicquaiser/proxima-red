@@ -991,7 +991,10 @@ class LiveNoteUpdatesView(View):
             # the locked re-fetch inside the service; same terminal 404.
             return json_error(ERROR_NOTE_NOT_FOUND, status=404)
         except ValidationError as e:
-            if e.code == "pending_tail_full":
+            # services.validation_code, not e.code: model field validation
+            # arrives here in ValidationError's dict form, which has no code
+            # attribute at all (see the helper's docstring).
+            if services.validation_code(e) == "pending_tail_full":
                 return json_error(
                     ERROR_LIVE_TAIL_FULL, status=409, code="pending_tail_full"
                 )
@@ -1045,9 +1048,12 @@ class LiveNoteSnapshotView(View):
         except LiveNote.DoesNotExist:
             return json_error(ERROR_NOTE_NOT_FOUND, status=404)
         except ValidationError as e:
-            if e.code == "stale_snapshot":
+            # See the note in LiveNoteUpdatesView.post: an oversized or
+            # non-Base64 snapshot raises the code-less dict form here.
+            code = services.validation_code(e)
+            if code == "stale_snapshot":
                 return json_error(ERROR_LIVE_STALE_SNAPSHOT, status=409)
-            if e.code == "covers_unknown_updates":
+            if code == "covers_unknown_updates":
                 return json_error(ERROR_LIVE_COVERS_UNKNOWN, status=409)
             return json_error(_validation_error_message(e))
         except Exception as e:

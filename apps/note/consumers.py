@@ -356,7 +356,11 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=WS_CLOSE_NOT_FOUND)
             return
         except ValidationError as e:
-            if e.code == "pending_tail_full":
+            # services.validation_code, not e.code: model field validation
+            # raises ValidationError's dict form, which has no code attribute.
+            # Reading it directly raised AttributeError out of this handler and
+            # dropped the socket instead of sending a recoverable error frame.
+            if services.validation_code(e) == "pending_tail_full":
                 code = WS_ERROR_TAIL_FULL
             else:
                 code = WS_ERROR_INVALID_FRAME

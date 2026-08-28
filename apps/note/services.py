@@ -56,6 +56,30 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+def validation_code(error: ValidationError) -> str | None:
+    """Return a ``ValidationError``'s stable code, or ``None`` if it has none.
+
+    The safe reader for this module's rejection vocabulary
+    (``pending_tail_full``, ``stale_snapshot``, ...). ``ValidationError`` only
+    carries a ``code`` attribute when it was built from a single message: the
+    dict form that ``Model.full_clean()`` raises has ``error_dict`` instead,
+    and touching ``.code`` on it raises ``AttributeError``. Both kinds arrive
+    at the same ``except ValidationError`` in the views and the consumer, so
+    reading the code directly there turns every field-validation failure
+    (oversized payload, non-Base64 ciphertext, bad IV length) into an
+    unhandled 500 or a dropped socket instead of the intended 400/error frame.
+
+    Args:
+        error (ValidationError): The caught error, of either shape.
+
+    Returns:
+        str | None: The code for a single-message error, else ``None``, which
+        callers treat as "not one of ours" and fall through to their generic
+        field-validation branch.
+    """
+    return getattr(error, "code", None)
+
+
 def create_note(
     *,
     content: str,

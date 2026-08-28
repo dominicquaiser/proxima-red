@@ -18,6 +18,9 @@
   };
 
   const KEY_STASH_PREFIX = "noteLiveKey:";
+  const SIZE_WARNING =
+    "This note is over the size limit and edits may stop saving. " +
+    "Shorten it, or copy your work somewhere safe.";
   const COUNTDOWN_INTERVAL_MS = 1000;
   const EDITOR_PLACEHOLDER = "# Write your markdown here";
 
@@ -154,6 +157,29 @@
       },
     });
 
+    // The static editors gate on size at share/save time; a live note has no
+    // submit, so nothing was checking it and the first sign of trouble was
+    // the server refusing an update. Warn on the way past the limit instead.
+    // Deliberately advisory, not a block: the sync client halts and says so
+    // if the server does refuse, and taking the keyboard away mid-sentence
+    // would strand text the user still needs to copy out.
+    const sizeLimitBytes = window.NoteEditorCore.MAX_NOTE_PLAINTEXT_BYTES;
+    const encoder = new TextEncoder();
+    let warnedTooLarge = false;
+
+    function checkSize(value) {
+      const over = encoder.encode(value).length > sizeLimitBytes;
+      // Re-arms when the note drops back under, so a user who trims and then
+      // grows past the limit again is warned again rather than once a page.
+      if (!over) {
+        warnedTooLarge = false;
+        return;
+      }
+      if (warnedTooLarge) return;
+      warnedTooLarge = true;
+      window.Notify.show(SIZE_WARNING, "error");
+    }
+
     const sync = window.NoteLiveSync.create({
       doc,
       ytext,
@@ -170,6 +196,9 @@
         const selStart = window.NoteLiveBinding.transformOffset(textarea.selectionStart, splices);
         const selEnd = window.NoteLiveBinding.transformOffset(textarea.selectionEnd, splices);
         core.applyRemoteSplices(splices, selStart, selEnd);
+        // A collaborator's paste can push the document over the limit just as
+        // easily as our own typing, and it is our updates that stop saving.
+        checkSize(textarea.value);
       },
       onStatus: paintStatus,
       onFatal: enterTerminalState,
@@ -181,6 +210,7 @@
     // Local edits enter Y.Text under "local" so sync queues them.
     core.onInput(function (value) {
       if (terminal) return;
+      checkSize(value);
       const diff = window.NoteLiveBinding.diffText(ytext.toString(), value);
       if (!diff) return;
       doc.transact(function () {
@@ -192,6 +222,8 @@
     if (!(await sync.start())) return;
 
     core.setValue(ytext.toString());
+    // The document may already be over the limit before we typed anything.
+    checkSize(textarea.value);
     textarea.readOnly = false;
     textarea.placeholder = EDITOR_PLACEHOLDER;
 

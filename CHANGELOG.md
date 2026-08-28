@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`NOTE_SITE_URL`** env var, mirroring `PASS_SITE_URL`.
 - **`delete_expired_notes`** management command, run every minute alongside `delete_expired`.
 
+### Fixed
+
+- **`[note·]` live-note sync no longer 500s or drops the socket on a rejected payload**: reading `ValidationError.code` in the update/snapshot endpoints and the WebSocket consumer crashed with `AttributeError` whenever the error came from model field validation (oversized, non-Base64, or bad-IV payloads), whose dict form carries no code. Those now answer a JSON 400 / a recoverable `invalid_frame` error frame as intended.
+- **`[note·]` a permanently rejected live update no longer retries forever in silence**: the sync client told transient failures (429, 5xx, network) apart from ones the server will always refuse, and retried both every 60s while showing only an "offline" pill. Permanent rejections now halt syncing with a clear message, keeping the outbox and leaving the editor readable, editable and downloadable so work can be rescued.
+- **`[note·]` the live editor warns when a note passes the size limit**: the static editors gate on size at share/save time, but a live note has no submit, so nothing checked it until the server refused an update. Crossing the limit (from local typing, a collaborator's edit, or the loaded document) now warns.
+
 ### Changed
 
 - Static assets reorganized into per-tool folders (`static/{shared,core,auth,passwd,note}/{css,js}/`).

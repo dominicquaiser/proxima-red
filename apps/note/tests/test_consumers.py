@@ -262,6 +262,49 @@ class LiveConsumerUpdateTests(LiveConsumerTestCase):
         self.assertEqual(reply, {"type": "error", "code": WS_ERROR_TAIL_FULL})
         await self._close_all()
 
+    async def test_unstorable_payload_gets_error_frame_and_stays_connected(self):
+        """A frame the model rejects must not take the socket down with it.
+
+        The consumer's own size check runs before the service, so this is the
+        path that reaches model field validation: a well-formed frame whose
+        payload is not Base64. That raises ValidationError's dict form, which
+        carries no code attribute; reading .code off it used to raise
+        AttributeError out of the handler and drop the connection instead of
+        sending a recoverable error frame.
+        """
+        note = await LiveConsumerConnectTests._make_note()
+        communicator = await self._connect(note.pk)
+
+        await communicator.send_json_to(
+            {"type": "update", "payload": "!!!not-base64!!!", "iv": VALID_IV_B64}
+        )
+        reply = await communicator.receive_json_from()
+
+        self.assertEqual(reply, {"type": "error", "code": WS_ERROR_INVALID_FRAME})
+        self.assertEqual(await self._row_count(note.pk), 0)
+
+        # Still usable: a good frame after a rejected one is acked as normal.
+        await communicator.send_json_to(
+            {"type": "update", "txn": 7, "payload": VALID_CONTENT_B64, "iv": VALID_IV_B64}
+        )
+        ack = await communicator.receive_json_from()
+        self.assertEqual(ack["type"], "ack")
+        self.assertEqual(ack["txn"], 7)
+        await self._close_all()
+
+    async def test_bad_iv_gets_error_frame_and_stays_connected(self):
+        note = await LiveConsumerConnectTests._make_note()
+        communicator = await self._connect(note.pk)
+
+        await communicator.send_json_to(
+            {"type": "update", "payload": VALID_CONTENT_B64, "iv": "AAAA"}
+        )
+        reply = await communicator.receive_json_from()
+
+        self.assertEqual(reply, {"type": "error", "code": WS_ERROR_INVALID_FRAME})
+        self.assertEqual(await self._row_count(note.pk), 0)
+        await self._close_all()
+
     async def test_malformed_frames_get_invalid_frame_not_a_dropped_socket(self):
         note = await LiveConsumerConnectTests._make_note()
         communicator = await self._connect(note.pk)

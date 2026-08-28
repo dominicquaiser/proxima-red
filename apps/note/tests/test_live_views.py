@@ -20,6 +20,8 @@ from apps.auth.tests.factories import create_user_with_password
 from apps.note.constants import (
     ERROR_LIVE_STALE_SNAPSHOT,
     ERROR_LIVE_TAIL_FULL,
+    MAX_LIVE_SNAPSHOT_LENGTH,
+    MAX_LIVE_UPDATE_LENGTH,
     RATE_LIMIT_LIVE_SNAPSHOT,
 )
 from apps.note.models import LiveNote, LiveNoteUpdate
@@ -241,6 +243,40 @@ class LiveNoteUpdatesViewTests(LiveViewTestCase):
         self.assertEqual(payload["pending"], 2)
         self.assertNotIn("snapshot", payload)
 
+    def test_field_validation_failure_answers_400_not_500(self):
+        """A malformed payload is a client error, not an unhandled crash.
+
+        The service raises its own coded ValidationError for pending_tail_full,
+        but model field validation raises the code-less dict form. Reading
+        .code off that used to raise AttributeError straight out of the
+        handler, turning every bad payload into an HTML 500 that the JSON sync
+        client cannot parse.
+        """
+        response = self._post_json(
+            self.url, {"payload": "!!!not-base64!!!", "iv": VALID_IV_B64}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
+
+    def test_oversized_payload_answers_400_not_500(self):
+        response = self._post_json(
+            self.url,
+            {"payload": "A" * (MAX_LIVE_UPDATE_LENGTH + 4), "iv": VALID_IV_B64},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
+
+    def test_bad_iv_answers_400_not_500(self):
+        response = self._post_json(
+            self.url, {"payload": VALID_CONTENT_B64, "iv": "AAAA"}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
+
     def test_get_requires_valid_since(self):
         self.assertEqual(self.client.get(self.url, **AJAX).status_code, 400)
         self.assertEqual(
@@ -338,6 +374,38 @@ class LiveNoteSnapshotViewTests(LiveViewTestCase):
         self.assertEqual(
             list(self.note.updates.values_list("pk", flat=True)), [second.pk]
         )
+
+    def test_field_validation_failure_answers_400_not_500(self):
+        """Same code-less ValidationError trap as the updates endpoint."""
+        make_live_update(self.note)
+
+        response = self._post_json(
+            self.url,
+            {
+                "snapshot": "!!!not-base64!!!",
+                "snapshot_iv": VALID_IV_B64,
+                "covers_seq": self.note.updates.first().pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
+
+    def test_oversized_snapshot_answers_400_not_500(self):
+        row = make_live_update(self.note)
+
+        response = self._post_json(
+            self.url,
+            {
+                "snapshot": "A" * (MAX_LIVE_SNAPSHOT_LENGTH + 4),
+                "snapshot_iv": VALID_IV_B64,
+                "covers_seq": row.pk,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
 
     def test_stale_compaction_answers_409(self):
         newest = make_live_update(self.note)

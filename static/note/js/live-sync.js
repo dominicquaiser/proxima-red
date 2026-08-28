@@ -87,6 +87,39 @@
   }
 
   /**
+   * Whether an HTTP status means "retrying this body will never work".
+   *
+   * 404 and 409 are handled by their own branches before this is consulted.
+   * What is left splits into a client error the server will refuse forever
+   * (an oversized or malformed payload: 400, or a rejected CSRF token: 403)
+   * and something worth waiting out (429 rate limit, 408, any 5xx, a network
+   * throw). Retrying the first kind is what used to loop the same rejected
+   * update every 60s while the user watched an "offline" pill and nothing
+   * else, so the two must be told apart.
+   *
+   * @param {number} status
+   * @returns {boolean}
+   */
+  function isPermanentStatus(status) {
+    if (status === 408 || status === 429) return false;
+    return status >= 400 && status < 500;
+  }
+
+  /**
+   * Whether a WebSocket error frame means the same thing.
+   *
+   * pending_tail_full has its own compaction recovery and never reaches here.
+   * rate_limited and server_error are worth a backoff; a payload the server
+   * calls too large or unstorable will be refused identically next time.
+   *
+   * @param {string} code
+   * @returns {boolean}
+   */
+  function isPermanentErrorCode(code) {
+    return code === "update_too_large" || code === "invalid_frame";
+  }
+
+  /**
    * Build the WebSocket URL for a socket path on the current origin.
    *
    * @param {string} path
@@ -162,6 +195,10 @@
     // document can no longer be compacted (see noteCompactOutcome).
     let compactFailures = 0;
     let warnedCompactStuck = false;
+    // Set when the server permanently refused an update. The outbox is kept
+    // (the user's text is never silently discarded) but no longer retried,
+    // and the status pill stops claiming progress that is not happening.
+    let flushHalted = false;
 
     // WebSocket transport state. `ws` is non-null from construction attempt
     // to close; only an OPEN socket carries traffic (wsIsOpen).
@@ -191,9 +228,41 @@
 
     function refreshStatus() {
       if (stopped) return;
+      // Sticky: a halted sync must not drift back to "syncing"/"offline",
+      // both of which read as "still working on it".
+      if (flushHalted) return setStatus("error");
       if (backoffMs) setStatus("offline");
       else if (outbox.length || flushInFlight) setStatus("syncing");
       else setStatus("synced");
+    }
+
+    // The server will never accept what is in the outbox. Unlike fatal() this
+    // does NOT stop(): remote edits keep arriving and the page keeps the
+    // buffer editable and downloadable, so the user can rescue their work.
+    // Deliberately not onFatal either, which the page renders as a terminal
+    // read-only state. The outbox is kept rather than dropped: the content
+    // only exists in this tab, and a discarded update has no way back (a
+    // later compaction cannot carry it, since covers_seq can only advance
+    // past snapshot_seq when some other client's row lands).
+    function haltFlush() {
+      if (flushHalted) return;
+      flushHalted = true;
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      flushInFlight = false;
+      wsFlush = null;
+      if (ackTimer) {
+        clearTimeout(ackTimer);
+        ackTimer = null;
+      }
+      setStatus("error");
+      window.Notify.show(
+        "This note's edits could not be saved and syncing has stopped. " +
+          "Copy or download your work before closing this tab.",
+        "error",
+      );
     }
 
     function fatal(kind, message) {
@@ -297,7 +366,7 @@
     // that guard fire an immediate flush on top of it and the backoff is
     // silently lost.
     function scheduleFlushAfter(delayMs) {
-      if (stopped || flushTimer) return;
+      if (stopped || flushHalted || flushTimer) return;
       flushTimer = setTimeout(function () {
         flushTimer = null;
         flush(false);
@@ -351,7 +420,10 @@
     }
 
     async function flush(keepalive) {
-      if (stopped || flushInFlight || !outbox.length) return;
+      // flushHalted guards here as well as in scheduleFlushAfter: the
+      // visibilitychange keepalive calls flush() directly, so the scheduler
+      // guard alone would let a halted outbox go back out on tab-hide.
+      if (stopped || flushHalted || flushInFlight || !outbox.length) return;
       flushInFlight = true;
       const count = outbox.length;
       refreshStatus();
@@ -379,6 +451,11 @@
           // Pending tail full: compact to drain it, then retry the flush.
           flushInFlight = false;
           scheduleFlushAfterCompact(await compact());
+          return;
+        }
+        if (isPermanentStatus(response.status)) {
+          // Retrying this body is futile; say so instead of looping on it.
+          haltFlush();
           return;
         }
         if (!response.ok || !result || !result.success) {
@@ -551,9 +628,15 @@
         flushInFlight = false;
         return compact().then(scheduleFlushAfterCompact);
       }
+      if (isPermanentErrorCode(msg.code)) {
+        // The socket stays open (remote edits still flow), but this payload
+        // is never going to be accepted.
+        haltFlush();
+        return null;
+      }
       if (wsFlush) {
-        // rate_limited / invalid_frame / server_error while our flush was
-        // pending: keep the outbox, retry after the shared backoff.
+        // rate_limited / server_error while our flush was pending: keep the
+        // outbox, retry after the shared backoff.
         wsFlush = null;
         if (ackTimer) clearTimeout(ackTimer);
         ackTimer = null;
@@ -765,6 +848,8 @@
     pollDelayMs,
     shouldCompact,
     advanceCursor,
+    isPermanentStatus,
+    isPermanentErrorCode,
     wsUrlFromPath,
     FLUSH_DEBOUNCE_MS,
     FLUSH_DEBOUNCE_WS_MS,
