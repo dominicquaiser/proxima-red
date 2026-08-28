@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`[note·]` a permanently rejected live update no longer retries forever in silence**: the sync client told transient failures (429, 5xx, network) apart from ones the server will always refuse, and retried both every 60s while showing only an "offline" pill. Permanent rejections now halt syncing with a clear message, keeping the outbox and leaving the editor readable, editable and downloadable so work can be rescued.
 - **`[note·]` the live editor warns when a note passes the size limit**: the static editors gate on size at share/save time, but a live note has no submit, so nothing checked it until the server refused an update. Crossing the limit (from local typing, a collaborator's edit, or the loaded document) now warns.
 
+- **`[note·]` a password change no longer tears the note vault in half**: the client re-encrypts the vault in batches, but `/vault/migrate/` allowed only 10/min against the ~29 batches a full vault needs, so the 11th was refused mid-flight. Because the change had already rotated `vault_salt`, the old key survived only in that page's memory and the abandoned rows became unrecoverable — and with the index (written last) still under the old key, the whole vault failed to open. The endpoint now answers a parseable JSON 429, the client retries it, batches are larger, and the limit clears a full vault in one window.
+
 ### Changed
 
 - Static assets reorganized into per-tool folders (`static/{shared,core,auth,passwd,note}/{css,js}/`).

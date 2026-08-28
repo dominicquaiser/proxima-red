@@ -20,6 +20,7 @@ from apps.note.constants import (
     MAX_VAULT_INDEX_LENGTH,
     MAX_VAULT_NOTE_CONTENT_LENGTH,
     MAX_VAULT_NOTES_PER_USER,
+    RATE_LIMIT_VAULT_MIGRATE,
     VAULT_TRASH_RETENTION_DAYS,
 )
 from apps.note.models import VaultIndex, VaultNote
@@ -523,6 +524,43 @@ class VaultMigrateViewTests(VaultTestCase):
     def test_requires_auth(self):
         response = self._post_json(reverse("note:vault_migrate"), {"notes": []})
         self.assertEqual(response.status_code, 401)
+
+    def test_rate_limited_batch_answers_json_429_not_html_403(self):
+        """The client must be able to tell a rate limit from a real refusal.
+
+        A password change re-encrypts the vault in batches, and by the time
+        they run the old key exists only in the changing page's memory: an
+        abandoned batch leaves rows under two keys with no way back. So the
+        endpoint answers block=False (JSON 429) rather than the vault APIs'
+        block=True (an HTML 403 indistinguishable from a rejected CSRF token),
+        and the client retries on it.
+        """
+        self._authenticate()
+        url = reverse("note:vault_migrate")
+        limit = int(RATE_LIMIT_VAULT_MIGRATE.split("/")[0])
+
+        for _ in range(limit):
+            self.assertEqual(self._post_json(url, {"notes": []}).status_code, 200)
+
+        response = self._post_json(url, {"notes": []})
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertFalse(response.json()["success"])
+
+    def test_limit_clears_a_full_vault_migration_in_one_window(self):
+        """The limit has to fit the worst case, not a typical vault.
+
+        A full vault (MAX_VAULT_NOTES_PER_USER notes at the content cap) is
+        split by the client's per-POST character budget, not its note count,
+        so it needs roughly one batch per seven notes. At the old 10/m the
+        11th batch was refused mid-migration and tore the vault in half.
+        """
+        notes_per_batch = 7  # 1.5M char budget / 200,000 char cap
+        worst_case_batches = -(-MAX_VAULT_NOTES_PER_USER // notes_per_batch)
+        limit = int(RATE_LIMIT_VAULT_MIGRATE.split("/")[0])
+
+        self.assertGreaterEqual(limit, worst_case_batches)
 
     def test_migrates_notes_and_index(self):
         first = make_vault_note(self.user)

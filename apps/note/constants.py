@@ -77,7 +77,12 @@ VAULT_TRASH_RETENTION_DAYS: Final[int] = 7
 RATE_LIMIT_VAULT: Final[str] = "100/h"  # vault page views
 RATE_LIMIT_VAULT_READ: Final[str] = "120/m"  # index/note reads
 RATE_LIMIT_VAULT_WRITE: Final[str] = "30/m"  # index/note writes + deletes
-RATE_LIMIT_VAULT_MIGRATE: Final[str] = "10/m"  # password-change re-encryption
+# Sized against the worst case rather than a typical one: a full vault (200
+# notes at the 200,000-char cap) re-encrypts in ~29 batches, because the
+# client's per-POST character budget splits them well before its note count
+# does. At 10/m the 11th batch was refused and the password change tore the
+# vault in half, so this has to clear the whole migration inside one window.
+RATE_LIMIT_VAULT_MIGRATE: Final[str] = "60/m"  # password-change re-encryption
 
 # ── Live notes (editable share links) ──────────────────────────────────────
 

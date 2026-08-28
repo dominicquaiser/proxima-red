@@ -18,11 +18,6 @@
   const NOTE_LIST_ENDPOINT = "/vault/notes/";
   const NOTE_MIGRATE_ENDPOINT = "/vault/migrate/";
 
-  // Migration batch bounds: each POST must stay under Django's default
-  // DATA_UPLOAD_MAX_MEMORY_SIZE (2.5MB). Note ciphertexts are capped at
-  // 200,000 chars server-side, so 8 notes / ~1.5M chars leaves ample headroom.
-  const NOTE_MIGRATE_BATCH_MAX_NOTES = 8;
-  const NOTE_MIGRATE_BATCH_MAX_CHARS = 1500000;
 
   // Read a password field honouring the '*' masking convention shared with the
   // signin/signup pages (FormUi.getMaskedInputValue); returns "" for a missing
@@ -142,25 +137,36 @@
     return { index, notes };
   };
 
-  // Split re-encrypted note payloads into POST-sized batches (see the
-  // NOTE_MIGRATE_BATCH_* bounds). Always returns at least one batch so the
-  // index payload has a final batch to ride in.
-  const batchNotePayloads = (items) => {
-    const batches = [[]];
-    let chars = 0;
-    for (const item of items) {
-      const last = batches[batches.length - 1];
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Shown once when a migration batch is throttled. The submit button is
+  // already in its busy state, but a multi-second stall with no explanation
+  // reads as a hang on the one flow the user must not interrupt.
+  const notifyMigrationThrottled = () => {
+    window.Notify.show(
+      "Re-securing your notes is taking a moment. Please keep this tab open.",
+      "info",
+    );
+  };
+
+  // POST one migration batch, waiting out a rate limit rather than failing on
+  // it. Only 429 is retried: the endpoint answers block=False specifically so
+  // this is distinguishable from a rejected CSRF token or a real error, both
+  // of which retrying would not fix. Throws once the delays are exhausted.
+  const postMigrationBatch = async (migrateUrl, payload, onThrottled) => {
+    const delays = window.VaultMigration.RETRY_DELAYS_MS;
+    for (let attempt = 0; ; attempt++) {
+      const { response, result } = await window.Http.postForm(migrateUrl, payload);
+      if (response.ok && result.success) return;
       if (
-        last.length >= NOTE_MIGRATE_BATCH_MAX_NOTES ||
-        (last.length > 0 && chars + item.content.length > NOTE_MIGRATE_BATCH_MAX_CHARS)
+        !window.VaultMigration.isRetryableMigrationStatus(response.status) ||
+        attempt >= delays.length
       ) {
-        batches.push([]);
-        chars = 0;
+        throw new Error(result.error || `HTTP ${response.status}`);
       }
-      batches[batches.length - 1].push(item);
-      chars += item.content.length;
+      if (attempt === 0 && onThrottled) onThrottled();
+      await sleep(delays[attempt]);
     }
-    return batches;
   };
 
   // Re-encrypt the recovered note vault under the new key and save it through
@@ -180,7 +186,7 @@
       indexPayload = { encrypted_data: encryptedIndex.encryptedData, iv: encryptedIndex.iv };
     }
 
-    const batches = batchNotePayloads(items);
+    const batches = window.VaultMigration.batchNotePayloads(items);
     for (let i = 0; i < batches.length; i++) {
       const isLast = i === batches.length - 1;
       if (batches[i].length === 0 && !(isLast && indexPayload)) continue;
@@ -188,10 +194,7 @@
       const payload = { notes: batches[i] };
       if (isLast && indexPayload) payload.index = indexPayload;
 
-      const { response, result } = await window.Http.postForm(migrateUrl, payload);
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || `HTTP ${response.status}`);
-      }
+      await postMigrationBatch(migrateUrl, payload, notifyMigrationThrottled);
     }
   };
 
@@ -292,9 +295,16 @@
       return true;
     } catch (migrateError) {
       console.error("Failed to re-secure note vault after password change:", migrateError);
+      // Deliberately not "re-save them": re-saving is not the recovery, and
+      // some notes will not open at all. Whichever batches did land are now
+      // under the new key while the rest (and the index) are still under the
+      // old one, which only THIS session still holds -- refreshSessionKey is
+      // skipped on this path precisely so it survives here. Copying the
+      // readable notes out before signing out is the whole of the recovery.
       window.Notify.show(
-        "Your password was changed, but your notes could not be re-secured. " +
-          "Open your note vault now and re-save them before signing out.",
+        "Your password was changed, but your notes could not all be re-secured. " +
+          "Open your note vault in this tab and copy out anything you need " +
+          "before signing out - some notes may not open.",
         "error",
       );
       return false;

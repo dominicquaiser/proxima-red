@@ -406,6 +406,29 @@ def _string_fields_or_error(
     return values, None
 
 
+def _rate_limited_json(request: HttpRequest) -> JsonResponse | None:
+    """Answer a rate-limited request with a JSON 429.
+
+    The counterpart of ``apps.auth.utils.ratelimited_response`` (conventions,
+    not code): JSON-only, no redirect branch. Used by every endpoint whose
+    client has to *parse* the refusal rather than merely notice it: the live
+    sync loop, which backs off, and the password-change migration, which
+    retries the batch. The ``block=True`` path those would otherwise take
+    hands back an HTML 403 that a fetch caller cannot tell apart from a
+    rejected CSRF token.
+
+    Args:
+        request (HttpRequest): Request annotated by a ``block=False`` limiter.
+
+    Returns:
+        JsonResponse | None: A JSON 429 when the limit was exceeded, else
+        ``None``.
+    """
+    if getattr(request, "limited", False):
+        return json_error(ERROR_RATE_LIMITED, status=429)
+    return None
+
+
 def _save_or_error(save: callable, log_message: str) -> JsonResponse:
     """Run a vault persistence callable and map failures to JSON errors.
 
@@ -703,14 +726,24 @@ class VaultMigrateView(View):
     migrated across two keys.
     """
 
+    # block=False + JSON 429, unlike the other vault APIs: a password change
+    # is the one flow that MUST finish. Once the change commits the server has
+    # replaced vault_salt, so the old key exists only in the changing page's
+    # memory -- a batch abandoned here leaves rows under two keys and no way
+    # back. The client therefore retries a 429, which means it has to be able
+    # to tell one from a rejected CSRF token; an HTML 403 is indistinguishable.
     @method_decorator(
         ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_MIGRATE, method="POST", block=True
+            key=client_ip_key, rate=RATE_LIMIT_VAULT_MIGRATE, method="POST", block=False
         )
     )
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest) -> JsonResponse:
         """Atomically apply a batch of re-encrypted notes and/or the index."""
+        limited = _rate_limited_json(request)
+        if limited:
+            return limited
+
         data, error_response = _json_body_or_error(request)
         if error_response:
             return error_response
@@ -760,24 +793,6 @@ class VaultMigrateView(View):
 # link can edit"). Unlike the vault APIs these use block=False + a JSON 429, since
 # a polling client must be able to parse the reply and back off; the vault's
 # block=True path would hand it an HTML 403.
-
-
-def _rate_limited_json(request: HttpRequest) -> JsonResponse | None:
-    """Answer a rate-limited request with a JSON 429.
-
-    The live endpoints' counterpart of ``apps.auth.utils.ratelimited_response``
-    (conventions, not code): JSON-only, no redirect branch.
-
-    Args:
-        request (HttpRequest): Request annotated by a ``block=False`` limiter.
-
-    Returns:
-        JsonResponse | None: A JSON 429 when the limit was exceeded, else
-        ``None``.
-    """
-    if getattr(request, "limited", False):
-        return json_error(ERROR_RATE_LIMITED, status=429)
-    return None
 
 
 def _live_note_or_404_json(pk) -> tuple[LiveNote | None, JsonResponse | None]:
