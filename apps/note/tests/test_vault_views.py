@@ -11,6 +11,7 @@ exercised with the AJAX header.
 import json
 import uuid
 
+from django.conf import settings
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -100,6 +101,22 @@ class NoteVaultViewTests(VaultTestCase):
         )
         self.assertContains(
             response, f'data-trash-retention-days="{VAULT_TRASH_RETENTION_DAYS}"'
+        )
+
+    def test_vault_page_hands_the_client_the_session_lifetime(self):
+        """The cross-tab key copy expires against the real session lifetime.
+
+        The note vault mirrors the vault key into localStorage, which is
+        origin-scoped: a sign-out on the main site or the pass subdomain
+        cannot clear it. The copy therefore ages out on its own, and the
+        window has to come from the server so it cannot drift from the
+        session it is tied to.
+        """
+        self._authenticate()
+        response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
+
+        self.assertContains(
+            response, f'data-session-max-age="{settings.SESSION_COOKIE_AGE}"'
         )
 
     def test_vault_page_renders_the_session_expiry_modal(self):

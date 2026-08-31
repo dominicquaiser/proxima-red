@@ -18,7 +18,8 @@ const vm = require("node:vm");
 
 const STATIC_DIR = path.join(__dirname, "..", "..", "static");
 
-function createSessionStorageStub() {
+/** Minimal Storage stand-in; backs both the sessionStorage and localStorage stubs. */
+function createWebStorageStub() {
   const store = new Map();
   return {
     getItem: (key) => (store.has(key) ? store.get(key) : null),
@@ -34,7 +35,10 @@ function createSessionStorageStub() {
 function loadCryptoModules() {
   global.window = globalThis;
   global.document = { addEventListener: () => {} };
-  global.sessionStorage = createSessionStorageStub();
+  global.sessionStorage = createWebStorageStub();
+  // The note vault mirrors the vault key here for sibling tabs; the passwd
+  // vault never touches it. Both paths are exercised, so it must exist.
+  global.localStorage = createWebStorageStub();
 
   for (const file of ["shared/js/crypto.js", "auth/js/auth-crypto.js"]) {
     const source = fs.readFileSync(path.join(STATIC_DIR, file), "utf8");
@@ -46,6 +50,7 @@ function loadCryptoModules() {
     CryptoCore: window.CryptoCore,
     AuthCrypto: window.AuthCrypto,
     sessionStorage: global.sessionStorage,
+    localStorage: global.localStorage,
   };
 }
 

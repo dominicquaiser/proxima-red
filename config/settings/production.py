@@ -30,6 +30,24 @@ if SECRET_KEY in INSECURE_SECRET_KEYS:
     )
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")  # noqa: F405
+
+# The three tool origins. docs/deployment.md marks all three prod-required,
+# but base.py reads them with a localhost fallback, so an unset one used to
+# boot fine and then break the host dispatch silently: apps.core.hosts
+# compares the request host against these, so a stale NOTE_SITE_URL means
+# is_note_site() never matches and the whole note tool disappears (the editor
+# at /, /<uuid>/ retrieves, the vault dispatch, every /live/ page 404s), while
+# robots.txt and sitemap.xml serve the main-site variant on every host.
+#
+# Re-read rather than defaulted, and deliberately re-read to the SAME values
+# base.py already resolved from the environment: CONTENT_SECURITY_POLICY is
+# built at base.py import time from these, so assigning anything different
+# here would leave the CSP pointing at the old origins. Single-domain setups
+# set all three to the same URL (see docs/deployment.md).
+SITE_URL = env("SITE_URL")  # noqa: F405
+PASS_SITE_URL = env("PASS_SITE_URL")  # noqa: F405
+NOTE_SITE_URL = env("NOTE_SITE_URL")  # noqa: F405
+
 DATABASES = {"default": env.db("DATABASE_URL")}  # noqa: F405
 # Reuse DB connections across requests (default 0 opens a new one each time) and
 # drop ones that died between requests, so bursts of share traffic don't pay the

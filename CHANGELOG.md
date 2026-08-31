@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`[note·]` a password change no longer tears the note vault in half**: the client re-encrypts the vault in batches, but `/vault/migrate/` allowed only 10/min against the ~29 batches a full vault needs, so the 11th was refused mid-flight. Because the change had already rotated `vault_salt`, the old key survived only in that page's memory and the abandoned rows became unrecoverable — and with the index (written last) still under the old key, the whole vault failed to open. The endpoint now answers a parseable JSON 429, the client retries it, batches are larger, and the limit clears a full vault in one window.
 
+- **`[note·]` the note vault's cross-tab key no longer lingers on disk indefinitely**: the key is mirrored into `localStorage` so sibling tabs can reuse it, but that store is origin-scoped, so only a sign-out on the note host itself cleared it — signing out on the main site or the pass subdomain left it behind. It now carries an expiry tied to `SESSION_COOKIE_AGE` (refreshed on use, server-supplied so the two can't drift) and is cleared on any 401 from a vault API.
+- **Production requires `SITE_URL`, `PASS_SITE_URL` and `NOTE_SITE_URL`**: `docs/deployment.md` already marked all three prod-required, but an unset one silently fell back to `http://localhost:8000`, and since host dispatch compares the request host against them the affected tool simply vanished — the note editor, `/<uuid>/` retrieves, the vault dispatch and every `/live/` page 404ing, with `robots.txt`/`sitemap.xml` serving the main-site variant everywhere. Deployments now fail fast instead.
+
 ### Changed
 
 - Static assets reorganized into per-tool folders (`static/{shared,core,auth,passwd,note}/{css,js}/`).

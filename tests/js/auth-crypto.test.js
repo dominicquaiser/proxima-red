@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 
 const { loadCryptoModules, base64ByteLength, flipFirstByte, cryptoError } = require("./helpers");
 
-const { AuthCrypto, sessionStorage } = loadCryptoModules();
+const { AuthCrypto, sessionStorage, localStorage } = loadCryptoModules();
 
 // The production default is 100,000 iterations; derivation tests pass a low
 // count through the public `iterations` parameter to keep the suite fast.
@@ -363,5 +363,159 @@ describe("consumeVaultKeyFromFragment", () => {
     assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), false);
     assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), key);
     assert.deepEqual(replaceCalls, []);
+  });
+});
+
+describe("cross-tab vault key mirror (note vault)", () => {
+  const MIRROR_KEY = "noteVaultMasterKey";
+  const SESSION_KEY = AuthCrypto.STORAGE_KEYS.masterKey;
+  const HALF_HOUR_MS = 30 * 60 * 1000;
+
+  function reset() {
+    sessionStorage.clear();
+    localStorage.clear();
+  }
+
+  /** Plant a mirrored key as if written `ageMs` ago. */
+  function plantMirror(keyBase64, ageMs) {
+    localStorage.setItem(
+      MIRROR_KEY,
+      JSON.stringify({ key: keyBase64, savedAt: Date.now() - ageMs }),
+    );
+  }
+
+  test("mirrors this tab's key so a sibling tab can reuse it", async () => {
+    reset();
+    sessionStorage.setItem(SESSION_KEY, "AAAA");
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    });
+
+    assert.equal(resolved, "AAAA");
+    const stored = JSON.parse(localStorage.getItem(MIRROR_KEY));
+    assert.equal(stored.key, "AAAA");
+    assert.equal(typeof stored.savedAt, "number");
+  });
+
+  test("a sibling tab with no session copy adopts the fresh mirror", async () => {
+    reset();
+    plantMirror("BBBB", 60 * 1000);
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    });
+
+    assert.equal(resolved, "BBBB");
+  });
+
+  test("discards and deletes a mirror older than the session lifetime", async () => {
+    // The whole point: a sign-out on another origin cannot reach this copy,
+    // so it has to age out on its own rather than sit on disk indefinitely.
+    reset();
+    plantMirror("CCCC", HALF_HOUR_MS + 1000);
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    });
+
+    assert.equal(resolved, null);
+    assert.equal(
+      localStorage.getItem(MIRROR_KEY),
+      null,
+      "expired key must be removed, not just ignored",
+    );
+  });
+
+  test("discards an unstamped value left by an older build", async () => {
+    reset();
+    localStorage.setItem(MIRROR_KEY, "DDDD"); // pre-stamp format
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    });
+
+    assert.equal(resolved, null);
+    assert.equal(localStorage.getItem(MIRROR_KEY), null);
+  });
+
+  test("refreshes the stamp on each resolve, so it ages from last use", async () => {
+    reset();
+    plantMirror("EEEE", HALF_HOUR_MS - 1000); // nearly stale
+    const before = JSON.parse(localStorage.getItem(MIRROR_KEY)).savedAt;
+
+    await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    });
+
+    const after = JSON.parse(localStorage.getItem(MIRROR_KEY)).savedAt;
+    assert.ok(after > before, "an in-use key should not expire mid-session");
+  });
+
+  test("maxAgeMs of 0 neither reads nor writes the mirror", async () => {
+    // An absent data-session-max-age must not degrade to an unbounded key.
+    reset();
+    plantMirror("FFFF", 1000);
+    sessionStorage.setItem(SESSION_KEY, "GGGG");
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: 0,
+    });
+
+    assert.equal(resolved, "GGGG", "the session copy is still authoritative");
+    assert.equal(localStorage.getItem(MIRROR_KEY), null, "the mirror is dropped, not refreshed");
+  });
+
+  test("the passwd vault (no localStorageKey) never touches localStorage", async () => {
+    reset();
+    plantMirror("HHHH", 1000);
+    sessionStorage.setItem(SESSION_KEY, "IIII");
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64();
+
+    assert.equal(resolved, "IIII");
+    assert.equal(JSON.parse(localStorage.getItem(MIRROR_KEY)).key, "HHHH", "left untouched");
+  });
+
+  test("this tab's session copy wins over the mirror", async () => {
+    reset();
+    plantMirror("STALE", 1000);
+    sessionStorage.setItem(SESSION_KEY, "FRESH");
+
+    const resolved = await AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    });
+
+    assert.equal(resolved, "FRESH");
+  });
+
+  test("clearMirroredVaultKey removes the copy", () => {
+    // Used by sign-out on this origin and by any 401 from a vault API.
+    reset();
+    plantMirror("JJJJ", 1000);
+
+    AuthCrypto.clearMirroredVaultKey(MIRROR_KEY);
+
+    assert.equal(localStorage.getItem(MIRROR_KEY), null);
+  });
+
+  test("a corrupt mirror is dropped rather than thrown on", () => {
+    reset();
+    localStorage.setItem(MIRROR_KEY, "{not json");
+
+    return AuthCrypto.resolveVaultKeyBase64({
+      localStorageKey: MIRROR_KEY,
+      maxAgeMs: HALF_HOUR_MS,
+    }).then((resolved) => {
+      assert.equal(resolved, null);
+      assert.equal(localStorage.getItem(MIRROR_KEY), null);
+    });
   });
 });

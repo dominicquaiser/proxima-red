@@ -115,6 +115,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       data-note-delete-url-base="{% url 'note:vault_note_delete' dummy_note_id %}"
       data-note-trash-url="{% url 'note:vault_note_trash' %}"
       data-trash-retention-days="{{ trash_retention_days }}"
+      data-session-max-age="{{ session_max_age_seconds }}"
       data-create-url="{% url 'note:create' %}"
       data-retrieve-url-base="{{ retrieval_url_base }}"
       data-live-create-url="{% url 'note:live_create' %}"

@@ -49,7 +49,7 @@ DUMMY_NOTE_ID: Final[str] = "00000000-0000-0000-0000-000000000000"
 RATE_LIMIT_CREATE: Final[str] = "30/h"  # 30 notes per hour per IP
 RATE_LIMIT_RETRIEVE: Final[str] = "120/h"  # 120 retrievals per hour per IP
 
-# ── Note vault (authenticated) ─────────────────────────────────────────────
+# --- Note vault (authenticated) ---
 
 # A vault note is the same kind of document as a shared note, so it shares the
 # derivation of MAX_NOTE_CONTENT_LENGTH (Base64 ciphertext of a 128KiB
@@ -84,7 +84,7 @@ RATE_LIMIT_VAULT_WRITE: Final[str] = "30/m"  # index/note writes + deletes
 # vault in half, so this has to clear the whole migration inside one window.
 RATE_LIMIT_VAULT_MIGRATE: Final[str] = "60/m"  # password-change re-encryption
 
-# ── Live notes (editable share links) ──────────────────────────────────────
+# --- Live notes (editable share links) ---
 
 # A live note is stored as an encrypted Yjs snapshot plus an append-only log
 # of encrypted Yjs updates; clients merge (the server can't read anything).
@@ -117,7 +117,7 @@ RATE_LIMIT_LIVE_READ: Final[str] = "240/m"
 RATE_LIMIT_LIVE_WRITE: Final[str] = "120/m"
 RATE_LIMIT_LIVE_SNAPSHOT: Final[str] = "12/m"
 
-# ── Live-note WebSocket transport (apps/note/consumers.py) ─────────────────
+# --- Live-note WebSocket transport (apps/note/consumers.py) ---
 
 # One encrypted y-protocols awareness update (cursor + selection + name/color
 # for the clients sharing a doc). Far above any honest payload (a single

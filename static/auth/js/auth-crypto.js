@@ -376,15 +376,34 @@
    * stay per-tab (the passwd vault) pass no `localStorageKey`. This resolves
    * the key only - callers still import it (and handle a null result as
    * "locked"). No-op-safe when `SecureSessionUnlock` is absent (returns null).
+   *
+   * The mirrored copy is stamped and expires after `maxAgeMs`, refreshed on
+   * every resolve so it ages from last use. localStorage is shared across
+   * tabs but also across sign-ins, and it is origin-scoped: signing out on
+   * the main site or the pass subdomain cannot reach the note origin's copy,
+   * so without an expiry that key would sit on disk indefinitely. The session
+   * lifetime is the right bound because the key is worthless once the session
+   * has lapsed - every vault API answers 401 and the ciphertext never
+   * arrives. A value stored without a stamp (an older build) is treated as
+   * expired, so the format change costs one unlock rather than trusting an
+   * unknown age.
+   *
    * @param {Object} [options]
    * @param {?string} [options.localStorageKey=null] Cross-tab mirror key, or
    *   null/omitted to skip localStorage entirely (per-tab behaviour).
+   * @param {number} [options.maxAgeMs=0] Lifetime of the mirrored copy. 0 or
+   *   omitted disables the mirror's read path, since an unbounded on-disk
+   *   key is exactly what this guards against.
    * @returns {Promise<string|null>} Base64 vault key, or null if still locked.
    */
-  async function resolveVaultKeyBase64({ localStorageKey = null } = {}) {
+  async function resolveVaultKeyBase64({ localStorageKey = null, maxAgeMs = 0 } = {}) {
+    // A mirror without a lifetime is the unbounded on-disk key this guards
+    // against, so a missing/zero maxAgeMs disables mirroring outright.
+    const mirrorEnabled = !!localStorageKey && maxAgeMs > 0;
+
     let stored = sessionStorage.getItem(SECURE_SESSION_STORAGE_KEYS.masterKey);
-    if (!stored && localStorageKey) {
-      stored = localStorage.getItem(localStorageKey);
+    if (!stored && mirrorEnabled) {
+      stored = readMirroredVaultKey(localStorageKey, maxAgeMs);
     }
     if (!stored && window.SecureSessionUnlock) {
       const unlocked = await window.SecureSessionUnlock.ensureSecureSession();
@@ -392,10 +411,80 @@
         stored = sessionStorage.getItem(SECURE_SESSION_STORAGE_KEYS.masterKey);
       }
     }
-    if (stored && localStorageKey) {
-      localStorage.setItem(localStorageKey, stored);
+    if (mirrorEnabled) {
+      if (stored) writeMirroredVaultKey(localStorageKey, stored);
+    } else if (localStorageKey) {
+      // Asked to mirror but given no lifetime: clear whatever is there
+      // rather than leaving a copy nothing will ever expire.
+      clearMirroredVaultKey(localStorageKey);
     }
     return stored || null;
+  }
+
+  /**
+   * Read a stamped cross-tab vault key, discarding it once it is too old.
+   *
+   * Anything unreadable, unstamped, or past `maxAgeMs` is removed rather than
+   * merely ignored: leaving a key on disk that this code has already decided
+   * not to trust is the situation being fixed.
+   *
+   * @param {string} storageKey
+   * @param {number} maxAgeMs
+   * @returns {string|null} The Base64 key, or null when absent or expired.
+   */
+  function readMirroredVaultKey(storageKey, maxAgeMs) {
+    let raw;
+    try {
+      raw = localStorage.getItem(storageKey);
+    } catch (error) {
+      return null; // storage disabled/partitioned
+    }
+    if (!raw) return null;
+
+    let entry = null;
+    try {
+      entry = JSON.parse(raw);
+    } catch (error) {
+      /* pre-stamp format, or corrupt: falls through to the discard below */
+    }
+    const fresh =
+      maxAgeMs > 0 &&
+      entry &&
+      typeof entry.key === "string" &&
+      typeof entry.savedAt === "number" &&
+      Date.now() - entry.savedAt < maxAgeMs;
+    if (!fresh) {
+      clearMirroredVaultKey(storageKey);
+      return null;
+    }
+    return entry.key;
+  }
+
+  /**
+   * Mirror a vault key for sibling tabs, stamped with the current time.
+   *
+   * @param {string} storageKey
+   * @param {string} keyBase64
+   */
+  function writeMirroredVaultKey(storageKey, keyBase64) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ key: keyBase64, savedAt: Date.now() }));
+    } catch (error) {
+      /* storage full or unavailable: the per-tab session copy still works */
+    }
+  }
+
+  /**
+   * Remove a mirrored vault key. Safe to call when storage is unavailable.
+   *
+   * @param {string} storageKey
+   */
+  function clearMirroredVaultKey(storageKey) {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch (error) {
+      /* nothing to do; the copy is unreachable either way */
+    }
   }
 
   /**
@@ -418,6 +507,7 @@
     establishSecureSession,
     consumeVaultKeyFromFragment,
     resolveVaultKeyBase64,
+    clearMirroredVaultKey,
     clearSecureSession,
     STORAGE_KEYS: SECURE_SESSION_STORAGE_KEYS,
     exportKeyToBase64,

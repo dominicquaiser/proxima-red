@@ -33,6 +33,11 @@
     const noteDeleteUrlBase = main.dataset.noteDeleteUrlBase;
     const noteTrashUrl = main.dataset.noteTrashUrl;
     const trashRetentionDays = main.dataset.trashRetentionDays;
+    // Bounds how long the cross-tab key copy may sit in localStorage. Server
+    // supplied (SESSION_COOKIE_AGE) so it cannot drift from the session it
+    // is tied to; 0 if absent, which disables the mirror rather than
+    // defaulting to some guessed lifetime.
+    const sessionMaxAgeMs = (Number(main.dataset.sessionMaxAge) || 0) * 1000;
     const dummyNoteId = main.dataset.dummyNoteId;
 
     const crumbEl = document.getElementById("vault-crumb");
@@ -293,6 +298,11 @@
      */
     const sessionIsGone = (response, mode) => {
       if (response.status === 401) {
+        // The session is over, so the mirrored key has nothing left to
+        // unlock: drop it instead of leaving it on disk for the next tab.
+        // This tab keeps its in-memory masterKey, so the sign-in-and-retry
+        // flow the modal offers still works.
+        window.AuthCrypto.clearMirroredVaultKey(NOTE_VAULT_KEY_STORAGE);
         showSessionExpired(mode);
         return true;
       }
@@ -917,6 +927,7 @@
       // helper mirrors whatever it resolves back to localStorage for siblings).
       const storedKeyBase64 = await window.AuthCrypto.resolveVaultKeyBase64({
         localStorageKey: NOTE_VAULT_KEY_STORAGE,
+        maxAgeMs: sessionMaxAgeMs,
       });
       if (!storedKeyBase64) {
         disableVault("This tab is locked. Reload the page to unlock your vault.");
@@ -935,9 +946,13 @@
     };
 
     // Clear the cross-tab vault key before sign-out navigation.
+    // Only reaches the copy when the sign-out happens on THIS origin (the
+    // sidebar's form and the unlock modal's). localStorage is origin-scoped,
+    // so a sign-out on the main site or the pass subdomain cannot clear it --
+    // which is why the stored copy also carries an expiry.
     document.querySelectorAll('form[action*="/auth/signout/"]').forEach((form) => {
       form.addEventListener("submit", () => {
-        localStorage.removeItem(NOTE_VAULT_KEY_STORAGE);
+        window.AuthCrypto.clearMirroredVaultKey(NOTE_VAULT_KEY_STORAGE);
       });
     });
 

@@ -23,6 +23,7 @@ and answer on every host instead (``LiveNotePageView`` host-gates itself).
 import json
 import logging
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -331,7 +332,7 @@ class RetrieveNoteView(View):
         return render(request, TEMPLATE_RETRIEVE, context)
 
 
-# ── Note vault (authenticated) ─────────────────────────────────────────────
+# --- Note vault (authenticated) ---
 #
 # The JSON helpers below replicate the shapes of their passwd counterparts
 # (``_session_user_or_error``, ``_decode_vault_payload``) rather than importing
@@ -475,7 +476,20 @@ class NoteVaultView(SessionAuthRequiredMixin, View):
         user = self.get_authenticated_user(request)
         user_id = user.user_id if user else request.session.get(SESSION_KEY_USER_ID)
         return render(
-            request, TEMPLATE_VAULT, _editor_context(request, user_id=user_id)
+            request,
+            TEMPLATE_VAULT,
+            _editor_context(
+                request,
+                user_id=user_id,
+                # The note vault mirrors the derived vault key into
+                # localStorage so sibling tabs on this origin can reuse it
+                # (the passwd vault keeps it per-tab in sessionStorage only).
+                # That copy has to age out, and the session's own lifetime is
+                # the honest bound: the key is useless once the session it
+                # depends on has lapsed. Handed over rather than hardcoded in
+                # JS so the two cannot drift apart.
+                session_max_age_seconds=settings.SESSION_COOKIE_AGE,
+            ),
         )
 
 
@@ -785,7 +799,7 @@ class VaultMigrateView(View):
         return _save_or_error(save, LOG_VAULT_MIGRATE_FAILED)
 
 
-# ── Live notes (editable share links) ──────────────────────────────────────
+# --- Live notes (editable share links) ---
 #
 # Anonymous JSON endpoints for the polling CRDT sync: anyone holding the link
 # may read and append (the fragment key gates *understanding* the ciphertext,

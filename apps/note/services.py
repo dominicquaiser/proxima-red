@@ -205,7 +205,7 @@ def register_note_access(pk) -> None:
     SharedNote.objects.filter(pk=pk).update(access_count=F("access_count") + 1)
 
 
-# ── Live notes (editable share links) ──────────────────────────────────────
+# --- Live notes (editable share links) ---
 
 
 def create_live_note(
@@ -544,7 +544,7 @@ def live_group_name(pk) -> str:
     return f"live.{pk}"
 
 
-# ── Note vault (authenticated) ─────────────────────────────────────────────
+# --- Note vault (authenticated) ---
 
 
 def serialize_vault_index(

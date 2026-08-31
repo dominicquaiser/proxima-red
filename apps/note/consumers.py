@@ -222,7 +222,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             connect and re-checked per frame, so a session cannot outlive it.
     """
 
-    # ── Connection lifecycle ─────────────────────────────────────────────
+    # --- Connection lifecycle ---
 
     async def connect(self):
         """Accept, run the gate checks, and join the note's group.
@@ -279,7 +279,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             self._counted_socket = False
             _cache_decr(self.sockets_key)
 
-    # ── Inbound frames ───────────────────────────────────────────────────
+    # --- Inbound frames ---
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         """Parse one inbound frame defensively.
@@ -414,7 +414,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             },
         )
 
-    # ── Group events (channel layer -> this socket) ──────────────────────
+    # --- Group events (channel layer -> this socket) ---
 
     async def live_update(self, event):
         """Forward another client's committed update.
@@ -445,7 +445,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             {"type": "awareness", "payload": event["payload"], "iv": event["iv"]}
         )
 
-    # ── Helpers ──────────────────────────────────────────────────────────
+    # --- Helpers ---
 
     async def _send_error(self, code: str):
         """Send a recoverable error frame, leaving the socket open.
