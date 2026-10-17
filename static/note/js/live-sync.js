@@ -162,7 +162,31 @@
   }
 
   /**
-  /** Create a sync client for one live note. */
+   * @typedef {Object} SyncOptions
+   * @property {Y.Doc} doc Document every update is applied to.
+   * @property {Y.Text} ytext The document's shared text, observed for replay.
+   * @property {CryptoKey} key Document key; every payload crosses the wire
+   *   encrypted under it, and the server never holds it.
+   * @property {{state: string, updates: string, snapshot: string, ws: string}} urls
+   *   Endpoints for bootstrap, poll/POST, compaction, and the socket.
+   * @property {function(Array<Object>): void} [onRemoteDelta] Y.Text delta for a
+   *   change that did not originate in this tab.
+   * @property {function(string): void} [onStatus] Status transitions, one of
+   *   loading/synced/syncing/offline/expired/error.
+   * @property {function(string, string): void} [onFatal] Terminal state: the page
+   *   freezes the editor but keeps the buffer readable.
+   * @property {function(string, string): void} [onAwareness] Encrypted presence
+   *   frame (payload, iv) relayed from a peer.
+   */
+
+  /**
+   * Create a sync client for one live note.
+   *
+   * @param {SyncOptions} opts
+   * @returns {{start: function(): Promise<boolean>, stop: function(): void,
+   *   hasPendingLocal: function(): boolean, isRealtime: function(): boolean,
+   *   sendAwareness: function(string, string): void}}
+   */
   function create(opts) {
     const {
       doc,
@@ -219,6 +243,19 @@
       return !!ws && ws.readyState === WebSocket.OPEN;
     }
 
+    // Stop awaiting the frame currently in flight, whether it was acked,
+    // refused, or abandoned. Deliberately leaves `outbox` alone: whether those
+    // updates were accepted is the caller's business, and keeping them is what
+    // lets a lost frame be retried over HTTP.
+    function clearWsFlushWait() {
+      wsFlush = null;
+      if (ackTimer) {
+        clearTimeout(ackTimer);
+        ackTimer = null;
+      }
+      flushInFlight = false;
+    }
+
     function setStatus(next) {
       if (stopped && next !== "expired" && next !== "error") return;
       if (status === next) return;
@@ -251,12 +288,7 @@
         clearTimeout(flushTimer);
         flushTimer = null;
       }
-      flushInFlight = false;
-      wsFlush = null;
-      if (ackTimer) {
-        clearTimeout(ackTimer);
-        ackTimer = null;
-      }
+      clearWsFlushWait();
       setStatus("error");
       window.Notify.show(
         "This note's edits could not be saved and syncing has stopped. " +
@@ -604,10 +636,7 @@
     function handleAck(msg) {
       if (wsFlush && msg.txn === wsFlush.txn) {
         outbox.splice(0, wsFlush.count);
-        wsFlush = null;
-        if (ackTimer) clearTimeout(ackTimer);
-        ackTimer = null;
-        flushInFlight = false;
+        clearWsFlushWait();
         pending = msg.pending;
         backoffMs = 0;
       }
@@ -622,10 +651,7 @@
     function handleErrorFrame(msg) {
       if (msg.code === "pending_tail_full") {
         // Same recovery as the HTTP 409, backoff included.
-        wsFlush = null;
-        if (ackTimer) clearTimeout(ackTimer);
-        ackTimer = null;
-        flushInFlight = false;
+        clearWsFlushWait();
         return compact().then(scheduleFlushAfterCompact);
       }
       if (isPermanentErrorCode(msg.code)) {
@@ -637,10 +663,7 @@
       if (wsFlush) {
         // rate_limited / server_error while our flush was pending: keep the
         // outbox, retry after the shared backoff.
-        wsFlush = null;
-        if (ackTimer) clearTimeout(ackTimer);
-        ackTimer = null;
-        flushInFlight = false;
+        clearWsFlushWait();
         backoffMs = nextBackoffMs(backoffMs);
         refreshStatus();
         scheduleFlushAfter(backoffMs);
@@ -728,6 +751,10 @@
         if (ws !== socket) return;
         ws = null;
         // Ack never arrived: outbox still has the updates for HTTP retry.
+        // Deliberately NOT clearWsFlushWait(): flushInFlight may belong to a
+        // flushOverWs still awaiting encryption, which has not sent anything
+        // yet and clears the flag itself once its `socket closed` throw lands.
+        // Releasing it here would let a second flush start alongside it.
         if (wsFlush) {
           wsFlush = null;
           flushInFlight = false;

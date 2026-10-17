@@ -61,6 +61,16 @@
     "start",
   ];
 
+  /**
+   * Escape the five HTML-significant characters.
+   *
+   * Used on raw author HTML so it renders as visible text instead of markup;
+   * this runs before DOMPurify rather than relying on it, so an author's
+   * `<script>` is shown, not silently dropped.
+   *
+   * @param {string} text
+   * @returns {string}
+   */
   function escapeHtml(text) {
     return text
       .replace(/&/g, "&amp;")
@@ -70,7 +80,15 @@
       .replace(/'/g, "&#39;");
   }
 
-  // The one allowed class shape: explicit fence language for highlight.js.
+  /**
+   * The one allowed class shape: an explicit fence language for highlight.js.
+   *
+   * Everything else is stripped, so `class` cannot be used to pull in page
+   * styling from a shared note.
+   *
+   * @param {string} value Candidate class attribute value.
+   * @returns {boolean}
+   */
   function isHighlightLanguageClass(value) {
     return LANGUAGE_CLASS_RE.test(value);
   }
@@ -86,7 +104,10 @@
     },
   });
 
-  /** @param {string} href */
+  /**
+   * @param {string} href
+   * @returns {boolean} True for a scheme-qualified or protocol-relative URL.
+   */
   function isAbsoluteUrl(href) {
     return ABSOLUTE_URL_RE.test(href) || href.slice(0, 2) === "//";
   }
@@ -313,6 +334,18 @@
     });
   }
 
+  /**
+   * Find a descendant by id, scanning rather than using a selector.
+   *
+   * The id comes from the note's own `#anchor` link, so it is untrusted text
+   * and cannot be spliced into a CSS selector without escaping. Comparing
+   * `element.id` sidesteps that entirely. Scoping to the container also keeps a
+   * note from scrolling to page chrome that happens to share an id.
+   *
+   * @param {Element} container
+   * @param {string} id
+   * @returns {?Element} The first match, or null.
+   */
   function findElementById(container, id) {
     let target = null;
     container.querySelectorAll("[id]").forEach(function (element) {

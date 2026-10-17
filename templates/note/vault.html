@@ -32,7 +32,6 @@ handoff from sign-in, sessionStorage, or the unlock modal).
 
     <div id="notification-container"></div>
 
-    <!-- --- Sidebar: file manager --- -->
     <aside class="sidebar" id="vault-sidebar">
       <div class="sidebar__top">
         <a href="{{ note_site_url }}/" class="header__logo">
@@ -73,7 +72,6 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </aside>
 
-    <!-- --- Topbar: breadcrumb + EDIT/PREVIEW tabs --- -->
     <header class="topbar">
       <button class="tool topbar__sidebar-toggle" type="button" id="sidebar-open-btn" title="Open sidebar">
         <span class="nicon nicon--sidebar-simple" aria-hidden="true"></span>
@@ -105,7 +103,6 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </header>
 
-    <!-- --- Editor surface --- -->
     <main
       id="main-content"
       class="editor"
@@ -142,7 +139,6 @@ handoff from sign-in, sessionStorage, or the unlock modal).
 
     <div class="meta" id="note-meta" aria-hidden="true"></div>
 
-    <!-- --- Tool rail --- -->
     <nav class="rail" aria-label="Formatting toolbar">
       <div class="rail__group">
         <button class="tool" type="button" data-action="bold" title="Bold">
@@ -207,6 +203,8 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       <div class="rail__spacer"></div>
 
       <div class="rail__group">
+        {# "save" is deliberately not a NoteEditorCore action - editor-core ignores #}
+        {# rail actions it does not know, and vault.js binds this button by id. #}
         <button class="tool" type="button" data-action="save" id="save-note-btn" title="Save to vault (Ctrl+S)">
           <span class="nicon nicon--floppy-disk" aria-hidden="true"></span>
         </button>
@@ -225,7 +223,8 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </nav>
 
-    <!-- --- Share popover (creates a regular SharedNote snapshot) --- -->
+    {# Creates a regular SharedNote snapshot under a fresh random key, byte-identical #}
+    {# to the public flow - the vault key is never involved. See share.js. #}
     <div id="share-pop" popover class="share-pop">
       <div id="share-menu">
         <div class="share-pop__title">Create share link</div>
@@ -333,7 +332,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       </div>
     </div>
 
-    <!-- --- Tree row context menu (filled by vault.js) --- -->
+    {# Served empty; vault.js openCtxMenu() builds the items per row kind. #}
     <div id="ctx-menu" class="ctx-menu hidden" role="menu"></div>
 
     {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" %}

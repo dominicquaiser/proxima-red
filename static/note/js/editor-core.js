@@ -334,12 +334,18 @@
       });
     }
 
-    // Keep the textarea scrollbar-free; the outer editor owns scrolling.
+    /** Grow the textarea to fit its content; the outer editor owns scrolling. */
     function autosize() {
       textarea.style.height = "auto";
       textarea.style.height = textarea.scrollHeight + "px";
     }
 
+    /**
+     * Repaint the character/size readout and flag it once over the byte limit.
+     *
+     * Counts UTF-8 bytes, not characters: the byte total is what the server cap
+     * applies to, so a note of mostly non-ASCII text is measured honestly.
+     */
     function updateCounter() {
       const characterCount = textarea.value.length;
       const byteCount = encoder.encode(textarea.value).length;

@@ -22,6 +22,7 @@ and answer on every host instead (``LiveNotePageView`` host-gates itself).
 
 import json
 import logging
+from collections.abc import Callable
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -97,6 +98,36 @@ from .models import LiveNote, SharedNote
 logger = logging.getLogger(__name__)
 
 
+def _ip_ratelimit(rate: str, method: str, *, block: bool = True, name: str = ""):
+    """Build the per-client-IP rate-limit decorator used by every view here.
+
+    Wraps the ``method_decorator(ratelimit(...))`` stack so each endpoint
+    declares its limit on one line instead of five.
+
+    The ``block`` choice is the meaningful part. ``block=True`` lets
+    django-ratelimit refuse the request itself, which renders ``handler403``
+    as HTML: right for the page views, where a browser is the client.
+    ``block=False`` only annotates ``request.limited``, leaving the view to
+    answer :func:`_rate_limited_json`'s JSON 429 - required wherever a fetch
+    caller must *parse* the refusal and back off, since it cannot tell an HTML
+    403 apart from a rejected CSRF token.
+
+    Args:
+        rate (str): django-ratelimit rate string, such as ``"30/h"``.
+        method (str): HTTP method the limit applies to.
+        block (bool): Whether django-ratelimit refuses the request outright.
+        name (str): Method to wrap when decorating a class; empty (the
+            default) when decorating a method directly.
+
+    Returns:
+        Callable: Decorator for a class-based view method, or for the class
+        itself when ``name`` is given.
+    """
+    return method_decorator(
+        ratelimit(key=client_ip_key, rate=rate, method=method, block=block), name=name
+    )
+
+
 def _validation_error_message(error: ValidationError) -> str:
     """Flatten a Django validation error into a user-facing message.
 
@@ -145,14 +176,19 @@ def _authenticated_note_owner(request: HttpRequest) -> User | None:
 
 
 def _editor_context(request: HttpRequest, **extra) -> dict:
-    """Build the editor context used for client-side share URL construction.
+    """Build the shared context behind every editor surface.
+
+    Serves the public editor, the vault shell, and their error re-renders: all
+    three need the absolute URL templates the client fills in with a new note's
+    id when it builds a share link.
 
     Args:
-        request (HttpRequest): Request used to construct an absolute URL.
-        **extra (Any): Additional template context values.
+        request (HttpRequest): Request used to construct absolute URLs.
+        **extra (Any): Additional template context values, merged last so a
+            caller can override any default.
 
     Returns:
-        dict[str, Any]: Editor template context.
+        dict[str, Any]: Template context.
     """
     retrieval_url_base = request.build_absolute_uri(
         reverse("note:retrieve", args=[DUMMY_NOTE_ID])
@@ -213,10 +249,7 @@ def _note_json_response(note: SharedNote) -> JsonResponse:
     )
 
 
-@method_decorator(
-    ratelimit(key=client_ip_key, rate=RATE_LIMIT_CREATE, method="POST", block=True),
-    name="dispatch",
-)
+@_ip_ratelimit(RATE_LIMIT_CREATE, "POST", name="dispatch")
 class CreateNoteView(View):
     """Create a new shared note.
 
@@ -273,10 +306,7 @@ class CreateNoteView(View):
         )
 
 
-@method_decorator(
-    ratelimit(key=client_ip_key, rate=RATE_LIMIT_RETRIEVE, method="GET", block=True),
-    name="dispatch",
-)
+@_ip_ratelimit(RATE_LIMIT_RETRIEVE, "GET", name="dispatch")
 class RetrieveNoteView(View):
     """Retrieve and display a shared note if valid and not expired.
 
@@ -430,11 +460,14 @@ def _rate_limited_json(request: HttpRequest) -> JsonResponse | None:
     return None
 
 
-def _save_or_error(save: callable, log_message: str) -> JsonResponse:
+def _save_or_error(
+    save: Callable[[], JsonResponse], log_message: str
+) -> JsonResponse:
     """Run a vault persistence callable and map failures to JSON errors.
 
     Args:
-        save (callable): Zero-argument callable performing the write.
+        save (Callable[[], JsonResponse]): Performs the write and builds the
+            success response.
         log_message (str): Log format string used for unexpected failures.
 
     Returns:
@@ -450,10 +483,7 @@ def _save_or_error(save: callable, log_message: str) -> JsonResponse:
         return json_error(ERROR_UNEXPECTED, status=500)
 
 
-@method_decorator(
-    ratelimit(key=client_ip_key, rate=RATE_LIMIT_VAULT, method="GET", block=True),
-    name="dispatch",
-)
+@_ip_ratelimit(RATE_LIMIT_VAULT, "GET", name="dispatch")
 class NoteVaultView(SessionAuthRequiredMixin, View):
     """
     The note vault: an authenticated file manager + editor for vault notes.
@@ -502,11 +532,7 @@ class VaultIndexView(View):
     ``success``) means the user has no vault index yet.
     """
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_READ, method="GET", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_READ, "GET")
     @method_decorator(require_session_auth_api)
     def get(self, request: HttpRequest) -> JsonResponse:
         """Return the current user's encrypted index (empty when unset)."""
@@ -515,11 +541,7 @@ class VaultIndexView(View):
             return error_response
         return json_ok(**(services.get_vault_index(user) or {}))
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_WRITE, method="POST", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest) -> JsonResponse:
         """Create or replace the current user's encrypted index."""
@@ -553,11 +575,7 @@ class VaultNoteCollectionView(View):
     creates a note and enforces the per-user quota.
     """
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_READ, method="GET", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_READ, "GET")
     @method_decorator(require_session_auth_api)
     def get(self, request: HttpRequest) -> JsonResponse:
         """Return all of the current user's vault notes."""
@@ -569,11 +587,7 @@ class VaultNoteCollectionView(View):
             notes=services.list_vault_notes(user, include_content=include_content)
         )
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_WRITE, method="POST", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest) -> JsonResponse:
         """Create a vault note from an encrypted payload."""
@@ -609,11 +623,7 @@ class VaultNoteDetailView(View):
     the endpoint reveals nothing about other users' note ids.
     """
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_READ, method="GET", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_READ, "GET")
     @method_decorator(require_session_auth_api)
     def get(self, request: HttpRequest, pk) -> JsonResponse:
         """Return one of the current user's vault notes."""
@@ -626,11 +636,7 @@ class VaultNoteDetailView(View):
             return json_error(ERROR_NOTE_NOT_FOUND, status=404)
         return json_ok(**services.serialize_vault_note(note))
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_WRITE, method="POST", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest, pk) -> JsonResponse:
         """Overwrite one of the current user's vault notes."""
@@ -665,11 +671,7 @@ class VaultNoteDeleteView(View):
     client's trash flow can safely retry.
     """
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_WRITE, method="POST", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest, pk) -> JsonResponse:
         """Delete the named note if it belongs to the current user."""
@@ -697,11 +699,7 @@ class VaultNoteTrashView(View):
     limit per note. Owner-scoped and idempotent, so the client can retry.
     """
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_WRITE, method="POST", block=True
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest) -> JsonResponse:
         """Set or clear the Trash flag on a batch of the user's notes."""
@@ -746,11 +744,7 @@ class VaultMigrateView(View):
     # memory -- a batch abandoned here leaves rows under two keys and no way
     # back. The client therefore retries a 429, which means it has to be able
     # to tell one from a rejected CSRF token; an HTML 403 is indistinguishable.
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_VAULT_MIGRATE, method="POST", block=False
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_VAULT_MIGRATE, "POST", block=False)
     @method_decorator(require_session_auth_api)
     def post(self, request: HttpRequest) -> JsonResponse:
         """Atomically apply a batch of re-encrypted notes and/or the index."""
@@ -851,12 +845,7 @@ def _non_negative_int(value) -> int | None:
     return value
 
 
-@method_decorator(
-    ratelimit(
-        key=client_ip_key, rate=RATE_LIMIT_LIVE_CREATE, method="POST", block=False
-    ),
-    name="dispatch",
-)
+@_ip_ratelimit(RATE_LIMIT_LIVE_CREATE, "POST", block=False, name="dispatch")
 class CreateLiveNoteView(View):
     """Create a live note from a client-encrypted seed snapshot.
 
@@ -901,10 +890,7 @@ class CreateLiveNoteView(View):
         return json_ok(note_id=str(note.id), expires_at=note.expires_at.isoformat())
 
 
-@method_decorator(
-    ratelimit(key=client_ip_key, rate=RATE_LIMIT_LIVE_PAGE, method="GET", block=True),
-    name="dispatch",
-)
+@_ip_ratelimit(RATE_LIMIT_LIVE_PAGE, "GET", name="dispatch")
 class LiveNotePageView(View):
     """Serve the live editor page for an active live note.
 
@@ -950,11 +936,7 @@ class LiveNotePageView(View):
 class LiveNoteStateView(View):
     """Bootstrap payload for a joining client: snapshot plus pending tail."""
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_READ, method="GET", block=False
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_LIVE_READ, "GET", block=False)
     def get(self, request: HttpRequest, pk) -> JsonResponse:
         """Return the full encrypted sync state."""
         limited = _rate_limited_json(request)
@@ -969,11 +951,7 @@ class LiveNoteStateView(View):
 class LiveNoteUpdatesView(View):
     """The sync loop: poll updates after a cursor, append merged updates."""
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_READ, method="GET", block=False
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_LIVE_READ, "GET", block=False)
     def get(self, request: HttpRequest, pk) -> JsonResponse:
         """Return updates newer than ``?since=``, resyncing pruned cursors."""
         limited = _rate_limited_json(request)
@@ -988,11 +966,7 @@ class LiveNoteUpdatesView(View):
 
         return json_ok(**services.live_updates_since(note, since))
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_WRITE, method="POST", block=False
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_LIVE_WRITE, "POST", block=False)
     def post(self, request: HttpRequest, pk) -> JsonResponse:
         """Append one client-merged encrypted update to the note's log."""
         limited = _rate_limited_json(request)
@@ -1040,11 +1014,7 @@ class LiveNoteUpdatesView(View):
 class LiveNoteSnapshotView(View):
     """Accept a client's compacted snapshot and prune the covered log."""
 
-    @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_LIVE_SNAPSHOT, method="POST", block=False
-        )
-    )
+    @_ip_ratelimit(RATE_LIMIT_LIVE_SNAPSHOT, "POST", block=False)
     def post(self, request: HttpRequest, pk) -> JsonResponse:
         """Store the re-encrypted snapshot; first valid compactor wins."""
         limited = _rate_limited_json(request)

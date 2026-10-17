@@ -24,6 +24,12 @@
   const COUNTDOWN_INTERVAL_MS = 1000;
   const EDITOR_PLACEHOLDER = "# Write your markdown here";
 
+  /**
+   * Format a remaining span as "2d 5h 3m 10s", dropping leading zero units.
+   *
+   * @param {number} remainingMs
+   * @returns {string}
+   */
   function expiryText(remainingMs) {
     const { days, hours, minutes, seconds } = window.TimeFmt.breakdown(remainingMs);
     const parts = [];
@@ -33,6 +39,13 @@
     return parts.join(" ");
   }
 
+  /**
+   * Boot the live-note page: adopt the document key, bind the Y.Doc to the
+   * editor, then start sync, presence, and the expiry countdown.
+   *
+   * Returns early (leaving the page in a terminal state) whenever the key is
+   * missing, unusable, or the initial sync bootstrap fails.
+   */
   async function initLiveNote() {
     const main = document.getElementById("main-content");
     const textarea = document.getElementById("note-content");
@@ -52,7 +65,17 @@
       statusPill.className = "live-status live-status--" + status;
     }
 
-    // Freeze editing/sync while leaving the buffer readable/copyable.
+    /**
+     * Freeze editing and sync while leaving the buffer readable and copyable.
+     *
+     * The text may exist nowhere else, so an expired or broken note stops
+     * accepting edits rather than clearing or navigating away from them.
+     * Idempotent: the first caller wins, so a later expiry cannot overwrite the
+     * error that actually stopped the session.
+     *
+     * @param {"expired"|"error"} kind
+     * @param {string} [message] Shown as a toast when given.
+     */
     function enterTerminalState(kind, message) {
       if (terminal) return;
       terminal = true;
@@ -103,9 +126,9 @@
 
     // Undo/redo lives in Yjs, not the textarea: only "local" transactions are
     // undoable (remote edits never are), and Yjs rebases undo items across
-    // interleaved remote changes. The reason the native textarea stack
-    // (corrupted by setRangeText remote splices) is suppressed wholesale via
-    // the `history` handle below.
+    // interleaved remote changes. That is also why the native textarea stack is
+    // suppressed wholesale through the `history` handle passed to editor-core
+    // below: remote splices land via setRangeText, which corrupts that stack.
     const undoManager = new window.Y.UndoManager(ytext, {
       trackedOrigins: new Set(["local"]),
     });
@@ -122,11 +145,25 @@
       poppedCursor = event.stackItem.meta.get("cursor") || null;
     });
 
+    /**
+     * Turn a stored relative position back into a current offset.
+     *
+     * @param {Object} relative Y relative position captured when the undo item
+     *   was pushed.
+     * @param {number} fallback Used when the position no longer resolves, e.g.
+     *   a peer deleted the text it pointed at.
+     * @returns {number}
+     */
     function resolveOffset(relative, fallback) {
       const abs = window.Y.createAbsolutePositionFromRelativePosition(relative, doc);
       return abs && abs.type === ytext ? abs.index : fallback;
     }
 
+    /**
+     * Run one undo or redo and restore the selection it was recorded with.
+     *
+     * @param {"undo"|"redo"} kind
+     */
     function runHistory(kind) {
       if (terminal) return;
       poppedCursor = null;
@@ -167,6 +204,11 @@
     const encoder = new TextEncoder();
     let warnedTooLarge = false;
 
+    /**
+     * Warn once per crossing when the document passes the plaintext limit.
+     *
+     * @param {string} value Current buffer contents.
+     */
     function checkSize(value) {
       const over = encoder.encode(value).length > sizeLimitBytes;
       // Re-arms when the note drops back under, so a user who trims and then
@@ -246,6 +288,7 @@
 
     const expiresAtMs = Date.parse(main.dataset.expiresAt);
 
+    /** Repaint the countdown, entering the terminal expired state at zero. */
     function updateExpiryCountdown() {
       if (!countdown || Number.isNaN(expiresAtMs)) return;
       const remainingMs = expiresAtMs - Date.now();

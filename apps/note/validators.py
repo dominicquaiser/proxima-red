@@ -72,6 +72,39 @@ def _decode_base64(value: str, label: str = "Value") -> bytes:
         )
 
 
+def _check_encrypted_blob(
+    value: str, *, max_length: int, label: str, empty_error: ValidationError
+) -> None:
+    """Apply the shared rule for an always-encrypted field: present, capped, Base64.
+
+    Vault notes, the vault index, live snapshots and live update payloads are
+    all ciphertext the client produced, so all four validate identically and
+    differ only in their cap and their wording. ``SharedNote.content`` is the
+    exception and is not routed through here: a plain-text share must *not* be
+    required to be Base64, which is why that rule lives in ``clean()``.
+
+    The empty-value error is passed in already built, so each caller keeps a
+    literal ``_("...")`` string that ``makemessages`` can extract.
+
+    Args:
+        value (str): Base64 ciphertext to validate.
+        max_length (int): Maximum permitted number of characters.
+        label (str): Human-readable field label used in the error messages.
+        empty_error (ValidationError): Raised when the value is blank.
+
+    Returns:
+        None: The value is accepted.
+
+    Raises:
+        ValidationError: If the value is empty, whitespace-only, over
+            ``max_length``, or not strict Base64.
+    """
+    if not value or not value.strip():
+        raise empty_error
+    _check_max_length(value, max_length, label, "content_too_long")
+    _decode_base64(value, f"Encrypted {label[0].lower()}{label[1:]}")
+
+
 def validate_note_content(value: str) -> None:
     """Validate a note body: non-empty and within the abuse cap.
 
@@ -196,12 +229,14 @@ def validate_vault_note_content(value: str) -> None:
         ValidationError: If the value is empty, longer than
             ``MAX_VAULT_NOTE_CONTENT_LENGTH``, or not strict Base64.
     """
-    if not value or not value.strip():
-        raise ValidationError(_("Note content cannot be empty."), code="empty_content")
-    _check_max_length(
-        value, MAX_VAULT_NOTE_CONTENT_LENGTH, "Note content", "content_too_long"
+    _check_encrypted_blob(
+        value,
+        max_length=MAX_VAULT_NOTE_CONTENT_LENGTH,
+        label="Note content",
+        empty_error=ValidationError(
+            _("Note content cannot be empty."), code="empty_content"
+        ),
     )
-    _decode_base64(value, "Encrypted note content")
 
 
 def validate_live_snapshot(value: str) -> None:
@@ -221,14 +256,14 @@ def validate_live_snapshot(value: str) -> None:
         ValidationError: If the value is empty, longer than
             ``MAX_LIVE_SNAPSHOT_LENGTH``, or not strict Base64.
     """
-    if not value or not value.strip():
-        raise ValidationError(
+    _check_encrypted_blob(
+        value,
+        max_length=MAX_LIVE_SNAPSHOT_LENGTH,
+        label="Live note snapshot",
+        empty_error=ValidationError(
             _("Live note snapshot cannot be empty."), code="empty_content"
-        )
-    _check_max_length(
-        value, MAX_LIVE_SNAPSHOT_LENGTH, "Live note snapshot", "content_too_long"
+        ),
     )
-    _decode_base64(value, "Encrypted live note snapshot")
 
 
 def validate_live_update_payload(value: str) -> None:
@@ -244,14 +279,14 @@ def validate_live_update_payload(value: str) -> None:
         ValidationError: If the value is empty, longer than
             ``MAX_LIVE_UPDATE_LENGTH``, or not strict Base64.
     """
-    if not value or not value.strip():
-        raise ValidationError(
+    _check_encrypted_blob(
+        value,
+        max_length=MAX_LIVE_UPDATE_LENGTH,
+        label="Live note update",
+        empty_error=ValidationError(
             _("Live note update cannot be empty."), code="empty_content"
-        )
-    _check_max_length(
-        value, MAX_LIVE_UPDATE_LENGTH, "Live note update", "content_too_long"
+        ),
     )
-    _decode_base64(value, "Encrypted live note update")
 
 
 def validate_vault_index_data(value: str) -> None:
@@ -267,11 +302,11 @@ def validate_vault_index_data(value: str) -> None:
         ValidationError: If the value is empty, longer than
             ``MAX_VAULT_INDEX_LENGTH``, or not strict Base64.
     """
-    if not value or not value.strip():
-        raise ValidationError(
+    _check_encrypted_blob(
+        value,
+        max_length=MAX_VAULT_INDEX_LENGTH,
+        label="Vault index data",
+        empty_error=ValidationError(
             _("Vault index data cannot be empty."), code="empty_content"
-        )
-    _check_max_length(
-        value, MAX_VAULT_INDEX_LENGTH, "Vault index data", "content_too_long"
+        ),
     )
-    _decode_base64(value, "Encrypted vault index data")

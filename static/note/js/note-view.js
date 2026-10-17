@@ -18,6 +18,11 @@
     element.classList.remove(HIDDEN_CLASS);
   }
 
+  /**
+   * Save the decrypted markdown as a local file, named from its first heading.
+   *
+   * @param {string} source
+   */
   function downloadMarkdown(source) {
     const markdownBlob = new Blob([source], { type: "text/markdown" });
     const objectUrl = URL.createObjectURL(markdownBlob);
@@ -31,6 +36,12 @@
     URL.revokeObjectURL(objectUrl);
   }
 
+  /**
+   * Format a remaining span as "2d 5h 3m 10s", dropping leading zero units.
+   *
+   * @param {number} remainingMs
+   * @returns {string}
+   */
   function expiryText(remainingMs) {
     const { days, hours, minutes, seconds } = window.TimeFmt.breakdown(remainingMs);
     const parts = [];
@@ -42,6 +53,13 @@
     return parts.join(" ");
   }
 
+  /**
+   * Render a shared note: decrypt it if needed, then wire the download, copy,
+   * and expiry-countdown controls.
+   *
+   * The action controls are only bound once the note is on screen, so a failed
+   * decrypt cannot leave buttons that would copy or download nothing.
+   */
   async function initNoteView() {
     const dataElement = document.getElementById("note-data");
     if (!dataElement) return;
@@ -69,6 +87,7 @@
       show(errorState);
     }
 
+    /** @param {string} source Decrypted, or plain when the note was never encrypted. */
     function showDocument(source) {
       markdownSource = source;
       window.NoteMarkdown.renderInto(doc, source);
@@ -77,6 +96,12 @@
       if (actions) show(actions);
     }
 
+    /**
+     * Show the note, decrypting with the fragment key when it is encrypted.
+     *
+     * @returns {Promise<boolean>} False when an error state was shown instead,
+     *   which the caller uses to skip wiring the note actions.
+     */
     async function renderNote() {
       if (!noteData.is_encrypted) {
         showDocument(noteData.content);
@@ -94,7 +119,7 @@
       if (!keyBase64) {
         showError(
           "The decryption key is missing from the link. Make sure you open " +
-          "the complete link, including everything after the # character.",
+            "the complete link, including everything after the # character.",
         );
         return false;
       }
@@ -110,7 +135,7 @@
         if (error && error.code === "AUTHENTICATION_FAILED") {
           showError(
             "This link's key does not match the stored note. The link may be " +
-            "incomplete, or the data may have been tampered with.",
+              "incomplete, or the data may have been tampered with.",
           );
         } else {
           showError("Decryption failed: " + (error.message || "unknown error"));
@@ -135,6 +160,7 @@
 
     const expiresAtMs = Date.parse(noteData.expires_at);
 
+    /** Repaint the countdown, stopping the interval once it runs out. */
     function updateExpiryCountdown() {
       const remainingMs = expiresAtMs - Date.now();
       if (Number.isNaN(remainingMs)) {

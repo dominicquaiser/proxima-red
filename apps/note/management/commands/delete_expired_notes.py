@@ -22,7 +22,7 @@ from apps.note import services
 
 
 class Command(BaseCommand):
-    """Delete expired shared notes and live notes.
+    """Delete expired shared notes, live notes, and long-trashed vault notes.
 
     The command supports dry-run previews, configurable delete batches, and
     verbosity-controlled output.
@@ -32,7 +32,8 @@ class Command(BaseCommand):
     """
 
     help = (
-        "Deletes shared notes and live notes that have passed their " "expiration date."
+        "Deletes shared notes and live notes that have passed their expiration "
+        "date, and vault notes trashed longer than the retention window."
     )
 
     def add_arguments(self, parser):
@@ -191,8 +192,9 @@ class Command(BaseCommand):
         for row in queryset[:10]:
             self.stdout.write(sample_line(row))
 
-        if queryset.count() > 10:
-            self.stdout.write(f"  ... and {queryset.count() - 10} more")
+        total_count = queryset.count()
+        if total_count > 10:
+            self.stdout.write(f"  ... and {total_count - 10} more")
 
         self.stdout.write(self.style.WARNING("--- End Sample Records ---\n"))
 

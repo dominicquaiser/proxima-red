@@ -49,8 +49,17 @@
   /**
    * Deterministic anonymous identity for a Yjs clientID.
    *
+   * Both fields read the hash's HIGH bits. A multiplicative hash barely mixes
+   * its low bits, so the obvious `hash % N` would cluster neighbouring
+   * clientIDs onto the same name and colour. Instead the top 16 bits are scaled
+   * into range as a fixed-point multiply (`(top16 * N) >>> 16`), and the colour
+   * takes the top 3 bits directly.
+   *
+   * Two separate multipliers keep name and colour independent, so peers do not
+   * end up with a fixed name-to-colour pairing.
+   *
    * @param {number} clientId
-   * @returns {{name: string, colorIndex: number}}
+   * @returns {{name: string, colorIndex: number}} colorIndex is 0..PALETTE_SIZE-1.
    */
   function identityFor(clientId) {
     const nameHash = Math.imul(clientId, 0x9e3779b1) >>> 0;
@@ -105,7 +114,26 @@
     return { anchor: anchor, head: head };
   }
 
-  /** Wire presence for one live-note session. */
+  /**
+   * @typedef {Object} PresenceOptions
+   * @property {Y.Doc} doc Its clientID seeds this session's identity.
+   * @property {Y.Text} ytext Text the cursor positions are relative to.
+   * @property {HTMLTextAreaElement} textarea Source of the local selection.
+   * @property {HTMLElement} editor Scroll container; carets outside it are culled.
+   * @property {CryptoKey} key Document key: awareness frames are ciphertext to
+   *   the relaying server, like every other payload.
+   * @property {function(string, string): void} send Hands one encrypted frame
+   *   (payload, iv) to the transport. A no-op while the socket is down.
+   */
+
+  /**
+   * Wire presence for one live-note session.
+   *
+   * @param {PresenceOptions} opts
+   * @returns {{awareness: Object, applyRemote: function(string, string): Promise<void>,
+   *   announce: function(): Promise<void>, shutdown: function(): void,
+   *   destroy: function(): void}}
+   */
   function create(opts) {
     const { doc, ytext, textarea, editor, send } = opts;
     const key = opts.key;
@@ -135,6 +163,14 @@
     let renderQueued = false;
     let lastCursorKey = "";
 
+    /**
+     * Encrypt and send this session's awareness state.
+     *
+     * Serialized against itself: encryption is async, and two overlapping
+     * announcements could otherwise reach peers out of order and leave a stale
+     * cursor painted. A request arriving mid-flight collapses into one trailing
+     * re-send, since only the latest state is worth transmitting.
+     */
     async function announce() {
       if (destroyed) return;
       if (announceInFlight) {
@@ -147,6 +183,9 @@
         const payload = await window.CryptoCore.encryptBytesWithKey(update, key);
         send(payload.encryptedData, payload.iv);
       } catch (error) {
+        // Presence is ephemeral and re-announced every REANNOUNCE_MS, so a
+        // failed frame needs no recovery and must not raise a toast: it would
+        // fire repeatedly for something the reader cannot act on.
       } finally {
         announceInFlight = false;
         if (announceAgain) {
@@ -156,6 +195,7 @@
       }
     }
 
+    /** Coalesce cursor movement into at most one frame per CURSOR_ANNOUNCE_MS. */
     function throttledAnnounce() {
       if (destroyed || announceTimer) return;
       announceTimer = setTimeout(function () {
@@ -164,6 +204,12 @@
       }, CURSOR_ANNOUNCE_MS);
     }
 
+    /**
+     * Publish the local selection, or null when the textarea is not focused.
+     *
+     * Skips the announcement when the encoded positions are unchanged, so
+     * arrow-key repeats within one character do not each cost a frame.
+     */
     function updateLocalCursor() {
       if (destroyed) return;
       let cursor = null;
@@ -192,6 +238,12 @@
       announce();
     }, REANNOUNCE_MS);
 
+    /**
+     * Decrypt one peer frame and merge it into the awareness state.
+     *
+     * @param {string} payload Base64 ciphertext.
+     * @param {string} iv Base64 IV.
+     */
     async function applyRemote(payload, iv) {
       if (destroyed) return;
       try {
@@ -215,9 +267,16 @@
     /**
      * Measure one remote cursor in the hidden mirror.
      *
-     * @param {number} anchor
-     * @param {number} head
-     * @returns {{caret: ?DOMRect, lines: DOMRect[]}}
+     * The mirror replicates the textarea's layout, so measuring a zero-width
+     * marker span inside it yields the geometry the browser will not expose for
+     * a textarea's own caret. The marker is placed before or after the selected
+     * text depending on which end `head` sits at, so a peer's caret is drawn at
+     * the end they are actually extending from.
+     *
+     * @param {number} anchor Selection origin, in UTF-16 code units.
+     * @param {number} head Selection end the caret sits at.
+     * @returns {{caret: ?DOMRect, lines: DOMRect[]}} Caret box, plus one box per
+     *   visual line of the selection (empty for a collapsed cursor).
      */
     function measureCursor(anchor, head) {
       const value = textarea.value;
@@ -249,6 +308,13 @@
       };
     }
 
+    /**
+     * Repaint every peer caret and selection into the overlay layer.
+     *
+     * Rebuilt wholesale rather than diffed: one remote edit can move every
+     * position at once, and the peer count is capped server-side. Boxes outside
+     * the editor's viewport are dropped so a scrolled-away peer leaves nothing.
+     */
     function render() {
       if (destroyed) return;
       layer.replaceChildren();
@@ -300,6 +366,15 @@
       mirror.replaceChildren();
     }
 
+    /**
+     * Clamp a peer-supplied colour into the palette.
+     *
+     * The value comes from another client, so it is treated as untrusted input
+     * rather than assumed to be one of ours.
+     *
+     * @param {*} color
+     * @returns {number} 0..PALETTE_SIZE-1, or 0 for anything non-numeric.
+     */
     function normalizeColorIndex(color) {
       return typeof color === "number" ? ((color % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE : 0;
     }

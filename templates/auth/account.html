@@ -61,7 +61,11 @@
           <div class="card__title">Account Information</div>
         </div>
         <div class="card__body">
-          {# user_obj (not user/current_user): Django's auth context-processor is intentionally off, so {{ user }} would render blank — see apps/auth/context_processors.py #}
+          {% comment %} AccountView passes the account holder explicitly as
+          user_obj (apps/auth/views.py). Django's own auth context-processor is
+          intentionally not enabled, so {{ user }} renders blank here; the
+          project-wide alternative is {{ current_user }}, from
+          apps/auth/context_processors.py. {% endcomment %}
           <div class="acct-info">
             <div class="acct-info__row">
               <span class="acct-info__key">User ID</span>

@@ -115,6 +115,7 @@
     const confirmDiscard = () =>
       !isDirty || window.confirm("Discard unsaved changes to this note?");
 
+    /** Repaint the breadcrumb as "/folder/name" for the open buffer. */
     const renderCrumb = () => {
       crumbEl.replaceChildren();
       const currentEntry = index.notes.find((note) => note.id === currentNoteId);
@@ -128,6 +129,7 @@
       crumbEl.appendChild(document.createTextNode(currentName));
     };
 
+    /** Build a `nicon--<name>` span, always aria-hidden: icons are decorative. */
     const icon = (name, extraClass) => {
       const span = document.createElement("span");
       span.className = "nicon nicon--" + name + (extraClass ? " " + extraClass : "");
@@ -135,6 +137,13 @@
       return span;
     };
 
+    /**
+     * Build the "..." button that opens a row's context menu.
+     *
+     * @param {"note"|"trash"|"folder"|"unreadable"} kind Selects which menu
+     *   openCtxMenu builds; the same row type gets a different menu in Trash.
+     * @param {string} id Note or folder id.
+     */
     const rowActionsButton = (kind, id) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -146,6 +155,12 @@
       return button;
     };
 
+    /**
+     * Build one note row for the sidebar.
+     *
+     * @param {Object} note Index entry.
+     * @param {"note"|"trash"} kind Which section the row is being built for.
+     */
     const buildFileRow = (note, kind) => {
       const row = document.createElement("button");
       row.type = "button";
@@ -161,6 +176,14 @@
       return row;
     };
 
+    /**
+     * Build a row for a server row that would not decrypt.
+     *
+     * There is no name to show - it lives in ciphertext this key cannot open -
+     * so the row is labelled with a truncated id instead.
+     *
+     * @param {string} id
+     */
     const buildUnreadableRow = (id) => {
       const row = document.createElement("button");
       row.type = "button";
@@ -176,6 +199,14 @@
       return row;
     };
 
+    /**
+     * Build a collapsible folder section.
+     *
+     * Open state is mirrored into `openFolders` so it survives renderTree()
+     * rebuilding the entire sidebar from scratch.
+     *
+     * @param {Object} folder Entry from visibleTree(), notes included.
+     */
     const buildFolderDetails = (folder) => {
       const details = document.createElement("details");
       details.dataset.folderId = folder.id;
@@ -201,6 +232,13 @@
       return details;
     };
 
+    /**
+     * Rebuild the whole sidebar from the current index, search term, and
+     * unreadable-row set.
+     *
+     * Cheap enough to redo wholesale after every change, which keeps the
+     * optimistic-then-roll-back model in commitIndexChange a single call.
+     */
     const renderTree = () => {
       const tree = Index.visibleTree(Index.filter(index, searchTerm));
       treeEl.replaceChildren();
@@ -240,9 +278,15 @@
       renderCrumb();
     };
 
-    // `message` is optional: the session-expiry path locks the vault but lets
-    // its own modal carry the explanation, so a toast alongside would only
-    // compete with it.
+    /**
+     * Put the vault into read-only mode.
+     *
+     * `message` is optional: the session-expiry path locks the vault but lets
+     * its own modal carry the explanation, so a toast alongside would only
+     * compete with it.
+     *
+     * @param {string} [message] Toast to show, when the caller has no modal.
+     */
     const disableVault = (message) => {
       readOnly = true;
       if (saveBtn) saveBtn.disabled = true;
@@ -261,6 +305,11 @@
     //
     // `mode` is "retry" (the editor is intact; sign in and try again) or
     // "reload" (the vault never loaded; sign in and reload the page).
+    /**
+     * Raise the sign-in prompt.
+     *
+     * @param {"retry"|"reload"} mode
+     */
     const showSessionExpired = (mode) => {
       if (!sessionModal) {
         // No modal in the DOM: still say something useful rather than nothing.
@@ -317,7 +366,14 @@
       sessionReloadBtn.addEventListener("click", () => window.location.reload());
     }
 
-    // Encrypt and save the current index.
+    /**
+     * Encrypt and save the current index.
+     *
+     * Every failure path reports rather than throws, because callers use the
+     * result to decide whether to roll their optimistic render back.
+     *
+     * @returns {Promise<boolean>} True when the server accepted the index.
+     */
     const persistIndex = async () => {
       if (!masterKey || readOnly) return false;
       try {
@@ -341,7 +397,16 @@
       }
     };
 
-    // Optimistically apply an index change, then roll back on save failure.
+    /**
+     * Apply an index change on screen immediately, then roll it back if the
+     * save fails.
+     *
+     * Every index operation is non-mutating, so the rollback is just restoring
+     * the previous object.
+     *
+     * @param {function(Object): Object} mutate Returns the new index.
+     * @returns {Promise<boolean>} True when the change was persisted.
+     */
     const commitIndexChange = async (mutate) => {
       const previousIndex = index;
       index = mutate(index);
@@ -355,6 +420,7 @@
       return persisted;
     };
 
+    /** Reset the editor to an unsaved, unnamed note with no server row yet. */
     const startNewBuffer = () => {
       currentNoteId = null;
       currentName = Index.defaultName(index);
@@ -365,6 +431,14 @@
       renderTree();
     };
 
+    /**
+     * Load, decrypt, and open a note, after confirming any unsaved changes.
+     *
+     * A row that will not decrypt is reported and left closed rather than
+     * opening an empty buffer that a save would then overwrite it with.
+     *
+     * @param {string} id
+     */
     const openNote = async (id) => {
       if (id === currentNoteId) return;
       if (!confirmDiscard()) return;
@@ -406,6 +480,14 @@
       renderTree();
     };
 
+    /**
+     * Encrypt and save the buffer, creating the server row on first save.
+     *
+     * The row is written before the index, so an index failure still leaves the
+     * content safely stored: reconcile() re-adopts it as an orphan on the next
+     * load. That is why the buffer is marked clean either way, and why the
+     * "saved" toast is withheld when only the row landed.
+     */
     const saveNote = async () => {
       if (!masterKey || readOnly) {
         window.Notify.show("Secure session missing. Please sign in again.", "error");
@@ -477,10 +559,18 @@
       }
     };
 
-    // Record Trash state on the server rows. Trash itself lives in the
-    // encrypted index; this flag is only what lets the expiry sweep delete a
-    // note once the retention window passes. Bulk on purpose: trashing a whole
-    // folder costs one write of the vault rate limit, not one per note.
+    /**
+     * Record Trash state on the server rows.
+     *
+     * Trash itself lives in the encrypted index; this flag is only what lets
+     * the expiry sweep delete a note once the retention window passes, even if
+     * the user never opens their vault again. Bulk on purpose: trashing a whole
+     * folder costs one write against the vault rate limit, not one per note.
+     *
+     * @param {string[]} ids Empty is a no-op success.
+     * @param {boolean} trashed
+     * @returns {Promise<boolean>} True when the server recorded the change.
+     */
     const setTrashed = async (ids, trashed) => {
       if (ids.length === 0) return true;
       try {
@@ -500,7 +590,15 @@
       }
     };
 
-    // Server row first, then the index; reset if the open note was deleted.
+    /**
+     * Delete a note permanently: the server row first, then its index entry.
+     *
+     * Unreadable rows have no index entry, so they only need the row deleted
+     * and a re-render. If the deleted note was open, the buffer resets rather
+     * than pointing at a row that no longer exists.
+     *
+     * @param {string} id
+     */
     const deleteNoteForever = async (id) => {
       try {
         const { response, result } = await window.Http.postForm(noteDeleteUrl(id), {});
@@ -526,6 +624,17 @@
       window.Notify.show("Note deleted.", "success");
     };
 
+    /**
+     * Swap a row's label for an inline text input.
+     *
+     * Enter and blur commit; Escape cancels. `finished` guards the pair, since
+     * committing with Enter also blurs the input. An unchanged or blank name
+     * re-renders instead of committing, so renaming to nothing is a cancel.
+     *
+     * @param {Element} row Row or summary holding a `.tree__name`.
+     * @param {string} initialValue
+     * @param {function(string): void} onCommit Receives the trimmed new name.
+     */
     const startRename = (row, initialValue, onCommit) => {
       const nameEl = row.querySelector(".tree__name");
       if (!nameEl) return;
@@ -586,6 +695,7 @@
 
     let armedDelete = null;
 
+    /** Hide and empty the context menu, disarming any pending delete. */
     const closeCtxMenu = () => {
       ctxMenu.classList.add(HIDDEN_CLASS);
       ctxMenu.replaceChildren();
@@ -595,6 +705,15 @@
         .forEach((el) => el.setAttribute("aria-expanded", "false"));
     };
 
+    /**
+     * Build one context-menu entry.
+     *
+     * @param {string} label
+     * @param {string} iconName
+     * @param {function(MouseEvent): void} onClick
+     * @param {string} [extraClass]
+     * @returns {HTMLButtonElement}
+     */
     const ctxItem = (label, iconName, onClick, extraClass) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -606,7 +725,16 @@
       return button;
     };
 
-    // Destructive deletes require a second click.
+    /**
+     * Build a delete entry that requires a second click to confirm.
+     *
+     * The first click rewrites the label in place; `armedDelete` is cleared
+     * whenever the menu closes, so the confirmation never survives it.
+     *
+     * @param {string} label
+     * @param {function(): void} onConfirm
+     * @returns {HTMLButtonElement}
+     */
     const ctxDeleteItem = (label, onConfirm) => {
       const button = ctxItem(
         label,
@@ -627,6 +755,13 @@
       return button;
     };
 
+    /**
+     * Replace the menu with the list of folders a note can move to.
+     *
+     * The note's current folder is omitted, since moving it there does nothing.
+     *
+     * @param {string} noteId
+     */
     const showMoveTargets = (noteId) => {
       ctxMenu.replaceChildren();
       const label = document.createElement("div");
@@ -650,6 +785,13 @@
       });
     };
 
+    /**
+     * Build and position the context menu for one row.
+     *
+     * @param {Element} anchor The actions button the menu is placed beside.
+     * @param {"note"|"trash"|"folder"|"unreadable"} kind
+     * @param {string} id Note or folder id.
+     */
     const openCtxMenu = (anchor, kind, id) => {
       closeCtxMenu();
       anchor.setAttribute("aria-expanded", "true");
@@ -806,8 +948,13 @@
       .addEventListener("click", () => setCollapsed(false));
     if (window.matchMedia(MOBILE_SIDEBAR_QUERY).matches) setCollapsed(true);
 
-    // Fetch and decrypt the index, list the note rows, reconcile the two,
-    // and adopt orphan rows. Failed index load disables the vault.
+    /**
+     * Fetch and decrypt the index, list the note rows, reconcile the two, and
+     * adopt orphan rows.
+     *
+     * Any failure before reconciliation disables the vault: continuing on a
+     * half-known index risks saving one that drops entries it could not read.
+     */
     const loadVault = async () => {
       let blob;
       try {
@@ -913,6 +1060,12 @@
       }
     };
 
+    /**
+     * Resolve the vault key, import it, then load the vault.
+     *
+     * Each failure leaves the vault read-only with an explanation, so a locked
+     * tab never silently presents an empty vault the user might save over.
+     */
     const initialize = async () => {
       if (!window.AuthCrypto) {
         disableVault("Cryptographic module unavailable. Please reload the page.");

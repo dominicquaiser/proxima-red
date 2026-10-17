@@ -16,7 +16,7 @@ Two conventions run through the live-note functions:
   ``LiveNote`` row. That single lock is what makes update ids a usable sync
   cursor and the tail caps sound.
 - Rejections raise ``ValidationError`` with a stable ``code``
-  (``pending_tail_full``, ``snapshot_stale``, ...). The codes are this layer's
+  (``pending_tail_full``, ``stale_snapshot``, ...). The codes are this layer's
   vocabulary for what went wrong; ``apps.note.views`` maps them to HTTP
   statuses and the consumer maps them to frames, so neither transport needs to
   re-derive the reason.
@@ -154,15 +154,30 @@ def delete_expired_notes(*, now=None, batch_size=None) -> int:
     Returns:
         int: Number of deleted ``SharedNote`` rows.
     """
-    queryset = expired_notes(now=now)
+    return _delete_expired_rows(expired_notes(now=now), batch_size)
 
-    if batch_size is None:
-        deleted_count = queryset.count()
-        if deleted_count:
-            queryset.delete()
-        return deleted_count
 
-    return _delete_in_batches(queryset, batch_size)
+def _delete_expired_rows(queryset: QuerySet, batch_size: int | None) -> int:
+    """Delete every row in a sweep queryset, optionally in fixed-size batches.
+
+    The shared body of the three expiry sweeps (shared notes, live notes,
+    trashed vault notes), which differ only in how they select rows.
+
+    Args:
+        queryset (QuerySet): Rows eligible for deletion.
+        batch_size (int | None): Rows per batch, or ``None`` to delete all
+            matching rows in one operation.
+
+    Returns:
+        int: Number of deleted rows of the queryset's own model.
+    """
+    if batch_size is not None:
+        return _delete_in_batches(queryset, batch_size)
+
+    deleted_count = queryset.count()
+    if deleted_count:
+        queryset.delete()
+    return deleted_count
 
 
 def _delete_in_batches(queryset: QuerySet, batch_size: int) -> int:
@@ -411,9 +426,7 @@ def append_live_update(pk, *, payload: str, iv: str) -> tuple[LiveNoteUpdate, in
             )
         prev_seq = note.snapshot_seq
         if pending_count:
-            tail = note.updates.aggregate(
-                total=Sum(Length("payload")), newest=Max("id")
-            )
+            tail = note.updates.aggregate(total=Sum(Length("payload")), newest=Max("id"))
             prev_seq = tail["newest"]
             if (tail["total"] or 0) + len(payload) > MAX_LIVE_PENDING_LENGTH:
                 raise ValidationError(
@@ -428,9 +441,7 @@ def append_live_update(pk, *, payload: str, iv: str) -> tuple[LiveNoteUpdate, in
         return row, pending_count + 1, prev_seq
 
 
-def save_live_snapshot(
-    pk, *, snapshot: str, snapshot_iv: str, covers_seq: int
-) -> int:
+def save_live_snapshot(pk, *, snapshot: str, snapshot_iv: str, covers_seq: int) -> int:
     """Replace a live note's snapshot with a client's compaction and prune the log.
 
     First valid writer wins: a compaction whose ``covers_seq`` is not newer
@@ -518,15 +529,7 @@ def delete_expired_live_notes(*, now=None, batch_size=None) -> int:
     Returns:
         int: Number of deleted ``LiveNote`` rows.
     """
-    queryset = expired_live_notes(now=now)
-
-    if batch_size is None:
-        deleted_count = queryset.count()
-        if deleted_count:
-            queryset.delete()
-        return deleted_count
-
-    return _delete_in_batches(queryset, batch_size)
+    return _delete_expired_rows(expired_live_notes(now=now), batch_size)
 
 
 def live_group_name(pk) -> str:
@@ -816,15 +819,7 @@ def delete_expired_trashed_vault_notes(*, now=None, batch_size=None) -> int:
     Returns:
         int: Number of deleted ``VaultNote`` rows.
     """
-    queryset = expired_trashed_vault_notes(now=now)
-
-    if batch_size is None:
-        deleted_count = queryset.count()
-        if deleted_count:
-            queryset.delete()
-        return deleted_count
-
-    return _delete_in_batches(queryset, batch_size)
+    return _delete_expired_rows(expired_trashed_vault_notes(now=now), batch_size)
 
 
 def migrate_vault_data(

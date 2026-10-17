@@ -44,6 +44,7 @@ import logging
 import time
 import uuid
 
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -55,6 +56,7 @@ from apps.core.http import exception_type
 
 from . import services
 from .constants import (
+    LOG_LIVE_WS_APPEND_FAILED,
     MAX_LIVE_AWARENESS_LENGTH,
     MAX_LIVE_UPDATE_LENGTH,
     MAX_LIVE_WS_PER_NOTE,
@@ -70,7 +72,6 @@ from .constants import (
     WS_ERROR_UPDATE_TOO_LARGE,
     WS_MSG_BURST,
     WS_MSG_RATE,
-    LOG_LIVE_WS_APPEND_FAILED,
 )
 from .models import LiveNote
 
@@ -101,8 +102,6 @@ def scope_client_ip(scope) -> str:
     Returns:
         str: The resolved client IP (may be empty if unavailable).
     """
-    from django.conf import settings
-
     trusted = getattr(settings, "RATELIMIT_TRUSTED_PROXY_COUNT", 0)
     if trusted > 0:
         forwarded = b""
