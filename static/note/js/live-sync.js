@@ -419,8 +419,13 @@
         scheduleFlush();
         return;
       }
+      backoffFlush(true);
+    }
+
+    // Keep the outbox intact and reserve the one flushTimer slot for retry.
+    function backoffFlush(refresh) {
       backoffMs = nextBackoffMs(backoffMs);
-      refreshStatus();
+      if (refresh) refreshStatus();
       scheduleFlushAfter(backoffMs);
     }
 
@@ -451,6 +456,58 @@
       }
     }
 
+    async function postOutbox(count, keepalive) {
+      const merged = window.Y.mergeUpdates(outbox.slice(0, count));
+      const payload = await window.CryptoCore.encryptBytesWithKey(merged, key);
+      const useKeepalive = keepalive && payload.encryptedData.length < KEEPALIVE_BODY_LIMIT;
+      return postJson(
+        urls.updates,
+        { payload: payload.encryptedData, iv: payload.iv },
+        useKeepalive,
+      );
+    }
+
+    async function handleHttpFlushResponse(response, result, count) {
+      if (response.status === 404) {
+        fatal("expired", "This live note has expired.");
+        return;
+      }
+      if (response.status === 409) {
+        // Pending tail full: compact to drain it, then retry the flush.
+        flushInFlight = false;
+        scheduleFlushAfterCompact(await compact());
+        return;
+      }
+      if (isPermanentStatus(response.status)) {
+        // Retrying this body is futile; say so instead of looping on it.
+        haltFlush();
+        return;
+      }
+      if (!response.ok || !result || !result.success) {
+        throw new Error("flush failed");
+      }
+
+      // Do not advance cursor from POST result; polling owns that path.
+      outbox.splice(0, count);
+      pending = result.pending;
+      backoffMs = 0;
+      maybeCompact();
+    }
+
+    async function flushOverHttp(count, keepalive) {
+      try {
+        const { response, result } = await postOutbox(count, keepalive);
+        await handleHttpFlushResponse(response, result, count);
+      } catch (error) {
+        // Keep the outbox; retry after a backoff (429, network, 5xx).
+        backoffFlush();
+      } finally {
+        flushInFlight = false;
+        refreshStatus();
+        if (!stopped && outbox.length && !flushTimer) scheduleFlush();
+      }
+    }
+
     async function flush(keepalive) {
       // flushHalted guards here as well as in scheduleFlushAfter: the
       // visibilitychange keepalive calls flush() directly, so the scheduler
@@ -464,50 +521,7 @@
         await flushOverWs(count);
         return; // flushInFlight stays set until the ack (or socket close)
       }
-
-      try {
-        const merged = window.Y.mergeUpdates(outbox.slice(0, count));
-        const payload = await window.CryptoCore.encryptBytesWithKey(merged, key);
-        const useKeepalive = keepalive && payload.encryptedData.length < KEEPALIVE_BODY_LIMIT;
-        const { response, result } = await postJson(
-          urls.updates,
-          { payload: payload.encryptedData, iv: payload.iv },
-          useKeepalive,
-        );
-
-        if (response.status === 404) {
-          fatal("expired", "This live note has expired.");
-          return;
-        }
-        if (response.status === 409) {
-          // Pending tail full: compact to drain it, then retry the flush.
-          flushInFlight = false;
-          scheduleFlushAfterCompact(await compact());
-          return;
-        }
-        if (isPermanentStatus(response.status)) {
-          // Retrying this body is futile; say so instead of looping on it.
-          haltFlush();
-          return;
-        }
-        if (!response.ok || !result || !result.success) {
-          throw new Error("flush failed");
-        }
-
-        // Do not advance cursor from POST result; polling owns that path.
-        outbox.splice(0, count);
-        pending = result.pending;
-        backoffMs = 0;
-        maybeCompact();
-      } catch (error) {
-        // Keep the outbox; retry after a backoff (429, network, 5xx).
-        backoffMs = nextBackoffMs(backoffMs);
-        scheduleFlushAfter(backoffMs);
-      } finally {
-        flushInFlight = false;
-        refreshStatus();
-        if (!stopped && outbox.length && !flushTimer) scheduleFlush();
-      }
+      await flushOverHttp(count, keepalive);
     }
 
     // --- Compaction ---
@@ -664,9 +678,7 @@
         // rate_limited / server_error while our flush was pending: keep the
         // outbox, retry after the shared backoff.
         clearWsFlushWait();
-        backoffMs = nextBackoffMs(backoffMs);
-        refreshStatus();
-        scheduleFlushAfter(backoffMs);
+        backoffFlush(true);
       }
       return null;
     }

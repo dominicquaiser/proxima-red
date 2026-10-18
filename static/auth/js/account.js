@@ -44,22 +44,22 @@
     return window.AuthCrypto.deriveKeyFromPassword(currentPassword, currentVaultSalt);
   };
 
+  // A successful HTTP response can still carry {success: false}. Treat that as
+  // unreadable data, not an empty vault, or a password rotation could strand
+  // ciphertext that the recovery phase silently skipped.
+  const readVaultJson = async (url, fallbackError) => {
+    const { response, result } = await window.Http.getJson(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!result.success) throw new Error(result.error || fallbackError);
+    return result;
+  };
+
   const recoverCurrentVaultData = async (vaultDataUrl, currentPassword, currentVaultSalt) => {
     // A failed read must throw (not return null): the caller aborts the password
     // change on a throw, but treats null as "no vault to migrate". Silently
     // mapping an HTTP error to null would let the change proceed and orphan the
     // existing blob under the new key.
-    const { response, result: blob } = await window.Http.getJson(vaultDataUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    // `success` is checked separately from the data fields: an unreadable
-    // reply must throw, while a successful-but-empty one is a user with no
-    // vault yet. Both used to arrive here as a rejected JSON parse; Http now
-    // hands back {success: false}, so the distinction has to be made here.
-    if (!blob.success) {
-      throw new Error(blob.error || "Could not read the vault blob.");
-    }
+    const blob = await readVaultJson(vaultDataUrl, "Could not read the vault blob.");
     if (!blob.encrypted_data || !blob.iv) {
       return null;
     }
@@ -96,15 +96,7 @@
   ) => {
     const oldKey = await resolveCurrentVaultKey(currentPassword, currentVaultSalt);
 
-    const { response: indexResponse, result: indexBlob } = await window.Http.getJson(noteIndexUrl);
-    if (!indexResponse.ok) {
-      throw new Error(`HTTP ${indexResponse.status}`);
-    }
-    // Same fail-closed split as recoverCurrentVaultData: unreadable throws,
-    // successful-but-empty means the user has no note index yet.
-    if (!indexBlob.success) {
-      throw new Error(indexBlob.error || "Could not read the note index.");
-    }
+    const indexBlob = await readVaultJson(noteIndexUrl, "Could not read the note index.");
     let index = null;
     if (indexBlob.encrypted_data && indexBlob.iv) {
       index = await window.AuthCrypto.decryptAccountData(
@@ -114,18 +106,12 @@
       );
     }
 
-    const { response: listResponse, result: listResult } = await window.Http.getJson(
+    // An unreadable list must throw rather than look like zero notes: rotating
+    // on that false empty state would strand all existing note rows.
+    const listResult = await readVaultJson(
       `${noteListUrl}?content=1`,
+      "Could not list the vault notes.",
     );
-    if (!listResponse.ok) {
-      throw new Error(`HTTP ${listResponse.status}`);
-    }
-    // Must throw rather than fall through to an empty list: migrating zero
-    // notes "successfully" would rotate the password and strand every note
-    // under the old key.
-    if (!listResult.success) {
-      throw new Error(listResult.error || "Could not list the vault notes.");
-    }
     const notes = [];
     for (const row of listResult.notes || []) {
       notes.push({
@@ -340,11 +326,65 @@
 
     if (changePasswordForm) {
       // Vault endpoints, defined by the URLconf via the form's data attributes.
-      const vaultDataUrl = changePasswordForm.dataset.vaultDataUrl || VAULT_DATA_ENDPOINT;
-      const updateDataUrl = changePasswordForm.dataset.updateDataUrl || SAVE_ENDPOINT;
-      const noteIndexUrl = changePasswordForm.dataset.noteIndexUrl || NOTE_INDEX_ENDPOINT;
-      const noteListUrl = changePasswordForm.dataset.noteListUrl || NOTE_LIST_ENDPOINT;
-      const noteMigrateUrl = changePasswordForm.dataset.noteMigrateUrl || NOTE_MIGRATE_ENDPOINT;
+      const endpoints = {
+        vaultDataUrl: changePasswordForm.dataset.vaultDataUrl || VAULT_DATA_ENDPOINT,
+        updateDataUrl: changePasswordForm.dataset.updateDataUrl || SAVE_ENDPOINT,
+        noteIndexUrl: changePasswordForm.dataset.noteIndexUrl || NOTE_INDEX_ENDPOINT,
+        noteListUrl: changePasswordForm.dataset.noteListUrl || NOTE_LIST_ENDPOINT,
+        noteMigrateUrl: changePasswordForm.dataset.noteMigrateUrl || NOTE_MIGRATE_ENDPOINT,
+      };
+
+      const resecureVaultsAfterChange = async (recovery, newPassword, newVaultSalt) => {
+        if (
+          !(await resecureVaultAfterChange(
+            recovery.vaultData,
+            newPassword,
+            newVaultSalt,
+            endpoints.updateDataUrl,
+          ))
+        ) {
+          return false;
+        }
+        return resecureNoteVaultAfterChange(
+          recovery.noteVault,
+          newPassword,
+          newVaultSalt,
+          endpoints.noteMigrateUrl,
+        );
+      };
+
+      // Before the server accepts the change, failures leave the old account
+      // untouched. Afterwards, migration can only move forward, and the old
+      // session key stays in place until both vaults are re-secured.
+      const submitPasswordChange = async (currentPassword, newPassword) => {
+        const recovery = await recoverVaultBeforeChange(
+          endpoints,
+          currentPassword,
+          authData.vault_salt,
+        );
+        if (!recovery.ok) return;
+
+        await fillDerivedSecretFields(currentPassword, newPassword, authData.auth_salt);
+        const { response, result } = await window.Http.postForm(
+          changePasswordForm.action,
+          changePasswordForm,
+        );
+        if (!response.ok || !result.success) {
+          window.Notify.show(window.Http.firstError(result), "error");
+          return;
+        }
+
+        if (!(await resecureVaultsAfterChange(recovery, newPassword, result.vault_salt))) {
+          clearSensitiveInputs(changePasswordForm);
+          return;
+        }
+        if (await refreshSessionKey(newPassword, result.vault_salt)) {
+          authData = { auth_salt: result.auth_salt, vault_salt: result.vault_salt };
+        }
+
+        clearSensitiveInputs(changePasswordForm);
+        window.Notify.show(result.message || "Password updated.", "success");
+      };
 
       changePasswordForm.addEventListener("submit", async (event) => {
         if (!window.fetch) return; // allow default form submission as fallback
@@ -367,56 +407,7 @@
 
         await window.FormUi.submitWithBusy(
           submitButton,
-          async () => {
-            const recovery = await recoverVaultBeforeChange(
-              { vaultDataUrl, noteIndexUrl, noteListUrl },
-              currentPassword,
-              authData.vault_salt,
-            );
-            if (!recovery.ok) return;
-
-            await fillDerivedSecretFields(currentPassword, newPassword, authData.auth_salt);
-
-            const { response, result } = await window.Http.postForm(
-              changePasswordForm.action,
-              changePasswordForm,
-            );
-
-            if (!response.ok || !result.success) {
-              window.Notify.show(window.Http.firstError(result), "error");
-              return;
-            }
-
-            // Password is now rotated server-side; re-secure both vaults, then
-            // swap the session key (see the phase helpers for the ordering
-            // rationale). The session key is refreshed only when everything
-            // was re-secured, so a failure leaves the old key active.
-            const passVaultOk = await resecureVaultAfterChange(
-              recovery.vaultData,
-              newPassword,
-              result.vault_salt,
-              updateDataUrl,
-            );
-            const noteVaultOk =
-              passVaultOk &&
-              (await resecureNoteVaultAfterChange(
-                recovery.noteVault,
-                newPassword,
-                result.vault_salt,
-                noteMigrateUrl,
-              ));
-            if (!passVaultOk || !noteVaultOk) {
-              clearSensitiveInputs(changePasswordForm);
-              return;
-            }
-
-            if (await refreshSessionKey(newPassword, result.vault_salt)) {
-              authData = { auth_salt: result.auth_salt, vault_salt: result.vault_salt };
-            }
-
-            clearSensitiveInputs(changePasswordForm);
-            window.Notify.show(result.message || "Password updated.", "success");
-          },
+          () => submitPasswordChange(currentPassword, newPassword),
           {
             onError: (error) => {
               console.error("Password update failed:", error);

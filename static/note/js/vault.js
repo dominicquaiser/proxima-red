@@ -480,6 +480,34 @@
       renderTree();
     };
 
+    /** Write the encrypted row before committing its index entry. */
+    const persistNoteRow = async (payload) => {
+      const isNew = currentNoteId === null;
+      const url = isNew ? notesUrl : noteUrl(currentNoteId);
+      const { response, result } = await window.Http.postForm(url, {
+        content: payload.encryptedData,
+        iv: payload.iv,
+      });
+      if (sessionIsGone(response, "retry")) return null;
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+      if (isNew) currentNoteId = result.note_id;
+      return { isNew, result };
+    };
+
+    const indexSavedNote = ({ isNew, result }) =>
+      commitIndexChange((idx) =>
+        isNew
+          ? Index.addNote(idx, {
+              id: result.note_id,
+              name: currentName,
+              createdAt: result.created_at,
+              updatedAt: result.updated_at,
+            })
+          : Index.touchNote(idx, currentNoteId, result.updated_at),
+      );
+
     /**
      * Encrypt and save the buffer, creating the server row on first save.
      *
@@ -503,42 +531,12 @@
       if (core.noteTooLarge()) return;
 
       isSaving = true;
-      let indexed = false;
       try {
         const payload = await window.CryptoCore.encryptWithKey(text, masterKey);
-
-        if (currentNoteId === null) {
-          // Row first, index last; reconcile() re-adopts orphan rows.
-          const { response, result } = await window.Http.postForm(notesUrl, {
-            content: payload.encryptedData,
-            iv: payload.iv,
-          });
-          if (sessionIsGone(response, "retry")) return;
-          if (!response.ok || !result.success) {
-            throw new Error(result.error || `HTTP ${response.status}`);
-          }
-          currentNoteId = result.note_id;
-          indexed = await commitIndexChange((idx) =>
-            Index.addNote(idx, {
-              id: result.note_id,
-              name: currentName,
-              createdAt: result.created_at,
-              updatedAt: result.updated_at,
-            }),
-          );
-        } else {
-          const { response, result } = await window.Http.postForm(noteUrl(currentNoteId), {
-            content: payload.encryptedData,
-            iv: payload.iv,
-          });
-          if (sessionIsGone(response, "retry")) return;
-          if (!response.ok || !result.success) {
-            throw new Error(result.error || `HTTP ${response.status}`);
-          }
-          indexed = await commitIndexChange((idx) =>
-            Index.touchNote(idx, currentNoteId, result.updated_at),
-          );
-        }
+        // Row first, index last; reconcile() re-adopts orphan rows.
+        const savedRow = await persistNoteRow(payload);
+        if (!savedRow) return;
+        const indexed = await indexSavedNote(savedRow);
 
         // The row is written either way, so the buffer does match the server.
         lastSavedValue = text;
@@ -785,88 +783,96 @@
       });
     };
 
-    /**
-     * Build and position the context menu for one row.
-     *
-     * @param {Element} anchor The actions button the menu is placed beside.
-     * @param {"note"|"trash"|"folder"|"unreadable"} kind
-     * @param {string} id Note or folder id.
-     */
+    const moveNoteToTrash = async (id) => {
+      if (id === currentNoteId) {
+        setDirty(false);
+        startNewBuffer();
+      }
+      // Index first, then the flag. The reverse order could leave a note the
+      // user still sees as active carrying a deletion flag.
+      if (await commitIndexChange((idx) => Index.trashNote(idx, id))) {
+        await setTrashed([id], true);
+      }
+    };
+
+    const restoreTrashedNote = async (id) => {
+      // Clear the flag first: a note still in Trash is recoverable, while one
+      // the server still plans to delete is not.
+      if (await setTrashed([id], false)) {
+        await commitIndexChange((idx) => Index.restoreNote(idx, id));
+      }
+    };
+
+    const deleteFolderToTrash = async (id) => {
+      // Folder contents move to Trash; rows stay on the server. Collect the
+      // ids before changing the index, then flag them in one bulk call.
+      const trashing = index.notes
+        .filter((note) => note.folderId === id && !note.trashed)
+        .map((note) => note.id);
+      if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
+        await setTrashed(trashing, true);
+      }
+    };
+
+    const buildNoteCtxMenu = (id) => {
+      ctxMenu.appendChild(
+        ctxItem("Rename", "pencil-simple-line", () => {
+          closeCtxMenu();
+          renameNote(id);
+        }),
+      );
+      ctxMenu.appendChild(
+        ctxItem("Move to…", "folder-open", (event) => {
+          event.stopPropagation();
+          showMoveTargets(id);
+        }),
+      );
+      const divider = document.createElement("div");
+      divider.className = "ctx-menu__divider";
+      ctxMenu.appendChild(divider);
+      ctxMenu.appendChild(
+        ctxItem(
+          "Move to Trash",
+          "trash",
+          () => {
+            closeCtxMenu();
+            moveNoteToTrash(id);
+          },
+          "ctx-menu__item--danger",
+        ),
+      );
+    };
+
+    const buildTrashCtxMenu = (id) => {
+      ctxMenu.appendChild(
+        ctxItem("Restore", "arrow-counter-clockwise", () => {
+          closeCtxMenu();
+          restoreTrashedNote(id);
+        }),
+      );
+      ctxMenu.appendChild(ctxDeleteItem("Delete forever", () => deleteNoteForever(id)));
+    };
+
+    const buildFolderCtxMenu = (id) => {
+      ctxMenu.appendChild(
+        ctxItem("Rename", "pencil-simple-line", () => {
+          closeCtxMenu();
+          renameFolder(id);
+        }),
+      );
+      ctxMenu.appendChild(ctxDeleteItem("Delete folder", () => deleteFolderToTrash(id)));
+    };
+
+    /** Build and position the context menu for one row. */
     const openCtxMenu = (anchor, kind, id) => {
       closeCtxMenu();
       anchor.setAttribute("aria-expanded", "true");
 
-      if (kind === "note") {
-        ctxMenu.appendChild(
-          ctxItem("Rename", "pencil-simple-line", () => {
-            closeCtxMenu();
-            renameNote(id);
-          }),
-        );
-        ctxMenu.appendChild(
-          ctxItem("Move to…", "folder-open", (event) => {
-            event.stopPropagation();
-            showMoveTargets(id);
-          }),
-        );
-        const divider = document.createElement("div");
-        divider.className = "ctx-menu__divider";
-        ctxMenu.appendChild(divider);
-        ctxMenu.appendChild(
-          ctxItem(
-            "Move to Trash",
-            "trash",
-            async () => {
-              closeCtxMenu();
-              if (id === currentNoteId) {
-                setDirty(false);
-                startNewBuffer();
-              }
-              // Index first, then the flag. The reverse order could leave a note
-              // the user still sees as active carrying a deletion flag.
-              if (await commitIndexChange((idx) => Index.trashNote(idx, id))) {
-                await setTrashed([id], true);
-              }
-            },
-            "ctx-menu__item--danger",
-          ),
-        );
-      } else if (kind === "trash") {
-        ctxMenu.appendChild(
-          ctxItem("Restore", "arrow-counter-clockwise", async () => {
-            closeCtxMenu();
-            // Clear the flag first, and abort the restore if that fails: a
-            // note left in Trash is recoverable, one the server still plans to
-            // delete is not.
-            if (await setTrashed([id], false)) {
-              await commitIndexChange((idx) => Index.restoreNote(idx, id));
-            }
-          }),
-        );
+      if (kind === "note") buildNoteCtxMenu(id);
+      else if (kind === "trash") buildTrashCtxMenu(id);
+      else if (kind === "unreadable") {
         ctxMenu.appendChild(ctxDeleteItem("Delete forever", () => deleteNoteForever(id)));
-      } else if (kind === "unreadable") {
-        ctxMenu.appendChild(ctxDeleteItem("Delete forever", () => deleteNoteForever(id)));
-      } else if (kind === "folder") {
-        ctxMenu.appendChild(
-          ctxItem("Rename", "pencil-simple-line", () => {
-            closeCtxMenu();
-            renameFolder(id);
-          }),
-        );
-        ctxMenu.appendChild(
-          ctxDeleteItem("Delete folder", async () => {
-            // Folder contents move to Trash; rows stay on the server. Collect
-            // the ids deleteFolder will trash before mutating, then flag them
-            // in one call (index first, then the flag).
-            const trashing = index.notes
-              .filter((note) => note.folderId === id && !note.trashed)
-              .map((note) => note.id);
-            if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
-              await setTrashed(trashing, true);
-            }
-          }),
-        );
-      }
+      } else if (kind === "folder") buildFolderCtxMenu(id);
 
       // Position beside the anchor, clamped to the viewport.
       const rect = anchor.getBoundingClientRect();
@@ -948,14 +954,7 @@
       .addEventListener("click", () => setCollapsed(false));
     if (window.matchMedia(MOBILE_SIDEBAR_QUERY).matches) setCollapsed(true);
 
-    /**
-     * Fetch and decrypt the index, list the note rows, reconcile the two, and
-     * adopt orphan rows.
-     *
-     * Any failure before reconciliation disables the vault: continuing on a
-     * half-known index risks saving one that drops entries it could not read.
-     */
-    const loadVault = async () => {
+    const loadVaultIndex = async () => {
       let blob;
       try {
         const { response, result } = await window.Http.getJson(indexUrl);
@@ -963,7 +962,7 @@
         // preserve and no in-place retry to offer.
         if (sessionIsGone(response, "reload")) {
           disableVault();
-          return;
+          return false;
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (!result.success) throw new Error(result.error || `HTTP ${response.status}`);
@@ -971,7 +970,7 @@
       } catch (error) {
         console.error("Failed to load vault index:", error);
         disableVault("Could not load your vault. Please reload the page.");
-        return;
+        return false;
       }
 
       if (blob.encrypted_data && blob.iv) {
@@ -988,30 +987,33 @@
         } catch (error) {
           console.error("Failed to decrypt vault index:", error);
           disableVault("Could not decrypt your vault index. Reload the page or sign in again.");
-          return;
+          return false;
         }
       }
+      return true;
+    };
 
-      let serverNotes = [];
+    const loadVaultRows = async () => {
       try {
         const { response, result } = await window.Http.getJson(notesUrl);
         if (sessionIsGone(response, "reload")) {
           disableVault();
-          return;
+          return null;
         }
         if (!response.ok || !result.success) throw new Error(`HTTP ${response.status}`);
-        serverNotes = result.notes || [];
+        return result.notes || [];
       } catch (error) {
         console.error("Failed to list vault notes:", error);
         disableVault("Could not load your notes. Please reload the page.");
-        return;
+        return null;
       }
+    };
 
-      const outcome = Index.reconcile(index, serverNotes);
-      index = outcome.index;
-      let changed = outcome.changed;
-
-      for (const id of outcome.orphanIds) {
+    // Returns null only when the session expired; unreadable ciphertext rows
+    // stay visible as flagged rows and do not stop the rest of recovery.
+    const recoverOrphanRows = async (orphanIds) => {
+      let recovered = false;
+      for (const id of orphanIds) {
         try {
           const { response, result } = await window.Http.getJson(noteUrl(id));
           // Stop rather than fall through to the catch: that path files the
@@ -1019,7 +1021,7 @@
           // stick in the UI long after signing in fixed the real problem.
           if (sessionIsGone(response, "reload")) {
             disableVault();
-            return;
+            return null;
           }
           if (!response.ok || !result.success) throw new Error(`HTTP ${response.status}`);
           const text = await window.PasswordCrypto.decryptPassword(
@@ -1037,15 +1039,34 @@
             trashed: !!result.trashed_at,
             deletedAt: result.trashed_at || null,
           });
-          changed = true;
+          recovered = true;
         } catch (error) {
           // Surface unreadable rows, but do not adopt them into the index.
           console.error("Could not recover vault note " + id + ":", error);
           unreadableIds.add(id);
         }
       }
+      return recovered;
+    };
 
-      if (changed) await persistIndex();
+    /**
+     * Fetch and decrypt the index, list the note rows, reconcile the two, and
+     * adopt orphan rows.
+     *
+     * Any failure before reconciliation disables the vault: continuing on a
+     * half-known index risks saving one that drops entries it could not read.
+     */
+    const loadVault = async () => {
+      if (!(await loadVaultIndex())) return;
+      const serverNotes = await loadVaultRows();
+      if (serverNotes === null) return;
+
+      const outcome = Index.reconcile(index, serverNotes);
+      index = outcome.index;
+      const recovered = await recoverOrphanRows(outcome.orphanIds);
+      if (recovered === null) return;
+
+      if (outcome.changed || recovered) await persistIndex();
       startNewBuffer();
 
       // Housekeeping, after the vault is on screen and normally a no-op: bring
