@@ -79,13 +79,19 @@
           const target = new URL(result.redirect_url || "/vault/", window.location.href);
           try {
             if (target.origin === window.location.origin) {
-              await window.AuthCrypto.establishSecureSession(password, result.vault_salt);
+              await window.AuthCrypto.establishSecureSession(
+                password,
+                result.vault_salt,
+                result.state,
+              );
             } else {
               const vaultKey = await window.AuthCrypto.deriveVaultKeyBase64(
                 password,
                 result.vault_salt,
               );
-              target.hash = encodeURIComponent(vaultKey);
+              target.hash = encodeURIComponent(
+                JSON.stringify({ key: vaultKey, context: result.state }),
+              );
             }
           } catch (cryptoError) {
             console.error("Failed to establish secure session:", cryptoError);

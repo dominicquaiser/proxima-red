@@ -18,7 +18,6 @@
   const NOTE_LIST_ENDPOINT = "/vault/notes/";
   const NOTE_MIGRATE_ENDPOINT = "/vault/migrate/";
 
-
   // Read a password field honouring the '*' masking convention shared with the
   // signin/signup pages (FormUi.getMaskedInputValue); returns "" for a missing
   // field. The account-page fields are currently unmasked, so this matches the
@@ -33,7 +32,7 @@
 
   const resolveCurrentVaultKey = async (currentPassword, currentVaultSalt) => {
     const storedKeyBase64 = sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey);
-    if (storedKeyBase64) {
+    if (storedKeyBase64 && !currentPassword) {
       return window.AuthCrypto.importKeyFromBase64(storedKeyBase64);
     }
     if (!currentPassword || !currentVaultSalt) {
@@ -251,9 +250,9 @@
   };
 
   // Phase 3 (after the server accepted the change): re-secure the recovered
-  // vault under the new key BEFORE the caller swaps the session key, so that if
-  // saving fails the old key stays active and the vault remains readable this
-  // session (the user can re-save manually). No-op without stored vault data.
+  // vault under the new key BEFORE the caller swaps the session key. If saving
+  // fails, the decrypted copy held by this page is the recovery: the caller
+  // offers it as a download. No-op without stored vault data.
   const resecureVaultAfterChange = async (vaultData, newPassword, newVaultSalt, saveUrl) => {
     if (vaultData === null) return true;
     try {
@@ -263,7 +262,7 @@
       console.error("Failed to re-secure vault after password change:", migrateError);
       window.Notify.show(
         "Your password was changed, but your saved links could not be re-secured. " +
-          "Open your vault now and re-save them before signing out.",
+          "Download the recovery copy below before signing out.",
         "error",
       );
       return false;
@@ -284,13 +283,12 @@
       // Deliberately not "re-save them": re-saving is not the recovery, and
       // some notes will not open at all. Whichever batches did land are now
       // under the new key while the rest (and the index) are still under the
-      // old one, which only THIS session still holds -- refreshSessionKey is
-      // skipped on this path precisely so it survives here. Copying the
-      // readable notes out before signing out is the whole of the recovery.
+      // old one, and the rotated cache context refuses every cached old key.
+      // The decrypted copy this page still holds, offered as a download, is
+      // the whole of the recovery.
       window.Notify.show(
         "Your password was changed, but your notes could not all be re-secured. " +
-          "Open your note vault in this tab and copy out anything you need " +
-          "before signing out - some notes may not open.",
+          "Download the recovery copy below before signing out.",
         "error",
       );
       return false;
@@ -298,11 +296,13 @@
   };
 
   // Phase 4: swap the session key to the new password's derived key, so the
-  // vault remains accessible without signing out and back in. Best-effort: the
+  // vault remains accessible without signing out and back in. The key is stamped
+  // with the post-change session state: VaultSession only adopts a handoff whose
+  // cache context matches, and the change rotated that context. Best-effort: the
   // password change itself already succeeded, so a failure here only logs.
-  const refreshSessionKey = async (newPassword, newVaultSalt) => {
+  const refreshSessionKey = async (newPassword, newVaultSalt, sessionState) => {
     try {
-      await window.AuthCrypto.establishSecureSession(newPassword, newVaultSalt);
+      await window.AuthCrypto.establishSecureSession(newPassword, newVaultSalt, sessionState);
       return true;
     } catch (cryptoError) {
       console.error("Failed to refresh derived key after password change:", cryptoError);
@@ -311,8 +311,25 @@
   };
 
   document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll('form[action*="/auth/signout/"]').forEach((form) => {
+      form.addEventListener("submit", () => window.AuthCrypto.clearAllVaultKeys());
+    });
     const changePasswordForm = document.getElementById("change-password-form");
     const deleteAccountForm = document.getElementById("delete-account-form");
+    const recoveryPanel = document.getElementById("vault-recovery");
+    const recoveryButton = document.getElementById("download-vault-recovery");
+    let recoveryCopy = null;
+    recoveryButton?.addEventListener("click", () => {
+      if (!recoveryCopy) return;
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(recoveryCopy, null, 2)], { type: "application/json" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "proxima-vault-recovery.json";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
     const authDataScript = document.getElementById("auth-data");
     let authData = {};
 
@@ -354,9 +371,29 @@
       };
 
       // Before the server accepts the change, failures leave the old account
-      // untouched. Afterwards, migration can only move forward, and the old
-      // session key stays in place until both vaults are re-secured.
+      // untouched. Afterwards, migration can only move forward; the session key
+      // is swapped only once both vaults are re-secured, and a failure leaves
+      // the decrypted recovery copy as the way out.
       const submitPasswordChange = async (currentPassword, newPassword) => {
+        // Both vault reads must be authorized before rotation. Reuse the
+        // password already entered in this form, rather than a second prompt.
+        const authSecret = await window.AuthCrypto.deriveAuthSecret(
+          currentPassword,
+          authData.auth_salt,
+        );
+        const verified = await window.Http.postForm(
+          "/auth/reauth/",
+          new URLSearchParams({
+            auth_secret: authSecret,
+            tool: "account",
+            expected_user: authData.user_id || "",
+          }),
+        );
+        if (!verified.response.ok || !verified.result.success) {
+          window.Notify.show(window.Http.firstError(verified.result), "error");
+          return;
+        }
+        window.Http.setVaultIdentity(verified.result.state.identity);
         const recovery = await recoverVaultBeforeChange(
           endpoints,
           currentPassword,
@@ -374,13 +411,23 @@
           return;
         }
 
+        window.Http.setVaultIdentity(result.state.identity);
+        // The server has rotated the salts whatever happens next; later forms on
+        // this page (account deletion, another change) must derive from them.
+        authData = { ...authData, auth_salt: result.auth_salt, vault_salt: result.vault_salt };
+
         if (!(await resecureVaultsAfterChange(recovery, newPassword, result.vault_salt))) {
+          // Rotated credentials invalidate cached keys in other tabs. Keep an
+          // explicit recovery download here, where both decrypted vaults still
+          // exist, instead of relying on opening an old key in a new vault tab.
+          recoveryCopy = { passwords: recovery.vaultData, notes: recovery.noteVault };
+          recoveryPanel?.classList.remove("hidden");
           clearSensitiveInputs(changePasswordForm);
           return;
         }
-        if (await refreshSessionKey(newPassword, result.vault_salt)) {
-          authData = { auth_salt: result.auth_salt, vault_salt: result.vault_salt };
-        }
+        recoveryCopy = null;
+        recoveryPanel?.classList.add("hidden");
+        await refreshSessionKey(newPassword, result.vault_salt, result.state);
 
         clearSensitiveInputs(changePasswordForm);
         window.Notify.show(result.message || "Password updated.", "success");
@@ -420,7 +467,37 @@
 
     const exportAction = document.querySelector(".export-action");
     if (exportAction) {
-      exportAction.addEventListener("click", () => {
+      exportAction.addEventListener("click", async (event) => {
+        event.preventDefault();
+        try {
+          // The export carries both vaults, so the server requires both grants.
+          // This page's unlock modal (tool "account") renews both at once.
+          const replies = await Promise.all(
+            ["pass", "note"].map((tool) => window.Http.getJson(`/auth/vault-session/?tool=${tool}`)),
+          );
+          if (replies.some(({ response }) => response.status === 401)) {
+            window.location.href = "/auth/signin/?tool=pass";
+            return;
+          }
+          if (
+            replies.some(
+              ({ response, result }) =>
+                !response.ok || !result.success || result.state.user_id !== authData.user_id,
+            )
+          ) {
+            window.Notify.show("Reload the account page before exporting.", "error");
+            return;
+          }
+          if (
+            replies.some(({ result }) => !result.state.unlocked) &&
+            !(await window.SecureSessionUnlock.ensureSecureSession({ force: true }))
+          )
+            return;
+          window.location.href = exportAction.href;
+        } catch {
+          window.Notify.show("Unable to export. Check your connection and try again.", "error");
+          return;
+        }
         const icon = exportAction.querySelector(".export-action__icon");
         const arrow = exportAction.querySelector(".export-action__arrow");
         if (!icon || !arrow || icon.classList.contains("is-downloading")) return;
@@ -462,7 +539,7 @@
               return;
             }
 
-            window.AuthCrypto.clearSecureSession();
+            window.AuthCrypto.clearAllVaultKeys();
             clearSensitiveInputs(deleteAccountForm);
             window.Notify.show(result.message || "Account deleted.", "success");
 

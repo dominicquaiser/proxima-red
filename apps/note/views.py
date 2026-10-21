@@ -24,21 +24,22 @@ import json
 import logging
 from collections.abc import Callable
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.generic import View
-
 from django_ratelimit.decorators import ratelimit
 
 from apps.auth.constants import SESSION_KEY_USER_ID
 from apps.auth.mixins import SessionAuthRequiredMixin
 from apps.auth.models import User
-from apps.auth.services import get_user_by_id
-from apps.auth.utils import get_authenticated_user_id, require_session_auth_api
+from apps.auth.utils import (
+    get_authenticated_user,
+    get_authenticated_user_id,
+    require_tool_auth_api,
+)
 from apps.core.hosts import is_note_site
 from apps.core.http import (
     ajax_or_html,
@@ -171,8 +172,7 @@ def _authenticated_note_owner(request: HttpRequest) -> User | None:
         User | None: Authenticated user, or ``None`` for an anonymous request
             or a session whose user no longer exists.
     """
-    user_id = get_authenticated_user_id(request)
-    return get_user_by_id(user_id) if user_id else None
+    return get_authenticated_user(request)
 
 
 def _editor_context(request: HttpRequest, **extra) -> dict:
@@ -190,12 +190,8 @@ def _editor_context(request: HttpRequest, **extra) -> dict:
     Returns:
         dict[str, Any]: Template context.
     """
-    retrieval_url_base = request.build_absolute_uri(
-        reverse("note:retrieve", args=[DUMMY_NOTE_ID])
-    )
-    live_url_base = request.build_absolute_uri(
-        reverse("note:live", args=[DUMMY_NOTE_ID])
-    )
+    retrieval_url_base = request.build_absolute_uri(reverse("note:retrieve", args=[DUMMY_NOTE_ID]))
+    live_url_base = request.build_absolute_uri(reverse("note:live", args=[DUMMY_NOTE_ID]))
     return {
         "retrieval_url_base": retrieval_url_base,
         "live_url_base": live_url_base,
@@ -376,13 +372,13 @@ def _vault_session_user_or_error(
 
     Args:
         request (HttpRequest): Authenticated request (already gated by
-            ``require_session_auth_api``).
+            ``require_tool_auth_api("note")``).
 
     Returns:
         tuple[User | None, JsonResponse | None]: The user, or a JSON 404 when
         the session references a deleted account.
     """
-    user = get_user_by_id(request.session.get(SESSION_KEY_USER_ID))
+    user = get_authenticated_user(request)
     if not user:
         return None, json_error(ERROR_USER_NOT_FOUND, status=404)
     return user, None
@@ -460,9 +456,7 @@ def _rate_limited_json(request: HttpRequest) -> JsonResponse | None:
     return None
 
 
-def _save_or_error(
-    save: Callable[[], JsonResponse], log_message: str
-) -> JsonResponse:
+def _save_or_error(save: Callable[[], JsonResponse], log_message: str) -> JsonResponse:
     """Run a vault persistence callable and map failures to JSON errors.
 
     Args:
@@ -511,14 +505,6 @@ class NoteVaultView(SessionAuthRequiredMixin, View):
             _editor_context(
                 request,
                 user_id=user_id,
-                # The note vault mirrors the derived vault key into
-                # localStorage so sibling tabs on this origin can reuse it
-                # (the passwd vault keeps it per-tab in sessionStorage only).
-                # That copy has to age out, and the session's own lifetime is
-                # the honest bound: the key is useless once the session it
-                # depends on has lapsed. Handed over rather than hardcoded in
-                # JS so the two cannot drift apart.
-                session_max_age_seconds=settings.SESSION_COOKIE_AGE,
             ),
         )
 
@@ -527,13 +513,13 @@ class VaultIndexView(View):
     """
     Read or save the user's encrypted vault index (folder tree + note names).
 
-    JSON API gated by ``require_session_auth_api`` (JSON 401, not a redirect).
+    JSON API gated by ``require_tool_auth_api("note")`` (JSON 401, not a redirect).
     The index is opaque ciphertext to the server; an empty GET payload (just
     ``success``) means the user has no vault index yet.
     """
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_READ, "GET")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def get(self, request: HttpRequest) -> JsonResponse:
         """Return the current user's encrypted index (empty when unset)."""
         user, error_response = _vault_session_user_or_error(request)
@@ -542,7 +528,7 @@ class VaultIndexView(View):
         return json_ok(**(services.get_vault_index(user) or {}))
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def post(self, request: HttpRequest) -> JsonResponse:
         """Create or replace the current user's encrypted index."""
         data, error_response = _json_body_or_error(request)
@@ -576,19 +562,17 @@ class VaultNoteCollectionView(View):
     """
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_READ, "GET")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def get(self, request: HttpRequest) -> JsonResponse:
         """Return all of the current user's vault notes."""
         user, error_response = _vault_session_user_or_error(request)
         if error_response:
             return error_response
         include_content = request.GET.get("content") == "1"
-        return json_ok(
-            notes=services.list_vault_notes(user, include_content=include_content)
-        )
+        return json_ok(notes=services.list_vault_notes(user, include_content=include_content))
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def post(self, request: HttpRequest) -> JsonResponse:
         """Create a vault note from an encrypted payload."""
         data, error_response = _json_body_or_error(request)
@@ -624,7 +608,7 @@ class VaultNoteDetailView(View):
     """
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_READ, "GET")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def get(self, request: HttpRequest, pk) -> JsonResponse:
         """Return one of the current user's vault notes."""
         user, error_response = _vault_session_user_or_error(request)
@@ -637,7 +621,7 @@ class VaultNoteDetailView(View):
         return json_ok(**services.serialize_vault_note(note))
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def post(self, request: HttpRequest, pk) -> JsonResponse:
         """Overwrite one of the current user's vault notes."""
         data, error_response = _json_body_or_error(request)
@@ -672,7 +656,7 @@ class VaultNoteDeleteView(View):
     """
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def post(self, request: HttpRequest, pk) -> JsonResponse:
         """Delete the named note if it belongs to the current user."""
         user, error_response = _vault_session_user_or_error(request)
@@ -700,7 +684,7 @@ class VaultNoteTrashView(View):
     """
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def post(self, request: HttpRequest) -> JsonResponse:
         """Set or clear the Trash flag on a batch of the user's notes."""
         data, error_response = _json_body_or_error(request)
@@ -745,7 +729,7 @@ class VaultMigrateView(View):
     # back. The client therefore retries a 429, which means it has to be able
     # to tell one from a rejected CSRF token; an HTML 403 is indistinguishable.
     @_ip_ratelimit(RATE_LIMIT_VAULT_MIGRATE, "POST", block=False)
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("note"))
     def post(self, request: HttpRequest) -> JsonResponse:
         """Atomically apply a batch of re-encrypted notes and/or the index."""
         limited = _rate_limited_json(request)
@@ -762,9 +746,7 @@ class VaultMigrateView(View):
         for item in notes:
             if not isinstance(item, dict):
                 return json_error(ERROR_INVALID_JSON)
-            _values, error_response = _string_fields_or_error(
-                item, "id", "content", "iv"
-            )
+            _values, error_response = _string_fields_or_error(item, "id", "content", "iv")
             if error_response:
                 return error_response
 
@@ -772,9 +754,7 @@ class VaultMigrateView(View):
         if index_payload is not None:
             if not isinstance(index_payload, dict):
                 return json_error(ERROR_INVALID_JSON)
-            _values, error_response = _string_fields_or_error(
-                index_payload, "encrypted_data", "iv"
-            )
+            _values, error_response = _string_fields_or_error(index_payload, "encrypted_data", "iv")
             if error_response:
                 return error_response
 
@@ -986,9 +966,7 @@ class LiveNoteUpdatesView(View):
         payload, iv = values
 
         try:
-            row, pending, prev_seq = services.append_live_update(
-                pk, payload=payload, iv=iv
-            )
+            row, pending, prev_seq = services.append_live_update(pk, payload=payload, iv=iv)
         except LiveNote.DoesNotExist:
             # The expiry sweep can delete the note between the fetch above and
             # the locked re-fetch inside the service; same terminal 404.
@@ -998,9 +976,7 @@ class LiveNoteUpdatesView(View):
             # arrives here in ValidationError's dict form, which has no code
             # attribute at all (see the helper's docstring).
             if services.validation_code(e) == "pending_tail_full":
-                return json_error(
-                    ERROR_LIVE_TAIL_FULL, status=409, code="pending_tail_full"
-                )
+                return json_error(ERROR_LIVE_TAIL_FULL, status=409, code="pending_tail_full")
             return json_error(_validation_error_message(e))
         except Exception as e:
             logger.error(LOG_LIVE_APPEND_FAILED, exception_type(e))

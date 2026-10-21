@@ -194,6 +194,10 @@
 /* Modal shell + the shared unlock overlay (partials/_unlock_modal.html).
    Lives here rather than in a tool's stylesheet because the unlock modal is
    included by every tool's vault page. */
+.hidden {
+  display: none !important;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

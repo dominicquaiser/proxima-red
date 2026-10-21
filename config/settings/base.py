@@ -23,9 +23,7 @@ environ.Env.read_env(BASE_DIR / ".env")
 # A clearly-marked dev-only fallback keeps local and test runs friction-free.
 # production.py requires SECRET_KEY from the environment and refuses to boot with
 # this (publicly-known) value, so it can never reach a real deployment.
-DEV_FALLBACK_SECRET_KEY = (
-    "django-insecure-1t2hbk3qe$o=0co%6g9hi^i%f9#k5va^48_@(&4qr9!3i*zarx"
-)
+DEV_FALLBACK_SECRET_KEY = "django-insecure-1t2hbk3qe$o=0co%6g9hi^i%f9#k5va^48_@(&4qr9!3i*zarx"
 SECRET_KEY = env("SECRET_KEY", default=DEV_FALLBACK_SECRET_KEY)
 
 DEBUG = env.bool("DEBUG", default=False)
@@ -125,9 +123,7 @@ CHANNEL_LAYERS = {
 # --- Database ---
 # Driven by DATABASE_URL; defaults to the local SQLite file for bare-metal dev.
 
-DATABASES = {
-    "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
-}
+DATABASES = {"default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")}
 
 
 # --- Cache ---
@@ -185,11 +181,13 @@ SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_DOMAIN = env("SESSION_COOKIE_DOMAIN", default=None)
 CSRF_COOKIE_SAMESITE = "Lax"
 
-# Strict session idle timeout, and the single source of truth for it:
-# apps/auth/services.py reads settings.SESSION_COOKIE_AGE when it calls
-# request.session.set_expiry() on sign-in and after a password change.
+# Account identity survives while notes are in use. Vault authorization has
+# separate deadlines; background requests must never refresh either timer.
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
-SESSION_COOKIE_AGE = 30 * 60  # 30 minutes, in seconds
+PASSWORD_VAULT_TIMEOUT = 30 * 60
+NOTE_VAULT_IDLE_TIMEOUT = 7 * 24 * 60 * 60
+SESSION_COOKIE_AGE = NOTE_VAULT_IDLE_TIMEOUT
+SESSION_SAVE_EVERY_REQUEST = False
 
 # Additional security headers.
 SECURE_BROWSER_XSS_FILTER = True

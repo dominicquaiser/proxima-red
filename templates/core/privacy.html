@@ -126,10 +126,11 @@
       <ul>
         <li>The authenticated user's internal numeric user ID</li>
         <li>A flag confirming successful authentication</li>
+        <li>Separate vault access deadlines and identifiers for invalidating sessions after a password change</li>
       </ul>
       <p>No personal name, e-mail address, or plaintext secret is stored in the session.</p>
       <p>
-        <strong>Attributes:</strong> HttpOnly · Secure (HTTPS) · SameSite=Lax · max-age 30 minutes.
+        <strong>Attributes:</strong> HttpOnly · Secure (HTTPS) · SameSite=Lax · max-age seven days.
         The cookie is not set for visitors who do not sign in.
       </p>
       <p>
@@ -144,9 +145,11 @@
         cookie meets this criterion.
       </p>
       <p>
-        <strong>Retention:</strong> The session is automatically invalidated after 30 minutes of
-        inactivity. The user can also invalidate it explicitly by signing out. Expired sessions are
-        purged from the database by Django's session cleanup mechanism.
+        <strong>Retention:</strong> Password vault access expires 30 minutes after password
+        verification, even during use. Note vault access expires after seven days without note
+        activity. Foreground note activity renews the note deadline and the shared session cookie;
+        background status checks do not. Signing out invalidates both vaults. Expired session records
+        are purged by Django's session cleanup mechanism.
       </p>
 
       <h3>3.3 CSRF Token Cookie</h3>
@@ -508,9 +511,12 @@
       </table>
       <p>
         The vault is encrypted with the vault key, which is derived entirely in the browser from the
-        account password and the <code>vault_salt</code>. The vault key is stored only in
-        <code>sessionStorage</code> for the duration of the browser session; it is never sent to the
-        server. The server stores only opaque ciphertext.
+        account password and the <code>vault_salt</code>. Password vault keys are held per tab in
+        <code>sessionStorage</code>. Notes also cache the derived key in <code>localStorage</code>
+        so other note tabs and browser restarts can reuse it within the seven-day access window.
+        Cached keys are checked against the account, session and expiry before use. Expired or revoked
+        copies are discarded when the application next checks them; closed browser origins cannot be
+        cleared remotely. The vault key is never sent to the server, which stores only opaque ciphertext.
       </p>
       <p><strong>Purpose:</strong> Persisting the user's vault across devices and sessions.</p>
       <p><strong>Legal basis:</strong> Art. 6(1)(b) GDPR — performance of the service contract.</p>
@@ -653,7 +659,7 @@
           </tr>
           <tr>
             <td>Session cookie / session record</td>
-            <td>30 minutes inactivity timeout; deleted on sign-out</td>
+            <td>Seven-day session lifetime, renewed by note activity or password verification; invalidated on sign-out</td>
           </tr>
           <tr>
             <td>CSRF cookie</td>

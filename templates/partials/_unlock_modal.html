@@ -1,9 +1,7 @@
-{% load static %} {% comment %} In-place unlock overlay: re-derive the per-tab vault key without a
-full sign-out, for a tab that has a valid login but an empty sessionStorage (e.g. a second tab, or
-one opened after the original sign-in tab closed). The overlay can't be dismissed (no close button)
-so nothing behind the lock is exposed by closing it. Wired by static/auth/js/unlock.js
-(window.SecureSessionUnlock). Include with the account's user id: {% templatetag openblock %}
-include "partials/_unlock_modal.html" with user_id=user_id {% templatetag closeblock %}
+{% load static %} {% comment %}
+Password unlock for a missing key or expired tool grant. Reauthentication
+renews only vault_tool (default: pass; "account" renews both, for the
+account page's export). The shared login must still be valid.
 {% endcomment %}
 <div
   id="unlock-modal"
@@ -12,6 +10,7 @@ include "partials/_unlock_modal.html" with user_id=user_id {% templatetag closeb
   aria-modal="true"
   aria-labelledby="unlock-title"
   data-user-id="{{ user_id }}"
+  data-tool="{{ vault_tool|default:'pass' }}"
   data-salts-url="{% url 'auth:salts' %}"
   data-reauth-url="{% url 'auth:reauth' %}"
 >
@@ -24,8 +23,7 @@ include "partials/_unlock_modal.html" with user_id=user_id {% templatetag closeb
           {% firstof unlock_title "[pass·]" %}<span> /unlock</span>
         </div>
         <div class="card__subtitle">
-          Your encryption key lives only in the tab you signed in on.<br />
-          Re-enter your password to unlock this tab.
+          Enter your account password to unlock this vault.
         </div>
       </div>
 

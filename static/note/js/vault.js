@@ -8,8 +8,6 @@
 (function () {
   "use strict";
 
-  // Cross-tab key cache for this origin; cleared during sign-out.
-  const NOTE_VAULT_KEY_STORAGE = "noteVaultMasterKey";
   const DEFAULT_NOTE_NAME = "untitled.md";
   const DEFAULT_FOLDER_NAME = "folder";
   const HIDDEN_CLASS = "hidden";
@@ -33,11 +31,6 @@
     const noteDeleteUrlBase = main.dataset.noteDeleteUrlBase;
     const noteTrashUrl = main.dataset.noteTrashUrl;
     const trashRetentionDays = main.dataset.trashRetentionDays;
-    // Bounds how long the cross-tab key copy may sit in localStorage. Server
-    // supplied (SESSION_COOKIE_AGE) so it cannot drift from the session it
-    // is tied to; 0 if absent, which disables the mirror rather than
-    // defaulting to some guessed lifetime.
-    const sessionMaxAgeMs = (Number(main.dataset.sessionMaxAge) || 0) * 1000;
     const dummyNoteId = main.dataset.dummyNoteId;
 
     const crumbEl = document.getElementById("vault-crumb");
@@ -53,6 +46,8 @@
     let masterKey = null;
     let index = Index.createEmpty();
     let readOnly = false;
+    let permanentReadOnly = false;
+    let vaultLoaded = false;
     let currentNoteId = null; // null means the buffer has no server row yet.
     let currentName = DEFAULT_NOTE_NAME;
     let lastSavedValue = "";
@@ -289,22 +284,16 @@
      */
     const disableVault = (message) => {
       readOnly = true;
+      if (message) permanentReadOnly = true;
       if (saveBtn) saveBtn.disabled = true;
       if (message) window.Notify.show(message, "error");
     };
 
     // --- Expired session ---
     //
-    // A 401 from any vault API means the session itself is gone. The unlock
-    // overlay cannot fix that (/auth/reauth/ is session-gated too, and only
-    // ever re-derives a missing key), so the recovery is a real sign-in - in
-    // a NEW tab, because this tab holds the unsaved buffer and there is no
-    // autosave to fall back on. The vault key survives signing in again (it
-    // derives from the password and vault_salt, neither of which a sign-in
-    // changes), so the retry afterwards just works.
-    //
-    // `mode` is "retry" (the editor is intact; sign in and try again) or
-    // "reload" (the vault never loaded; sign in and reload the page).
+    // A 401 needs a full sign-in in a new tab, preserving this tab's unsaved
+    // text. VaultSession restores access after the same account signs in again.
+    // A 423 (tool grant expired) instead uses the in-place password prompt.
     /**
      * Raise the sign-in prompt.
      *
@@ -346,12 +335,10 @@
      * @returns {boolean} True when the session has expired.
      */
     const sessionIsGone = (response, mode) => {
+      if (response.status === 423) return true;
       if (response.status === 401) {
-        // The session is over, so the mirrored key has nothing left to
-        // unlock: drop it instead of leaving it on disk for the next tab.
-        // This tab keeps its in-memory masterKey, so the sign-in-and-retry
-        // flow the modal offers still works.
-        window.AuthCrypto.clearMirroredVaultKey(NOTE_VAULT_KEY_STORAGE);
+        // The 401 also reaches VaultSession (via "vault-session-error"), which
+        // locks and drops the cached keys. The editor buffer stays available.
         showSessionExpired(mode);
         return true;
       }
@@ -955,9 +942,11 @@
     if (window.matchMedia(MOBILE_SIDEBAR_QUERY).matches) setCollapsed(true);
 
     const loadVaultIndex = async () => {
+      const loadKey = masterKey;
       let blob;
       try {
         const { response, result } = await window.Http.getJson(indexUrl);
+        if (loadKey !== masterKey) return false;
         // "reload", not "retry": nothing loaded, so there is no buffer to
         // preserve and no in-place retry to offer.
         if (sessionIsGone(response, "reload")) {
@@ -978,8 +967,9 @@
           const decrypted = await window.AuthCrypto.decryptAccountData(
             blob.encrypted_data,
             blob.iv,
-            masterKey,
+            loadKey,
           );
+          if (loadKey !== masterKey) return false;
           if (!Index.isSupported(decrypted)) {
             throw new Error("Unsupported vault index format");
           }
@@ -1012,10 +1002,12 @@
     // Returns null only when the session expired; unreadable ciphertext rows
     // stay visible as flagged rows and do not stop the rest of recovery.
     const recoverOrphanRows = async (orphanIds) => {
+      const loadKey = masterKey;
       let recovered = false;
       for (const id of orphanIds) {
         try {
           const { response, result } = await window.Http.getJson(noteUrl(id));
+          if (loadKey !== masterKey) return null;
           // Stop rather than fall through to the catch: that path files the
           // row as "unreadable", which is a claim about the key and would
           // stick in the UI long after signing in fixed the real problem.
@@ -1027,8 +1019,9 @@
           const text = await window.PasswordCrypto.decryptPassword(
             result.content,
             result.iv,
-            masterKey,
+            loadKey,
           );
+          if (loadKey !== masterKey) return null;
           // Re-adopt at the row's own Trash state, so a note recovered from a
           // half-finished write does not silently climb back out of Trash.
           index = Index.addNote(index, {
@@ -1057,9 +1050,11 @@
      * half-known index risks saving one that drops entries it could not read.
      */
     const loadVault = async () => {
+      const loadKey = masterKey;
       if (!(await loadVaultIndex())) return;
+      if (loadKey !== masterKey) return;
       const serverNotes = await loadVaultRows();
-      if (serverNotes === null) return;
+      if (serverNotes === null || loadKey !== masterKey) return;
 
       const outcome = Index.reconcile(index, serverNotes);
       index = outcome.index;
@@ -1067,7 +1062,9 @@
       if (recovered === null) return;
 
       if (outcome.changed || recovered) await persistIndex();
-      startNewBuffer();
+      vaultLoaded = true;
+      if (!isDirty) startNewBuffer();
+      else renderTree();
 
       // Housekeeping, after the vault is on screen and normally a no-op: bring
       // rows whose Trash flag disagrees with the index back in line, one bulk
@@ -1093,16 +1090,31 @@
         return;
       }
 
-      // Import a key handed over in the URL fragment, then scrub it.
-      window.AuthCrypto.consumeVaultKeyFromFragment();
-
-      // Resolve the vault key: this tab's session, a key another tab on this
-      // origin mirrored to localStorage, or the in-place unlock modal (the
-      // helper mirrors whatever it resolves back to localStorage for siblings).
-      const storedKeyBase64 = await window.AuthCrypto.resolveVaultKeyBase64({
-        localStorageKey: NOTE_VAULT_KEY_STORAGE,
-        maxAgeMs: sessionMaxAgeMs,
+      const session = window.VaultSession.create({
+        tool: "note",
+        userId: document.getElementById("unlock-modal").dataset.userId,
+        onLock: () => {
+          masterKey = null;
+          disableVault();
+        },
+        onUnlock: async (key) => {
+          masterKey = await window.AuthCrypto.importKeyFromBase64(key);
+          readOnly = permanentReadOnly;
+          if (saveBtn) saveBtn.disabled = readOnly;
+          hideSessionExpired();
+          if (!vaultLoaded && !readOnly) await loadVault();
+        },
+        onSignedOut: () => showSessionExpired(vaultLoaded ? "retry" : "reload"),
+        onIdentityChange: () =>
+          disableVault("Your account or password changed. Copy any unsaved text before reloading."),
       });
+      let storedKeyBase64;
+      try {
+        storedKeyBase64 = await session.start();
+      } catch {
+        disableVault("Unable to check your session. Check your connection and reload.");
+        return;
+      }
       if (!storedKeyBase64) {
         disableVault("This tab is locked. Reload the page to unlock your vault.");
         return;
@@ -1118,17 +1130,6 @@
 
       await loadVault();
     };
-
-    // Clear the cross-tab vault key before sign-out navigation.
-    // Only reaches the copy when the sign-out happens on THIS origin (the
-    // sidebar's form and the unlock modal's). localStorage is origin-scoped,
-    // so a sign-out on the main site or the pass subdomain cannot clear it --
-    // which is why the stored copy also carries an expiry.
-    document.querySelectorAll('form[action*="/auth/signout/"]').forEach((form) => {
-      form.addEventListener("submit", () => {
-        window.AuthCrypto.clearMirroredVaultKey(NOTE_VAULT_KEY_STORAGE);
-      });
-    });
 
     renderTree();
     initialize();

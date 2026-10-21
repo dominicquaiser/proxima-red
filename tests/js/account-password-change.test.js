@@ -22,6 +22,7 @@ const accountSource = fs.readFileSync(path.join(ROOT, "static/auth/js/account.js
 function setup(overrides = {}) {
   const trace = [];
   const notices = [];
+  let recoveryVisible = false;
   const fields = Object.fromEntries(
     [
       "id_current_password",
@@ -62,6 +63,7 @@ function setup(overrides = {}) {
   let ready;
   let migrationAttempts = 0;
   const context = {
+    URLSearchParams,
     console: { error: () => {} },
     fetch: () => {},
     setTimeout: (callback) => {
@@ -74,6 +76,17 @@ function setup(overrides = {}) {
         if (name === "DOMContentLoaded") ready = callback;
       },
       getElementById: (id) => {
+        if (id === "vault-recovery")
+          return {
+            classList: {
+              remove: () => {
+                recoveryVisible = true;
+              },
+              add: () => {
+                recoveryVisible = false;
+              },
+            },
+          };
         if (id === "change-password-form") return form;
         if (id === "auth-data") {
           return {
@@ -86,6 +99,7 @@ function setup(overrides = {}) {
         return fields[id] || null;
       },
       querySelector: () => null,
+      querySelectorAll: () => [],
     },
   };
   context.window = context;
@@ -113,8 +127,8 @@ function setup(overrides = {}) {
       encryptedData: data.kind === "index" ? "index-new" : "pass-new",
       iv: "new-iv",
     }),
-    establishSecureSession: async () => {
-      trace.push({ step: "session-key" });
+    establishSecureSession: async (_password, salt, context) => {
+      trace.push({ step: "session-key", salt, context });
     },
   };
   context.PasswordCrypto = { decryptPassword: async (content) => content };
@@ -122,6 +136,7 @@ function setup(overrides = {}) {
     encryptWithKey: async (content) => ({ encryptedData: `new:${content}`, iv: "new-iv" }),
   };
   context.Http = {
+    setVaultIdentity: () => {},
     getJson: async (url) => {
       trace.push({ step: "read", url });
       assert.ok(Object.hasOwn(replies, url), `unexpected GET ${url}`);
@@ -129,6 +144,13 @@ function setup(overrides = {}) {
     },
     postForm: async (url, payload) => {
       trace.push({ step: "post", url, payload });
+      if (url === "/auth/reauth/") {
+        if (overrides.reauthReply) return overrides.reauthReply;
+        return {
+          response: { ok: true, status: 200 },
+          result: { success: true, state: { identity: "old-identity" } },
+        };
+      }
       if (url === "/vault/migrate/") {
         migrationAttempts += 1;
         if (overrides.migrateReply) return overrides.migrateReply(migrationAttempts, payload);
@@ -136,7 +158,12 @@ function setup(overrides = {}) {
       if (url === form.action) {
         return {
           response: { ok: true, status: 200 },
-          result: { success: true, auth_salt: "new-auth-salt", vault_salt: "new-vault-salt" },
+          result: {
+            success: true,
+            auth_salt: "new-auth-salt",
+            vault_salt: "new-vault-salt",
+            state: { identity: "new-identity" },
+          },
         };
       }
       return { response: { ok: true, status: 200 }, result: { success: true } };
@@ -153,6 +180,7 @@ function setup(overrides = {}) {
     fields,
     notices,
     trace,
+    recoveryVisible: () => recoveryVisible,
     submit: async () => {
       let prevented = false;
       await listeners.submit({
@@ -174,8 +202,29 @@ test("an empty pair of vaults permits the change without migration writes", asyn
   assert.equal(postsTo(page.trace, "/update-data/").length, 0);
   assert.equal(postsTo(page.trace, "/vault/migrate/").length, 0);
   assert.equal(page.trace.at(-1).step, "session-key");
+  // Stamped with the post-change state, or VaultSession refuses the handoff.
+  assert.equal(page.trace.at(-1).salt, "new-vault-salt");
+  assert.equal(page.trace.at(-1).context.identity, "new-identity");
   assert.equal(page.fields.id_current_password.value, "");
   assert.ok(page.notices.some((notice) => notice.kind === "success"));
+  assert.equal(page.trace[0].url, "/auth/reauth/");
+  assert.equal(page.trace[0].payload.get("tool"), "account");
+});
+
+test("rejected password verification prevents all vault reads and credential changes", async () => {
+  const page = setup({
+    reauthReply: {
+      response: { ok: false, status: 401 },
+      result: { success: false, error: "Incorrect password" },
+    },
+  });
+  await page.submit();
+  assert.equal(
+    page.trace.some((entry) => entry.step === "read"),
+    false,
+  );
+  assert.equal(postsTo(page.trace, "/auth/account/password/").length, 0);
+  assert.equal(page.recoveryVisible(), false);
 });
 
 for (const [label, replies] of [
@@ -186,7 +235,10 @@ for (const [label, replies] of [
     const page = setup({ replies });
     await page.submit();
     assert.equal(postsTo(page.trace, "/auth/account/password/").length, 0);
-    assert.equal(page.trace.some((entry) => entry.step === "session-key"), false);
+    assert.equal(
+      page.trace.some((entry) => entry.step === "session-key"),
+      false,
+    );
     assert.ok(page.notices.some((notice) => notice.kind === "error"));
   });
 }
@@ -201,9 +253,10 @@ test("a 429 retries the same note batch before refreshing the session key", asyn
         notes: [{ id: "n1", content: "text", iv: "old-iv" }],
       },
     },
-    migrateReply: (attempt) => attempt === 1
-      ? { response: { ok: false, status: 429 }, result: { success: false } }
-      : { response: { ok: true, status: 200 }, result: { success: true } },
+    migrateReply: (attempt) =>
+      attempt === 1
+        ? { response: { ok: false, status: 429 }, result: { success: false } }
+        : { response: { ok: true, status: 200 }, result: { success: true } },
   });
   await page.submit();
   const migration = postsTo(page.trace, "/vault/migrate/");
@@ -233,9 +286,10 @@ test("a failed later batch keeps the old session key and leaves the index for la
       "/vault/index/": { success: true, encrypted_data: "index-old", iv: "old-iv" },
       "/vault/notes/?content=1": { success: true, notes },
     },
-    migrateReply: (attempt) => attempt === 1
-      ? { response: { ok: true, status: 200 }, result: { success: true } }
-      : { response: { ok: false, status: 500 }, result: { success: false } },
+    migrateReply: (attempt) =>
+      attempt === 1
+        ? { response: { ok: true, status: 200 }, result: { success: true } }
+        : { response: { ok: false, status: 500 }, result: { success: false } },
   });
   await page.submit();
   const migration = postsTo(page.trace, "/vault/migrate/");
@@ -244,8 +298,12 @@ test("a failed later batch keeps the old session key and leaves the index for la
   assert.equal(migration[0].payload.index, undefined);
   assert.equal(migration[1].payload.notes.length, 1);
   assert.equal(migration[1].payload.index.encrypted_data, "index-new");
-  assert.equal(page.trace.some((entry) => entry.step === "session-key"), false);
+  assert.equal(
+    page.trace.some((entry) => entry.step === "session-key"),
+    false,
+  );
   assert.equal(page.fields.id_current_password.value, "");
+  assert.equal(page.recoveryVisible(), true);
   assert.ok(
     page.notices.some((notice) => notice.message.includes("notes could not all be re-secured")),
   );

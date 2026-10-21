@@ -4,8 +4,8 @@ Host classification for the multi-site dispatch.
 One Django instance serves three hosts (``SITE_URL``, ``PASS_SITE_URL``,
 ``NOTE_SITE_URL``); these helpers say which one a request arrived on. They
 live in a leaf module (like ``apps.core.http``) so tool apps can host-gate
-their own views — e.g. the note tool's live page — without importing
-``apps.core.views``, whose dispatchers import tool views in return.
+their own views without importing ``apps.core.views``, whose dispatchers
+import tool views in return.
 """
 
 from urllib.parse import urlparse

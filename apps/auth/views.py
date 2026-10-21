@@ -27,47 +27,53 @@ from apps.core.http import (
     json_ok,
 )
 
+from . import services
+from .constants import (
+    DEFAULT_VAULT_TOOL,
+    ERROR_ACCOUNT_DELETION_FAILED,
+    ERROR_INVALID_CREDENTIALS,
+    ERROR_INVALID_USER_ID,
+    ERROR_UNEXPECTED,
+    ERROR_USER_CREATION_FAILED,
+    LOG_ACCOUNT_DELETE_ERROR,
+    LOG_SIGNIN_ERROR,
+    LOG_SIGNUP_ERROR,
+    RATE_LIMIT_ACCOUNT,
+    RATE_LIMIT_SIGNIN,
+    RATE_LIMIT_SIGNUP,
+    RATE_LIMIT_VAULT_SESSION,
+    SUCCESS_ACCOUNT_CREATED,
+    SUCCESS_ACCOUNT_DELETED,
+    SUCCESS_PASSWORD_CHANGED,
+    SUCCESS_SIGNIN,
+    SUCCESS_SIGNOUT,
+    SUCCESS_USER_CREATED,
+    TEMPLATE_ACCOUNT,
+    TEMPLATE_SIGNIN,
+    TEMPLATE_SIGNUP,
+    VAULT_TOOL_NOTE,
+    VAULT_TOOLS,
+)
 from .exceptions import UserCreationError
+from .forms import (
+    AccountDeletionForm,
+    PasswordChangeForm,
+    SigninForm,
+    SignupForm,
+)
 from .mixins import (
     MainSiteRedirectMixin,
     RatelimitGateMixin,
     SessionAuthRequiredMixin,
 )
 from .models import is_valid_user_id
-from .utils import get_authenticated_user_id, require_session_auth_api
-from .forms import (
-    SignupForm,
-    SigninForm,
-    PasswordChangeForm,
-    AccountDeletionForm,
+from .utils import (
+    get_authenticated_user,
+    get_authenticated_user_id,
+    require_session_auth_api,
+    require_tool_auth_api,
 )
-from . import services
-from .constants import (
-    DEFAULT_VAULT_TOOL,
-    RATE_LIMIT_SIGNUP,
-    RATE_LIMIT_SIGNIN,
-    RATE_LIMIT_ACCOUNT,
-    SESSION_KEY_AUTHENTICATED,
-    VAULT_TOOL_NOTE,
-    VAULT_TOOLS,
-    TEMPLATE_SIGNUP,
-    TEMPLATE_SIGNIN,
-    TEMPLATE_ACCOUNT,
-    ERROR_UNEXPECTED,
-    ERROR_USER_CREATION_FAILED,
-    ERROR_ACCOUNT_DELETION_FAILED,
-    ERROR_INVALID_CREDENTIALS,
-    ERROR_INVALID_USER_ID,
-    SUCCESS_ACCOUNT_CREATED,
-    SUCCESS_USER_CREATED,
-    SUCCESS_SIGNIN,
-    SUCCESS_SIGNOUT,
-    SUCCESS_PASSWORD_CHANGED,
-    SUCCESS_ACCOUNT_DELETED,
-    LOG_ACCOUNT_DELETE_ERROR,
-    LOG_SIGNIN_ERROR,
-    LOG_SIGNUP_ERROR,
-)
+from .vault_sessions import access_state, grant_access, renew_note_access
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +128,7 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
 
     def redirect_if_authenticated(self, request: HttpRequest):
         """Return a redirect to the vault for an already-authenticated session, else None."""
-        if request.session.get(SESSION_KEY_AUTHENTICATED):
+        if get_authenticated_user_id(request):
             return redirect(vault_url(self.requested_tool(request)))
         return None
 
@@ -164,9 +170,7 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
             html=lambda: self._html_exception_response(request, message),
         )
 
-    def _html_exception_response(
-        self, request: HttpRequest, message: str
-    ) -> HttpResponse:
+    def _html_exception_response(self, request: HttpRequest, message: str) -> HttpResponse:
         """Flash an error message and render the unbound form."""
         messages.error(request, message)
         return self.render_form(request)
@@ -276,16 +280,11 @@ class AuthSaltsView(RatelimitGateMixin, View):
 )
 class ReauthView(RatelimitGateMixin, View):
     """
-    Re-verify the *current session's* password and return its public salts.
+    Verify the current account password and renew the selected vault grant.
 
-    Backs the in-place "unlock" prompt (``static/auth/js/unlock.js``): a tab with a
-    valid login but no derived vault key - the key lives in per-tab
-    ``sessionStorage`` and can't be shared across tabs/subdomains - re-derives it
-    without a full sign-out. Unlike ``SigninView`` this neither creates nor
-    short-circuits a session; it only confirms the supplied auth secret matches
-    the logged-in account and hands back the salts to derive the key client-side.
-    Verifying against the *session* user (not a posted ``user_id``) keeps it from
-    becoming a password-checking oracle for other accounts.
+    The account preflight grants both tools so password rotation can recover
+    both vaults before changing credentials. Verification always uses the session
+    user; a posted user ID cannot select another account.
     """
 
     ratelimit_redirect = "auth:signin"
@@ -297,11 +296,53 @@ class ReauthView(RatelimitGateMixin, View):
             return json_error(ERROR_INVALID_CREDENTIALS, status=400)
 
         user_id = get_authenticated_user_id(request)
+        tool = request.POST.get("tool", "pass")
+        if tool not in (*VAULT_TOOLS, "account"):
+            return json_error("Invalid vault tool.")
+        expected_user = request.POST.get("expected_user")
+        if expected_user and expected_user != user_id:
+            return json_error("The signed-in account changed. Reload to continue.", status=409)
         user = services.authenticate_user(user_id, auth_secret)
         if not user:
             return json_error(ERROR_INVALID_CREDENTIALS, status=401)
 
-        return json_ok(auth_salt=user.auth_salt, vault_salt=user.vault_salt)
+        grant_access(request, user, VAULT_TOOLS if tool == "account" else (tool,))
+        response = json_ok(
+            auth_salt=user.auth_salt,
+            vault_salt=user.vault_salt,
+            state=access_state(request, user, "pass" if tool == "account" else tool),
+        )
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+@method_decorator(
+    ratelimit(
+        key=client_ip_key, rate=RATE_LIMIT_VAULT_SESSION, method=["GET", "POST"], block=False
+    ),
+    name="dispatch",
+)
+class VaultSessionView(RatelimitGateMixin, View):
+    """Read deadlines without renewal; explicitly record foreground note activity."""
+
+    ratelimit_redirect = "auth:signin"
+
+    @method_decorator(require_session_auth_api)
+    def get(self, request):
+        tool = request.GET.get("tool", "pass")
+        if tool not in VAULT_TOOLS:
+            return json_error("Invalid vault tool.")
+        user = get_authenticated_user(request)
+        if not user:
+            return json_error(ERROR_INVALID_CREDENTIALS, status=401)
+        response = json_ok(state=access_state(request, user, tool))
+        response["Cache-Control"] = "no-store"
+        return response
+
+    @method_decorator(require_tool_auth_api("note"))
+    def post(self, request):
+        renew_note_access(request)
+        return json_ok(state=access_state(request, get_authenticated_user(request), "note"))
 
 
 @method_decorator(
@@ -375,6 +416,7 @@ class SigninView(AuthFormView):
                 SUCCESS_SIGNIN,
                 auth_salt=user.auth_salt,
                 vault_salt=user.vault_salt,
+                state=access_state(request, user, tool),
                 redirect_url=vault_url(tool),
             ),
             html=lambda: redirect(vault_url(tool)),
@@ -411,9 +453,7 @@ class SignoutView(RatelimitGateMixin, View):
     ratelimit(key=client_ip_key, rate=RATE_LIMIT_ACCOUNT, method="POST", block=False),
     name="dispatch",
 )
-class AccountBaseView(
-    MainSiteRedirectMixin, RatelimitGateMixin, SessionAuthRequiredMixin, View
-):
+class AccountBaseView(MainSiteRedirectMixin, RatelimitGateMixin, SessionAuthRequiredMixin, View):
     """
     Shared authentication gate, rate limiting, and helpers for the account
     pages (view page, password change, account deletion).
@@ -435,6 +475,7 @@ class AccountBaseView(
             "password_form": password_form,
             "deletion_form": deletion_form,
             "auth_data_json": {
+                "user_id": user.user_id,
                 "auth_salt": user.auth_salt,
                 "vault_salt": user.vault_salt,
             },
@@ -522,7 +563,7 @@ class PasswordChangeView(AccountBaseView):
             )
 
             # Regenerate session to prevent session fixation
-            services.regenerate_session_after_password_change(request)
+            services.regenerate_session_after_password_change(request, user)
 
             return ajax_or_html(
                 request,
@@ -530,10 +571,9 @@ class PasswordChangeView(AccountBaseView):
                     SUCCESS_PASSWORD_CHANGED,
                     auth_salt=new_auth_salt,
                     vault_salt=new_vault_salt,
+                    state=access_state(request, user, "pass"),
                 ),
-                html=lambda: flash_and_redirect(
-                    request, SUCCESS_PASSWORD_CHANGED, "auth:account"
-                ),
+                html=lambda: flash_and_redirect(request, SUCCESS_PASSWORD_CHANGED, "auth:account"),
             )
 
         return self.account_form_error_response(
@@ -576,19 +616,11 @@ class AccountDeletionView(AccountBaseView):
         request.session.flush()
         return ajax_or_html(
             request,
-            ajax=lambda: json_ok(
-                SUCCESS_ACCOUNT_DELETED, redirect_url=reverse("auth:signup")
-            ),
-            html=lambda: flash_and_redirect(
-                request, SUCCESS_ACCOUNT_DELETED, "auth:signup"
-            ),
+            ajax=lambda: json_ok(SUCCESS_ACCOUNT_DELETED, redirect_url=reverse("auth:signup")),
+            html=lambda: flash_and_redirect(request, SUCCESS_ACCOUNT_DELETED, "auth:signup"),
         )
 
-    def _render_deletion_error(
-        self, request, user, password_form, deletion_form
-    ) -> HttpResponse:
+    def _render_deletion_error(self, request, user, password_form, deletion_form) -> HttpResponse:
         """Flash deletion failure and render the account page."""
         messages.error(request, ERROR_ACCOUNT_DELETION_FAILED)
-        return self.render_account(
-            request, user, password_form, deletion_form, status=500
-        )
+        return self.render_account(request, user, password_form, deletion_form, status=500)

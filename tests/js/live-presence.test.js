@@ -44,7 +44,7 @@ describe("identityFor", () => {
   });
 
   test("name and colour hashes are independent (not always co-varying)", () => {
-    // Find two ids with the same name but different colours — if name and
+    // Find two ids with the same name but different colours. If name and
     // colour were derived from one hash, same name would force same colour.
     const byName = new Map();
     let found = false;

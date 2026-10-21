@@ -25,6 +25,8 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 global.window = globalThis;
+const events = new EventTarget();
+global.dispatchEvent = (event) => events.dispatchEvent(event);
 // getCsrfToken looks for a hidden form field, then the cookie jar.
 global.document = { querySelector: () => null, cookie: "" };
 // postForm branches on `body instanceof HTMLFormElement`; Node has no DOM, so

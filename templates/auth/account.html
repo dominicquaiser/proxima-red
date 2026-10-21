@@ -161,6 +161,10 @@
 
             <button type="submit" class="btn-create">Update Password</button>
           </form>
+          <div id="vault-recovery" class="hidden">
+            <p>Your password changed, but some data could not be saved. Download a recovery copy before leaving this page. It contains unencrypted notes and saved links; store it privately.</p>
+            <button type="button" id="download-vault-recovery" class="btn-create">Download recovery copy</button>
+          </div>
         </div>
       </div>
 
@@ -262,9 +266,11 @@
     </main>
 
     {{ auth_data_json|json_script:"auth-data" }}
+    {% include "partials/_unlock_modal.html" with user_id=user_obj.user_id vault_tool="account" %}
 
     {% include "partials/_util_scripts.html" %}
     {% include "partials/_auth_scripts.html" %}
+    <script src="{% static 'auth/js/unlock.js' %}" defer></script>
     <script src="{% static 'auth/js/vault-migration.js' %}" defer></script>
     <script src="{% static 'auth/js/account.js' %}" defer></script>
   </body>

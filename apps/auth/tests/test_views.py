@@ -19,8 +19,8 @@ from apps.auth.constants import (
 )
 from apps.auth.exceptions import UserCreationError
 from apps.auth.models import User
-from apps.auth.views import vault_url
 from apps.auth.tests.factories import create_user_with_password
+from apps.auth.views import vault_url
 from apps.passwd.models import SharedPassword
 
 AUTH_SECRET = base64.b64encode(b"a" * 32).decode()
@@ -101,15 +101,14 @@ class SignupViewTests(TestCase):
     def _authenticate_session(self):
         session = self.client.session
         session["authenticated"] = True
+        session["user_id"] = "12345678"
         session.save()
 
     def test_signup_get_redirects_when_authenticated(self):
         """An already-authenticated session is sent to the vault instead."""
         self._authenticate_session()
         response = self.client.get(self.signup_url)
-        self.assertRedirects(
-            response, vault_url(), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, vault_url(), fetch_redirect_response=False)
 
     def test_signup_post_redirects_when_authenticated(self):
         """An authenticated POST is redirected without creating a user."""
@@ -122,9 +121,7 @@ class SignupViewTests(TestCase):
                 "vault_salt": VAULT_SALT,
             },
         )
-        self.assertRedirects(
-            response, vault_url(), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, vault_url(), fetch_redirect_response=False)
         self.assertEqual(User.objects.count(), 0)
 
     def test_signup_user_creation_error_returns_specific_message(self):
@@ -273,9 +270,7 @@ class SigninViewTests(TestCase):
             {"user_id": self.user.user_id, "auth_secret": self.auth_secret},
         )
         response = self.client.get(self.signin_url)
-        self.assertRedirects(
-            response, vault_url(), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, vault_url(), fetch_redirect_response=False)
 
     def test_signin_post_redirects_when_authenticated(self):
         """An authenticated POST short-circuits to the vault redirect."""
@@ -287,9 +282,7 @@ class SigninViewTests(TestCase):
             self.signin_url,
             {"user_id": self.user.user_id, "auth_secret": WRONG_AUTH_SECRET},
         )
-        self.assertRedirects(
-            response, vault_url(), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, vault_url(), fetch_redirect_response=False)
         # The short-circuit must not have torn down the session.
         self.assertTrue(self.client.session.get("authenticated"))
 
@@ -318,9 +311,7 @@ class SigninViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["redirect_url"], vault_url("note"))
-        self.assertTrue(
-            response.json()["redirect_url"].endswith(reverse("note:vault"))
-        )
+        self.assertTrue(response.json()["redirect_url"].endswith(reverse("note:vault")))
 
     def test_signin_unknown_tool_falls_back_to_pass(self):
         """A tool value outside the allowlist must not steer the redirect."""
@@ -342,9 +333,7 @@ class SigninViewTests(TestCase):
             {"user_id": self.user.user_id, "auth_secret": self.auth_secret},
         )
         response = self.client.get(self.signin_url, {"tool": "note"})
-        self.assertRedirects(
-            response, vault_url("note"), fetch_redirect_response=False
-        )
+        self.assertRedirects(response, vault_url("note"), fetch_redirect_response=False)
 
     def test_signin_form_carries_tool_through_render(self):
         """The rendered signin form embeds the vetted tool as a hidden field."""
@@ -395,9 +384,7 @@ class SigninViewTests(TestCase):
 
         # RATE_LIMIT_SIGNIN is 10/m; the 11th POST in the window is blocked.
         for _ in range(10):
-            self.client.post(
-                self.signin_url, payload, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
-            )
+            self.client.post(self.signin_url, payload, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
 
         response = self.client.post(
             self.signin_url, payload, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
@@ -455,9 +442,7 @@ class MainSiteRedirectTests(TestCase):
     def test_account_get_on_pass_host_redirects_to_main(self):
         """An authenticated account GET on pass.proxima.red is sent to main."""
         self._authenticate()
-        response = self.client.get(
-            reverse("auth:account"), HTTP_HOST="pass.proxima.red"
-        )
+        response = self.client.get(reverse("auth:account"), HTTP_HOST="pass.proxima.red")
         self.assertRedirects(
             response,
             "https://proxima.red/auth/account/",
@@ -480,9 +465,7 @@ class MainSiteRedirectTests(TestCase):
         response = self.client.get(reverse("auth:signin"), HTTP_HOST="proxima.red")
         self.assertEqual(response.status_code, 200)
 
-    @override_settings(
-        SITE_URL="https://proxima.red", PASS_SITE_URL="https://proxima.red"
-    )
+    @override_settings(SITE_URL="https://proxima.red", PASS_SITE_URL="https://proxima.red")
     def test_single_domain_does_not_redirect(self):
         """When both sites share a host the mixin is a no-op."""
         response = self.client.get(reverse("auth:signin"), HTTP_HOST="proxima.red")
@@ -542,9 +525,7 @@ class ReauthViewTests(TestCase):
     def test_missing_secret_is_rejected(self):
         """An empty payload is a 400, not a server error."""
         self._authenticate()
-        response = self.client.post(
-            self.reauth_url, {}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
-        )
+        response = self.client.post(self.reauth_url, {}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json()["success"])
 

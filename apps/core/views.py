@@ -72,7 +72,7 @@ def vault_dispatch(request: HttpRequest) -> HttpResponse:
 
     Same host-dispatch arrangement as ``index``/``retrieve_dispatch``: core
     claims the path first (see config/urls.py) while both tools keep their own
-    ``vault/`` route reversible. The vaults' JSON APIs need no dispatch — their
+    ``vault/`` route reversible. The vaults' JSON APIs need no dispatch. Their
     literal paths (``/vault-data/`` vs ``/vault/index/`` etc.) don't collide.
     """
     if is_note_site(request):

@@ -64,6 +64,9 @@ ERROR_INVALID_SHARE_ID: Final[str] = "Invalid share identifier."
 ERROR_USER_NOT_FOUND: Final[str] = "User not found"
 ERROR_INVALID_JSON: Final[str] = "Invalid JSON data"
 ERROR_UNEXPECTED: Final[str] = "An unexpected error occurred"
+ERROR_EXPORT_LOCKED: Final[str] = (
+    "Enter your password to unlock both vaults, then download your data again."
+)
 
 # Success messages
 SUCCESS_DATA_SAVED: Final[str] = "Your data has been saved securely."

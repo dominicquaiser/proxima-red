@@ -167,6 +167,9 @@
     let userShares = [];
     let masterKey = null;
     let isPersisting = false;
+    // Bumped by every lock, so a save that was in flight when the vault locked
+    // knows its rollback snapshot is decrypted data that must not come back.
+    let lockEpoch = 0;
     let isCopyingLink = false;
     let armedRemoveBtn = null;
     let armedRemoveTimer = null;
@@ -429,6 +432,7 @@
     // a later save overwriting the stored blob with nothing; an empty payload (no
     // blob stored yet) renders an empty vault normally.
     const loadSavedShares = async () => {
+      const loadKey = masterKey;
       if (!masterKey) {
         renderShares();
         return;
@@ -437,6 +441,7 @@
       let blob;
       try {
         const { response, result } = await window.Http.getJson(vaultDataEndpoint);
+        if (loadKey !== masterKey || response.status === 401 || response.status === 423) return;
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -465,9 +470,9 @@
         const decrypted = await window.AuthCrypto.decryptAccountData(
           blob.encrypted_data,
           blob.iv,
-          masterKey,
+          loadKey,
         );
-
+        if (loadKey !== masterKey) return;
         userShares = Array.isArray(decrypted?.shares) ? decrypted.shares : [];
         userShares.forEach((share) => {
           share.tags = normalizeTagList(share.tags);
@@ -535,14 +540,17 @@
 
     // Apply an optimistic change to userShares and persist it, rolling back and
     // re-rendering if the encrypted vault blob fails to save. `mutate` returns the
-    // new shares array; resolves to whether the change was persisted.
+    // new shares array; resolves to whether the change was persisted. A lock
+    // during the save has already cleared the list, so the rollback is skipped:
+    // the unlock reloads the shares from the server instead.
     const commitShareChange = async (mutate) => {
       const previousShares = userShares;
+      const epoch = lockEpoch;
       userShares = mutate(userShares);
       renderShares();
 
       const persisted = await persistUserShares();
-      if (!persisted) {
+      if (!persisted && epoch === lockEpoch) {
         userShares = previousShares;
         renderShares();
       }
@@ -921,16 +929,36 @@
         return;
       }
 
-      // Adopt a vault key handed over from sign-in on the main site (it arrives
-      // in the URL fragment because sessionStorage can't cross origins) and
-      // scrub it from the URL before anything else reads location.
-      window.AuthCrypto.consumeVaultKeyFromFragment();
-
-      // Resolve the vault key from this tab's session, falling back to the
-      // in-place unlock modal. No localStorage mirror: the passwd vault is
-      // strictly per-tab, so a second tab (or one opened after the sign-in tab
-      // closed) always re-prompts rather than forcing a full sign-in.
-      const storedKeyBase64 = await window.AuthCrypto.resolveVaultKeyBase64();
+      const session = window.VaultSession.create({
+        tool: "pass",
+        userId: document.getElementById("unlock-modal").dataset.userId,
+        onLock: () => {
+          lockEpoch++;
+          document.getElementById("main-content").inert = true;
+          masterKey = null;
+          userShares = [];
+          closeModal();
+          renderShares();
+        },
+        onUnlock: async (key) => {
+          masterKey = await window.AuthCrypto.importKeyFromBase64(key);
+          document.getElementById("main-content").inert = false;
+          await loadSavedShares();
+        },
+        onSignedOut: () => {
+          window.location.href = "/auth/signin/?tool=pass";
+        },
+        onIdentityChange: () => {
+          window.location.reload();
+        },
+      });
+      let storedKeyBase64;
+      try {
+        storedKeyBase64 = await session.start();
+      } catch {
+        disableVault("Unable to check your session. Check your connection and reload.");
+        return;
+      }
       if (!storedKeyBase64) {
         disableVault("This tab is locked. Reload the page to unlock your vault.");
         return;

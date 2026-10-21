@@ -1,21 +1,7 @@
 /**
- * @fileoverview In-place secure-session unlock, exposed as
- * window.SecureSessionUnlock.
- *
- * The vault's AES key is derived from the password at sign-in and held in
- * sessionStorage, which is scoped to a single tab and cannot be shared across
- * tabs or subdomains. A tab that has a valid login but no key (a second tab, or
- * one opened after the original sign-in tab closed) therefore can't decrypt the
- * vault. Rather than dead-ending with "sign in again", this re-derives the key
- * from a small modal: it verifies the password server-side via the reauth
- * endpoint (so a wrong password is rejected instead of silently storing a bad
- * key, which matters for an empty vault) and re-derives the key into THIS tab's
- * sessionStorage - without creating a new session, since one already exists.
- *
- * Loaded with `defer` after crypto.js/auth-crypto.js, http.js, and forms.js, so
- * the DOM is parsed and window.{AuthCrypto,Http,FormUi,Notify} are available
- * when this runs; ensureSecureSession is then ready before page controllers
- * (vault.js/account.js) run their own DOMContentLoaded handlers.
+ * In-place password verification for a missing key or expired tool grant.
+ * The shared account session must still be valid. Reauthentication renews only
+ * this modal's tool and produces a key handoff bound to the current session.
  */
 (function () {
   "use strict";
@@ -34,6 +20,7 @@
   // Resolver for the in-flight ensureSecureSession() promise, set while the modal
   // is open so the form submit handler can settle it once the tab is unlocked.
   let pendingResolve = null;
+  let pendingPromise = null;
 
   const show = () => {
     overlay.classList.remove("hidden");
@@ -47,6 +34,7 @@
   const settle = () => {
     const resolve = pendingResolve;
     pendingResolve = null;
+    pendingPromise = null;
     overlay.classList.add("hidden");
     if (passwordInput) passwordInput.value = "";
     if (resolve) resolve(true);
@@ -57,28 +45,35 @@
   // the reauth endpoint, which confirms it matches the logged-in account (the
   // user is already signed in, so this checks the password without starting a
   // new session). On success, establish the secure session from the authoritative
-  // vault salt the server returns. Returns true on success, false on a bad
-  // password (throws are left to the caller's error handler for unexpected I/O).
+  // vault salt the server returns. Returns "ok" on success, "changed" when the
+  // session now belongs to another account (409: no password will work here),
+  // or "invalid" on a bad password (throws are left to the caller's error
+  // handler for unexpected I/O).
   const deriveAndStoreKey = async (password) => {
     const { response: saltsResponse, result: salts } = await window.Http.postForm(
       saltsUrl,
       new URLSearchParams({ user_id: userId }),
     );
     if (!saltsResponse.ok || !salts.success || !salts.auth_salt || !salts.vault_salt) {
-      return false;
+      return "invalid";
     }
 
     const authSecret = await window.AuthCrypto.deriveAuthSecret(password, salts.auth_salt);
     const { response: reauthResponse, result } = await window.Http.postForm(
       reauthUrl,
-      new URLSearchParams({ auth_secret: authSecret }),
+      new URLSearchParams({
+        auth_secret: authSecret,
+        tool: overlay.dataset.tool || "pass",
+        expected_user: userId,
+      }),
     );
+    if (reauthResponse.status === 409) return "changed";
     if (!reauthResponse.ok || !result.success || !result.vault_salt) {
-      return false;
+      return "invalid";
     }
 
-    await window.AuthCrypto.establishSecureSession(password, result.vault_salt);
-    return true;
+    await window.AuthCrypto.establishSecureSession(password, result.vault_salt, result.state);
+    return "ok";
   };
 
   if (form) {
@@ -98,9 +93,16 @@
       await window.FormUi.submitWithBusy(
         submitButton,
         async () => {
-          if (await deriveAndStoreKey(password)) {
+          const outcome = await deriveAndStoreKey(password);
+          if (outcome === "ok") {
             window.Notify.show("Unlocked.", "success");
             settle();
+          } else if (outcome === "changed") {
+            if (passwordInput) passwordInput.value = "";
+            window.Notify.show(
+              "You signed in to a different account in another tab. Reload this page to continue.",
+              "error",
+            );
           } else {
             window.Notify.show("Incorrect password. Please try again.", "error");
           }
@@ -122,15 +124,26 @@
    * option is the modal's sign-out, which navigates away instead of resolving.
    * @returns {Promise<boolean>}
    */
-  const ensureSecureSession = () => {
-    if (sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey)) {
+  const ensureSecureSession = ({ force = false } = {}) => {
+    if (pendingPromise) return pendingPromise;
+    if (!force && sessionStorage.getItem(window.AuthCrypto.STORAGE_KEYS.masterKey)) {
       return Promise.resolve(true);
     }
-    return new Promise((resolve) => {
+    pendingPromise = new Promise((resolve) => {
       pendingResolve = resolve;
       show();
     });
+    return pendingPromise;
   };
 
-  window.SecureSessionUnlock = { ensureSecureSession };
+  const dismiss = () => {
+    overlay.classList.add("hidden");
+    if (passwordInput) passwordInput.value = "";
+    const resolve = pendingResolve;
+    pendingResolve = null;
+    pendingPromise = null;
+    if (resolve) resolve(false);
+  };
+
+  window.SecureSessionUnlock = { ensureSecureSession, dismiss };
 })();

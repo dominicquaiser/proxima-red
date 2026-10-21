@@ -8,6 +8,25 @@
   "use strict";
 
   const DEFAULT_ERROR_MESSAGE = "An unexpected error occurred.";
+  let vaultIdentity = null;
+  const setVaultIdentity = (identity) => {
+    vaultIdentity = identity;
+  };
+  const vaultHeaders = () => (vaultIdentity ? { "X-Vault-Identity": vaultIdentity } : {});
+  const finish = async (url, response) => {
+    const result = await parseJsonBody(response);
+    if (
+      !url.startsWith("/auth/") &&
+      (response.status === 401 ||
+        response.status === 423 ||
+        result.code === "vault_identity_changed")
+    ) {
+      window.dispatchEvent(
+        new CustomEvent("vault-session-error", { detail: { response, result } }),
+      );
+    }
+    return { response, result };
+  };
 
   /**
    * Describe a reply that could not be parsed as JSON.
@@ -110,7 +129,7 @@
   const postForm = async (url, body) => {
     const normalizedBody = body instanceof HTMLFormElement ? new FormData(body) : body;
 
-    const headers = { "X-Requested-With": "XMLHttpRequest" };
+    const headers = { "X-Requested-With": "XMLHttpRequest", ...vaultHeaders() };
     let payload;
 
     if (normalizedBody instanceof FormData || normalizedBody instanceof URLSearchParams) {
@@ -130,7 +149,7 @@
       body: payload,
       credentials: "same-origin",
     });
-    return { response, result: await parseJsonBody(response) };
+    return finish(url, response);
   };
 
   /**
@@ -148,10 +167,11 @@
    */
   const getJson = async (url) => {
     const response = await fetch(url, {
-      headers: { "X-Requested-With": "XMLHttpRequest" },
+      headers: { "X-Requested-With": "XMLHttpRequest", ...vaultHeaders() },
       credentials: "same-origin",
+      cache: "no-store",
     });
-    return { response, result: await parseJsonBody(response) };
+    return finish(url, response);
   };
 
   /**
@@ -191,5 +211,5 @@
     return DEFAULT_ERROR_MESSAGE;
   };
 
-  window.Http = { getCsrfToken, postForm, getJson, firstError };
+  window.Http = { getCsrfToken, postForm, getJson, firstError, setVaultIdentity };
 })();

@@ -11,12 +11,11 @@ exercised with the AJAX header.
 import json
 import uuid
 
-from django.conf import settings
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from apps.auth.tests.factories import create_user_with_password
+from apps.auth.tests.factories import authorize_vaults, create_user_with_password
 from apps.note.constants import (
     MAX_VAULT_INDEX_LENGTH,
     MAX_VAULT_NOTE_CONTENT_LENGTH,
@@ -52,12 +51,11 @@ class VaultTestCase(TestCase):
         session = self.client.session
         session["authenticated"] = True
         session["user_id"] = (user or self.user).user_id
+        authorize_vaults(session, user or self.user)
         session.save()
 
     def _post_json(self, url, payload):
-        return self.client.post(
-            url, json.dumps(payload), content_type="application/json", **AJAX
-        )
+        return self.client.post(url, json.dumps(payload), content_type="application/json", **AJAX)
 
 
 @override_settings(
@@ -96,28 +94,15 @@ class NoteVaultViewTests(VaultTestCase):
         """
         self._authenticate()
         response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
-        self.assertContains(
-            response, f'data-note-trash-url="{reverse("note:vault_note_trash")}"'
-        )
-        self.assertContains(
-            response, f'data-trash-retention-days="{VAULT_TRASH_RETENTION_DAYS}"'
-        )
+        self.assertContains(response, f'data-note-trash-url="{reverse("note:vault_note_trash")}"')
+        self.assertContains(response, f'data-trash-retention-days="{VAULT_TRASH_RETENTION_DAYS}"')
 
-    def test_vault_page_hands_the_client_the_session_lifetime(self):
-        """The cross-tab key copy expires against the real session lifetime.
-
-        The note vault mirrors the vault key into localStorage, which is
-        origin-scoped: a sign-out on the main site or the pass subdomain
-        cannot clear it. The copy therefore ages out on its own, and the
-        window has to come from the server so it cannot drift from the
-        session it is tied to.
-        """
+    def test_vault_page_loads_the_note_session_controller(self):
+        """The server-checked key cache and note activity controller are wired in."""
         self._authenticate()
         response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
-
-        self.assertContains(
-            response, f'data-session-max-age="{settings.SESSION_COOKIE_AGE}"'
-        )
+        self.assertContains(response, "auth/js/vault-session.js")
+        self.assertContains(response, 'data-tool="note"')
 
     def test_vault_page_renders_the_session_expiry_modal(self):
         """The 401 prompt and the ids ``vault.js`` looks up by name.
@@ -203,9 +188,7 @@ class VaultIndexViewTests(VaultTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(VaultIndex.objects.count(), 1)
-        self.assertEqual(
-            VaultIndex.objects.get(user=self.user).encrypted_data, "bmV3aW5kZXg="
-        )
+        self.assertEqual(VaultIndex.objects.get(user=self.user).encrypted_data, "bmV3aW5kZXg=")
 
     def test_missing_fields_rejected(self):
         self._authenticate()
@@ -252,20 +235,18 @@ class VaultIndexViewTests(VaultTestCase):
             )
             self.assertEqual(response.status_code, 400)
 
-    def test_session_for_deleted_user_returns_404(self):
+    def test_session_for_deleted_user_returns_401(self):
         self._authenticate()
         self.user.delete()
         response = self.client.get(reverse("note:vault_index"), **AJAX)
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 401)
 
 
 class VaultNoteCollectionViewTests(VaultTestCase):
     """GET/POST /vault/notes/ - listing and creating note rows."""
 
     def test_requires_auth(self):
-        self.assertEqual(
-            self.client.get(reverse("note:vault_notes"), **AJAX).status_code, 401
-        )
+        self.assertEqual(self.client.get(reverse("note:vault_notes"), **AJAX).status_code, 401)
         self.assertEqual(
             self._post_json(
                 reverse("note:vault_notes"),
@@ -325,9 +306,7 @@ class VaultNoteCollectionViewTests(VaultTestCase):
     def test_list_with_content_includes_ciphertext(self):
         note = make_vault_note(self.user)
         self._authenticate()
-        response = self.client.get(
-            reverse("note:vault_notes"), {"content": "1"}, **AJAX
-        )
+        response = self.client.get(reverse("note:vault_notes"), {"content": "1"}, **AJAX)
         entry = response.json()["notes"][0]
         self.assertEqual(entry["content"], note.content)
         self.assertEqual(entry["iv"], note.iv)
@@ -366,9 +345,7 @@ class VaultNoteDetailViewTests(VaultTestCase):
 
     def test_unknown_note_is_404(self):
         self._authenticate()
-        response = self.client.get(
-            reverse("note:vault_note", args=[uuid.uuid4()]), **AJAX
-        )
+        response = self.client.get(reverse("note:vault_note", args=[uuid.uuid4()]), **AJAX)
         self.assertEqual(response.status_code, 404)
 
     def test_update_persists_and_bumps_updated_at(self):
@@ -417,9 +394,7 @@ class VaultNoteDeleteViewTests(VaultTestCase):
     def test_deletes_owned_note(self):
         note = make_vault_note(self.user)
         self._authenticate()
-        response = self._post_json(
-            reverse("note:vault_note_delete", args=[note.id]), {}
-        )
+        response = self._post_json(reverse("note:vault_note_delete", args=[note.id]), {})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(VaultNote.objects.filter(pk=note.id).exists())
 
@@ -427,17 +402,13 @@ class VaultNoteDeleteViewTests(VaultTestCase):
         other = create_user_with_password("other user password")
         note = make_vault_note(other)
         self._authenticate()
-        response = self._post_json(
-            reverse("note:vault_note_delete", args=[note.id]), {}
-        )
+        response = self._post_json(reverse("note:vault_note_delete", args=[note.id]), {})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(VaultNote.objects.filter(pk=note.id).exists())
 
     def test_unknown_note_reports_success(self):
         self._authenticate()
-        response = self._post_json(
-            reverse("note:vault_note_delete", args=[uuid.uuid4()]), {}
-        )
+        response = self._post_json(reverse("note:vault_note_delete", args=[uuid.uuid4()]), {})
         self.assertEqual(response.status_code, 200)
 
 
@@ -608,9 +579,7 @@ class VaultMigrateViewTests(VaultTestCase):
         second.refresh_from_db()
         self.assertEqual(first.content, "Zmlyc3RuZXc=")
         self.assertEqual(second.content, "c2Vjb25kbmV3")
-        self.assertEqual(
-            VaultIndex.objects.get(user=self.user).encrypted_data, "bmV3aW5kZXg="
-        )
+        self.assertEqual(VaultIndex.objects.get(user=self.user).encrypted_data, "bmV3aW5kZXg=")
 
     def test_foreign_id_rolls_back_whole_batch(self):
         """Atomicity: one bad id must leave every row (and the index) untouched."""
@@ -634,9 +603,7 @@ class VaultMigrateViewTests(VaultTestCase):
         foreign.refresh_from_db()
         self.assertEqual(own.content, VALID_CONTENT_B64)
         self.assertEqual(foreign.content, VALID_CONTENT_B64)
-        self.assertEqual(
-            VaultIndex.objects.get(user=self.user).encrypted_data, VALID_CONTENT_B64
-        )
+        self.assertEqual(VaultIndex.objects.get(user=self.user).encrypted_data, VALID_CONTENT_B64)
 
     def test_index_only_migration(self):
         make_vault_index(self.user)
@@ -650,9 +617,7 @@ class VaultMigrateViewTests(VaultTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["migrated"], 0)
-        self.assertEqual(
-            VaultIndex.objects.get(user=self.user).encrypted_data, "bmV3aW5kZXg="
-        )
+        self.assertEqual(VaultIndex.objects.get(user=self.user).encrypted_data, "bmV3aW5kZXg=")
 
     def test_malformed_payload_shapes_rejected(self):
         self._authenticate()

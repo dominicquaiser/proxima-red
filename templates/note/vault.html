@@ -112,7 +112,6 @@ handoff from sign-in, sessionStorage, or the unlock modal).
       data-note-delete-url-base="{% url 'note:vault_note_delete' dummy_note_id %}"
       data-note-trash-url="{% url 'note:vault_note_trash' %}"
       data-trash-retention-days="{{ trash_retention_days }}"
-      data-session-max-age="{{ session_max_age_seconds }}"
       data-create-url="{% url 'note:create' %}"
       data-retrieve-url-base="{{ retrieval_url_base }}"
       data-live-create-url="{% url 'note:live_create' %}"
@@ -335,7 +334,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
     {# Served empty; vault.js openCtxMenu() builds the items per row kind. #}
     <div id="ctx-menu" class="ctx-menu hidden" role="menu"></div>
 
-    {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" %}
+    {% include "partials/_unlock_modal.html" with user_id=user_id unlock_title="[note·]" vault_tool="note" %}
 
     {% comment %} Session-expiry prompt, raised when a vault API answers 401. Distinct from the
     unlock overlay above, which only re-derives a missing vault key and cannot help here:
@@ -396,6 +395,7 @@ handoff from sign-in, sessionStorage, or the unlock modal).
 
     {% include "partials/_util_scripts.html" %} {% include "partials/_auth_scripts.html" %}
     <script src="{% static 'auth/js/unlock.js' %}" defer></script>
+    <script src="{% static 'auth/js/vault-session.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/yjs.min.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/marked.min.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/purify.min.js' %}" defer></script>
