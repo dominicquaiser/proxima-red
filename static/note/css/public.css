@@ -353,9 +353,9 @@ html:has(.note-view) {
 /*
  * Presence overlays for remote collaborators on the live page.
  *
- * live-presence.js positions fixed carets and selection rectangles using the
- * editor mirror's viewport coordinates. Each remote peer supplies --cc for
- * its caret, label, and translucent selection color; the local caret remains
+ * live-presence.js positions fixed carets, name flags, and selection rectangles
+ * using the editor mirror's viewport coordinates. Each remote peer supplies --cc
+ * for its caret, flag, and translucent selection color; the local caret remains
  * the shared editor caret from shared.css.
  */
 
@@ -379,23 +379,41 @@ html:has(.note-view) {
   pointer-events: none;
 }
 
-.presence-caret::after {
+.presence-flags {
+  position: fixed;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  transform: translateX(calc(-100% - 28px));
+  pointer-events: none;
+}
+
+.presence-flag,
+.presence-caret[data-name]::after {
+  padding: 0 6px;
+  background: var(--cc);
+  color: var(--color-pitch-black);
+  border-radius: 2px;
+  white-space: nowrap;
+  font-family: var(--font-primary);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.presence-flag {
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.presence-caret[data-name]::after {
   content: attr(data-name);
   position: absolute;
   bottom: 100%;
   left: -1px;
   margin-bottom: 2px;
-  padding: 1px 5px;
-  background: var(--cc);
-  color: var(--color-pitch-black);
-  border-radius: 3px 3px 3px 0;
-  white-space: nowrap;
-  font-family: var(--font-primary);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.4;
-  pointer-events: none;
+  border-bottom-left-radius: 0;
+  line-height: 1.6;
 }
 
 .presence-selection {

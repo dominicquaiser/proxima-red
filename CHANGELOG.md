@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`[note·]` real-time collaboration**: live notes sync over WebSockets (sub-second, coloured flag-caret cursors with Greek-letter names), with HTTP polling as automatic fallback. Undo moved to Y.UndoManager on the live page. Runtime now serves ASGI (gunicorn + uvicorn workers, Django Channels, dedicated `redis-channels` layer).
+- **`[note·]` real-time collaboration**: live notes sync over WebSockets (sub-second, coloured cursors with Greek-letter name flags in the margin), with HTTP polling as automatic fallback. Undo moved to Y.UndoManager on the live page. Runtime now serves ASGI (gunicorn + uvicorn workers, Django Channels, dedicated `redis-channels` layer).
 - **`[note·]` editable share links (live notes)**: "Editable link" share option creates a collaboratively-editable CRDT (Yjs) document merged client-side; server stores an encrypted snapshot + append-only encrypted update log it can't read. Same expiry model as other shares; swept by `delete_expired_notes`.
 - **`[note·]` note vault** at `note.…/vault/`: file manager + editor, folder tree, search, rename/move, Trash. Notes + folder structure encrypted client-side under the vault key — server never learns names or content. Password change transparently re-encrypts the note vault alongside the password vault; GDPR export now includes it.
 - **Per-tool sign-in destinations**: signin/signup accept a `tool` param so note sign-ins land on the note vault; `/vault/` is host-dispatched.

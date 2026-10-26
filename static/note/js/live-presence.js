@@ -14,6 +14,8 @@
   const LAYER_CLASS = "presence-layer";
   const SELECTION_CLASS = "presence-selection";
   const CARET_CLASS = "presence-caret";
+  const FLAG_ROW_CLASS = "presence-flags";
+  const FLAG_CLASS = "presence-flag";
   const DEFAULT_PEER_NAME = "Peer";
   const MIN_SELECTION_WIDTH = 3;
   const ZERO_WIDTH_SPACE = "\u200b";
@@ -107,6 +109,33 @@
     const head = resolve(cursor.head);
     if (anchor === null || head === null) return null;
     return { anchor: anchor, head: head };
+  }
+
+  /**
+   * Group carets that share a visual line, each line ordered left to right.
+   *
+   * Carets on one line share a top edge up to sub-pixel noise, while adjacent
+   * lines sit a full line height apart, so half a caret height separates them.
+   *
+   * @param {Array<{top: number, left: number, height: number}>} carets Viewport
+   *   caret boxes; any other properties ride along.
+   * @returns {Array<Array<Object>>} One array per line, top to bottom.
+   */
+  function groupByLine(carets) {
+    const lines = [];
+    const byTop = carets.slice().sort(function (a, b) {
+      return a.top - b.top;
+    });
+    for (const caret of byTop) {
+      const line = lines[lines.length - 1];
+      if (line && caret.top - line[0].top < caret.height / 2) line.push(caret);
+      else lines.push([caret]);
+    }
+    return lines.map(function (line) {
+      return line.sort(function (a, b) {
+        return a.left - b.left;
+      });
+    });
   }
 
   /**
@@ -297,7 +326,47 @@
     }
 
     /**
-     * Repaint every peer caret and selection into the overlay layer.
+     * Paint peer names as flags in the gutter left of the text column.
+     *
+     * Flags whose carets share a visual line form one row, in caret order and as
+     * tall as the caret. A row the gutter cannot hold, as on narrow layouts, is
+     * dropped and its carets carry their names above them instead.
+     *
+     * @param {Array<{el: HTMLElement, name: string, colorVar: string, top: number,
+     *   left: number, height: number}>} carets Carets painted this frame.
+     * @param {number} textLeft Viewport x of the text column's left edge.
+     * @param {number} minLeft Leftmost viewport x a row may reach.
+     */
+    function renderFlags(carets, textLeft, minLeft) {
+      const rows = groupByLine(carets).map(function (line) {
+        const row = document.createElement("div");
+        row.className = FLAG_ROW_CLASS;
+        row.style.left = textLeft + "px";
+        row.style.top = line[0].top + "px";
+        row.style.height = line[0].height + "px";
+        for (const caret of line) {
+          const flag = document.createElement("span");
+          flag.className = FLAG_CLASS;
+          flag.style.setProperty("--cc", caret.colorVar);
+          flag.textContent = caret.name;
+          row.appendChild(flag);
+        }
+        layer.appendChild(row);
+        return { el: row, line: line };
+      });
+
+      // Measure every row before changing any so layout runs once.
+      const clipped = rows.filter(function (row) {
+        return row.el.getBoundingClientRect().left < minLeft;
+      });
+      for (const row of clipped) {
+        row.el.remove();
+        for (const caret of row.line) caret.el.dataset.name = caret.name;
+      }
+    }
+
+    /**
+     * Repaint every peer caret, name flag, and selection into the overlay layer.
      *
      * Rebuild all positions after edits; omit boxes outside the editor viewport.
      */
@@ -305,7 +374,10 @@
       if (destroyed) return;
       layer.replaceChildren();
       const editorRect = editor.getBoundingClientRect();
+      // The mirror spans the text column, so its left edge anchors the gutter.
+      const textLeft = mirror.getBoundingClientRect().left;
       const states = awareness.getStates();
+      const carets = [];
 
       states.forEach(function (state, clientId) {
         if (clientId === doc.clientID || !state || !state.cursor) return;
@@ -340,16 +412,24 @@
         ) {
           const caret = document.createElement("div");
           caret.className = CARET_CLASS;
-          caret.dataset.name = name;
           caret.style.setProperty("--cc", colorVar);
           caret.style.left = caretRect.left + "px";
           caret.style.top = caretRect.top + "px";
           caret.style.height = caretRect.height + "px";
           layer.appendChild(caret);
+          carets.push({
+            el: caret,
+            name: name,
+            colorVar: colorVar,
+            top: caretRect.top,
+            left: caretRect.left,
+            height: caretRect.height,
+          });
         }
       });
 
       mirror.replaceChildren();
+      renderFlags(carets, textLeft, editorRect.left);
     }
 
     /**
@@ -431,6 +511,7 @@
     identityFor,
     encodeCursorState,
     resolveCursorState,
+    groupByLine,
     GREEK_NAMES,
     PALETTE_SIZE,
     CURSOR_ANNOUNCE_MS,

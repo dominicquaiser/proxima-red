@@ -1,9 +1,9 @@
 /**
  * Tests for the pure helpers of static/note/js/live-presence.js
  * (window.NoteLivePresence): identity assignment, cursor encode/resolve as
- * relative positions, and the awareness-state round trip through the
- * encrypted relay. The DOM rendering (mirror measurement, overlay) is
- * exercised in the browser.
+ * relative positions, line grouping for the gutter name flags, and the
+ * awareness-state round trip through the encrypted relay. The DOM rendering
+ * (mirror measurement, overlay) is exercised in the browser.
  *
  * Run with: node --test tests/js/
  */
@@ -105,6 +105,24 @@ describe("cursor encode/resolve", () => {
       Presence.resolveCursorState(doc, ytext, { anchor: "!!!", head: "!!!" }),
       null,
     );
+  });
+});
+
+describe("groupByLine", () => {
+  const names = (lines) => lines.map((line) => line.map((caret) => caret.name));
+
+  test("shares a row per visual line, ordered like the carets", () => {
+    // The live editor's 14px text: 23.8px line pitch, ~18px carets.
+    const lines = Presence.groupByLine([
+      { name: "Pi", top: 123.8, left: 40, height: 18.2 },
+      { name: "Rho", top: 100.02, left: 310, height: 18.2 },
+      { name: "Tau", top: 100, left: 120, height: 18.2 },
+    ]);
+    assert.deepEqual(names(lines), [["Tau", "Rho"], ["Pi"]]);
+  });
+
+  test("returns no rows without carets", () => {
+    assert.deepEqual(Presence.groupByLine([]), []);
   });
 });
 
