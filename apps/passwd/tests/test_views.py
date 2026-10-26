@@ -18,15 +18,14 @@ from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.auth.tests.factories import create_user_with_password
+from apps.auth.tests.factories import authorize_vaults, create_user_with_password
 from apps.passwd.constants import (
     ERROR_CREATE_FAILED,
-    ERROR_INVALID_JSON,
     ERROR_INVALID_IV,
+    ERROR_INVALID_JSON,
     ERROR_INVALID_SHARE_ID,
     ERROR_MISSING_REQUIRED,
     ERROR_UNEXPECTED,
-    ERROR_USER_NOT_FOUND,
     GCM_IV_LENGTH_BYTES,
     MAX_ENCRYPTED_DATA_LENGTH,
     MAX_VAULT_DATA_LENGTH,
@@ -305,6 +304,7 @@ class VaultViewTests(TestCase):
         session = self.client.session
         session["authenticated"] = True
         session["user_id"] = self.user.user_id
+        authorize_vaults(session, self.user)
         session.save()
 
     def test_requires_authentication(self):
@@ -328,9 +328,7 @@ class VaultViewTests(TestCase):
         establishes its vault key). Delivery of the blob itself is covered by
         ``VaultDataViewTests.test_returns_encrypted_blob``.
         """
-        ServiceData.objects.create(
-            user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12
-        )
+        ServiceData.objects.create(user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12)
         self._authenticate()
         response = self.client.get(self.url)
 
@@ -362,6 +360,7 @@ class VaultDataViewTests(TestCase):
         session = self.client.session
         session["authenticated"] = True
         session["user_id"] = self.user.user_id
+        authorize_vaults(session, self.user)
         session.save()
 
     def test_requires_authentication(self):
@@ -381,9 +380,7 @@ class VaultDataViewTests(TestCase):
 
     def test_returns_encrypted_blob(self):
         """Stored ServiceData is returned with a Base64-encoded IV."""
-        ServiceData.objects.create(
-            user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12
-        )
+        ServiceData.objects.create(user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12)
         self._authenticate()
         response = self.client.get(self.url)
 
@@ -393,15 +390,15 @@ class VaultDataViewTests(TestCase):
         self.assertEqual(payload["encrypted_data"], "ZW5jcnlwdGVk")
         self.assertEqual(payload["iv"], "AAAAAAAAAAAAAAAA")  # b"\x00" * 12 in base64
 
-    def test_session_for_deleted_user_returns_404(self):
-        """A session whose user was deleted mid-session gets a JSON 404."""
+    def test_session_for_deleted_user_returns_401(self):
+        """A session whose user was deleted mid-session gets a JSON 401."""
         self._authenticate()
         self.user.delete()
         response = self.client.get(self.url)
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 401)
         body = response.json()
         self.assertFalse(body["success"])
-        self.assertEqual(body["error"], ERROR_USER_NOT_FOUND)
+        self.assertEqual(body["error"], "Invalid session")
 
 
 class UpdateEncryptedDataViewTests(TestCase):
@@ -417,12 +414,11 @@ class UpdateEncryptedDataViewTests(TestCase):
         session = self.client.session
         session["authenticated"] = True
         session["user_id"] = self.user.user_id
+        authorize_vaults(session, self.user)
         session.save()
 
     def _post(self, body):
-        return self.client.post(
-            self.url, data=json.dumps(body), content_type="application/json"
-        )
+        return self.client.post(self.url, data=json.dumps(body), content_type="application/json")
 
     def test_requires_authentication(self):
         """Unauthenticated requests get a JSON 401."""
@@ -433,9 +429,7 @@ class UpdateEncryptedDataViewTests(TestCase):
     def test_creates_service_data(self):
         """A valid POST creates the user's ServiceData."""
         self._authenticate()
-        response = self._post(
-            {"encrypted_data": "ZW5jcnlwdGVk", "iv": "AAAAAAAAAAAAAAAA"}
-        )
+        response = self._post({"encrypted_data": "ZW5jcnlwdGVk", "iv": "AAAAAAAAAAAAAAAA"})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
 
@@ -445,9 +439,7 @@ class UpdateEncryptedDataViewTests(TestCase):
 
     def test_updates_existing_service_data(self):
         """A second POST updates rather than duplicates ServiceData."""
-        ServiceData.objects.create(
-            user=self.user, encrypted_data="b2xk", iv=b"\x01" * 12
-        )
+        ServiceData.objects.create(user=self.user, encrypted_data="b2xk", iv=b"\x01" * 12)
         self._authenticate()
         response = self._post({"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA"})
         self.assertEqual(response.status_code, 200)
@@ -475,17 +467,15 @@ class UpdateEncryptedDataViewTests(TestCase):
                 self.assertEqual(response.json()["error"], ERROR_MISSING_REQUIRED)
         self.assertFalse(ServiceData.objects.filter(user=self.user).exists())
 
-    def test_session_for_deleted_user_returns_404(self):
-        """A session whose user was deleted mid-session gets a JSON 404."""
+    def test_session_for_deleted_user_returns_401(self):
+        """A session whose user was deleted mid-session gets a JSON 401."""
         self._authenticate()
         self.user.delete()
-        response = self._post(
-            {"encrypted_data": "ZW5jcnlwdGVk", "iv": "AAAAAAAAAAAAAAAA"}
-        )
-        self.assertEqual(response.status_code, 404)
+        response = self._post({"encrypted_data": "ZW5jcnlwdGVk", "iv": "AAAAAAAAAAAAAAAA"})
+        self.assertEqual(response.status_code, 401)
         body = response.json()
         self.assertFalse(body["success"])
-        self.assertEqual(body["error"], ERROR_USER_NOT_FOUND)
+        self.assertEqual(body["error"], "Invalid session")
         self.assertFalse(ServiceData.objects.exists())
 
     def test_invalid_iv_rejected(self):
@@ -501,9 +491,7 @@ class UpdateEncryptedDataViewTests(TestCase):
     def test_invalid_encrypted_data_rejected(self):
         """A POST with malformed ciphertext is rejected."""
         self._authenticate()
-        response = self._post(
-            {"encrypted_data": "not base64!!", "iv": "AAAAAAAAAAAAAAAA"}
-        )
+        response = self._post({"encrypted_data": "not base64!!", "iv": "AAAAAAAAAAAAAAAA"})
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json()["success"])
         self.assertFalse(ServiceData.objects.filter(user=self.user).exists())
@@ -546,9 +534,7 @@ class UpdateEncryptedDataViewTests(TestCase):
     def test_invalid_json_rejected(self):
         """A POST with a malformed JSON body is rejected."""
         self._authenticate()
-        response = self.client.post(
-            self.url, data="{not json", content_type="application/json"
-        )
+        response = self.client.post(self.url, data="{not json", content_type="application/json")
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json()["success"])
         self.assertEqual(response.json()["error"], ERROR_INVALID_JSON)
@@ -580,9 +566,7 @@ class UpdateEncryptedDataViewTests(TestCase):
                 "apps.passwd.views.services.save_user_vault_data",
                 side_effect=RuntimeError(raw_detail),
             ):
-                response = self._post(
-                    {"encrypted_data": "ZW5jcnlwdGVk", "iv": "AAAAAAAAAAAAAAAA"}
-                )
+                response = self._post({"encrypted_data": "ZW5jcnlwdGVk", "iv": "AAAAAAAAAAAAAAAA"})
 
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json()["error"], ERROR_UNEXPECTED)
@@ -605,12 +589,11 @@ class DeleteShareViewTests(TestCase):
         session = self.client.session
         session["authenticated"] = True
         session["user_id"] = self.user.user_id
+        authorize_vaults(session, self.user)
         session.save()
 
     def _post(self, body):
-        return self.client.post(
-            self.url, data=json.dumps(body), content_type="application/json"
-        )
+        return self.client.post(self.url, data=json.dumps(body), content_type="application/json")
 
     def test_requires_authentication(self):
         """Unauthenticated requests get a JSON 401."""
@@ -671,6 +654,7 @@ class DataExportViewTests(TestCase):
         session = self.client.session
         session["authenticated"] = True
         session["user_id"] = self.user.user_id
+        authorize_vaults(session, self.user)
         session.save()
 
     def test_requires_authentication(self):
@@ -694,9 +678,7 @@ class DataExportViewTests(TestCase):
 
     def test_export_with_vault(self):
         """The export includes the encrypted vault blob when present."""
-        ServiceData.objects.create(
-            user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12
-        )
+        ServiceData.objects.create(user=self.user, encrypted_data="ZW5jcnlwdGVk", iv=b"\x00" * 12)
         self._authenticate()
         response = self.client.get(self.url)
 
@@ -704,6 +686,28 @@ class DataExportViewTests(TestCase):
         self.assertIsNotNone(payload["vault"])
         self.assertEqual(payload["vault"]["encrypted_data"], "ZW5jcnlwdGVk")
         self.assertEqual(payload["vault"]["iv"], "AAAAAAAAAAAAAAAA")
+
+    def test_export_includes_note_vault(self):
+        """The export carries the note vault (encrypted index + note rows)."""
+        from apps.note.tests.factories import make_vault_index, make_vault_note
+
+        note = make_vault_note(self.user)
+        make_vault_index(self.user)
+        self._authenticate()
+        response = self.client.get(self.url)
+
+        payload = json.loads(response.content)
+        note_vault = payload["note_vault"]
+        self.assertEqual(note_vault["index"]["encrypted_data"], "ZW5jcnlwdGVk")
+        self.assertEqual(len(note_vault["notes"]), 1)
+        self.assertEqual(note_vault["notes"][0]["id"], str(note.id))
+        self.assertEqual(note_vault["notes"][0]["content"], "ZW5jcnlwdGVk")
+
+    def test_export_without_note_vault_is_empty_section(self):
+        """No note vault yet: the section is present but empty."""
+        self._authenticate()
+        payload = json.loads(self.client.get(self.url).content)
+        self.assertEqual(payload["note_vault"], {"index": None, "notes": []})
 
     def test_session_for_deleted_user_redirects_to_signin(self):
         """A session whose user was deleted mid-session is flushed and redirected."""

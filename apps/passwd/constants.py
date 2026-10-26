@@ -26,7 +26,7 @@ MAX_ENCRYPTED_DATA_LENGTH: Final[int] = 50000  # ~50KB cap for a single anonymou
 # (share id + per-share key + title/tags), so it gets a far larger cap than the
 # one-secret anonymous share flow. ~500KB of Base64 ciphertext.
 MAX_VAULT_DATA_LENGTH: Final[int] = 500000  # ~500KB encrypted vault blob
-# Cross-runtime contract: must match GCM_IV_LENGTH_BYTES in static/js/crypto.js.
+# Cross-runtime contract: must match GCM_IV_LENGTH_BYTES in static/shared/js/crypto.js.
 GCM_IV_LENGTH_BYTES: Final[int] = 12
 # AES-GCM uses a 12-byte IV -> 16 Base64 chars; 24 leaves generous headroom
 # without accepting absurdly long values.
@@ -64,6 +64,9 @@ ERROR_INVALID_SHARE_ID: Final[str] = "Invalid share identifier."
 ERROR_USER_NOT_FOUND: Final[str] = "User not found"
 ERROR_INVALID_JSON: Final[str] = "Invalid JSON data"
 ERROR_UNEXPECTED: Final[str] = "An unexpected error occurred"
+ERROR_EXPORT_LOCKED: Final[str] = (
+    "Enter your password to unlock both vaults, then download your data again."
+)
 
 # Success messages
 SUCCESS_DATA_SAVED: Final[str] = "Your data has been saved securely."

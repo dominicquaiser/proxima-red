@@ -11,20 +11,20 @@ import json
 import logging
 import uuid
 
+from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.decorators import method_decorator
 from django.views.generic import View
-
 from django_ratelimit.decorators import ratelimit
 
-from apps.auth.constants import SESSION_KEY_USER_ID
+from apps.auth.constants import SESSION_KEY_USER_ID, VAULT_TOOLS
 from apps.auth.mixins import SessionAuthRequiredMixin
 from apps.auth.models import User
-from apps.auth.services import get_user_by_id
-from apps.auth.utils import get_authenticated_user_id, require_session_auth_api
+from apps.auth.utils import get_authenticated_user, require_tool_auth_api
+from apps.auth.vault_sessions import access_state
 from apps.core.encoding import decode_base64
 from apps.core.http import (
     ajax_or_html,
@@ -38,33 +38,34 @@ from . import services
 from .constants import (
     DEFAULT_EXPIRY,
     DUMMY_SHARE_ID,
+    ERROR_CREATE_FAILED,
+    ERROR_EXPORT_LOCKED,
+    ERROR_INVALID_IV,
+    ERROR_INVALID_JSON,
+    ERROR_INVALID_SHARE_ID,
+    ERROR_MISSING_FIELDS,
+    ERROR_MISSING_REQUIRED,
+    ERROR_UNEXPECTED,
+    ERROR_USER_NOT_FOUND,
+    LOG_CREATE_FAILED,
+    LOG_DELETE_SHARE_ERROR,
+    LOG_EXPIRED_DELETED,
+    LOG_SHARE_DELETED,
+    LOG_UPDATE_DATA,
+    LOG_UPDATE_DATA_ERROR,
     RATE_LIMIT_CREATE,
+    RATE_LIMIT_DELETE_SHARE,
     RATE_LIMIT_EXPORT,
     RATE_LIMIT_RETRIEVE,
     RATE_LIMIT_UPDATE_DATA,
-    RATE_LIMIT_DELETE_SHARE,
     RATE_LIMIT_VAULT,
-    TEMPLATE_CREATE,
-    TEMPLATE_SUCCESS,
-    TEMPLATE_RETRIEVE,
-    TEMPLATE_EXPIRED,
-    TEMPLATE_VAULT,
-    ERROR_MISSING_FIELDS,
-    ERROR_CREATE_FAILED,
-    ERROR_MISSING_REQUIRED,
-    ERROR_INVALID_IV,
-    ERROR_INVALID_SHARE_ID,
-    ERROR_USER_NOT_FOUND,
-    ERROR_INVALID_JSON,
-    ERROR_UNEXPECTED,
     SUCCESS_DATA_SAVED,
     SUCCESS_SHARE_DELETED,
-    LOG_CREATE_FAILED,
-    LOG_EXPIRED_DELETED,
-    LOG_UPDATE_DATA,
-    LOG_UPDATE_DATA_ERROR,
-    LOG_SHARE_DELETED,
-    LOG_DELETE_SHARE_ERROR,
+    TEMPLATE_CREATE,
+    TEMPLATE_EXPIRED,
+    TEMPLATE_RETRIEVE,
+    TEMPLATE_SUCCESS,
+    TEMPLATE_VAULT,
 )
 from .models import SharedPassword
 
@@ -89,8 +90,7 @@ def _create_share_payload(request: HttpRequest) -> dict:
 
 def _authenticated_share_owner(request: HttpRequest) -> User | None:
     """Return the current authenticated user for owned shares, if any."""
-    user_id = get_authenticated_user_id(request)
-    return get_user_by_id(user_id) if user_id else None
+    return get_authenticated_user(request)
 
 
 def _create_error_response(
@@ -100,9 +100,7 @@ def _create_error_response(
     return ajax_or_html(
         request,
         ajax=lambda: json_error(message, status=status),
-        html=lambda: render(
-            request, TEMPLATE_CREATE, {"error": message}, status=status
-        ),
+        html=lambda: render(request, TEMPLATE_CREATE, {"error": message}, status=status),
     )
 
 
@@ -155,16 +153,14 @@ def _decode_vault_payload(data: dict) -> tuple[str, bytes, JsonResponse | None]:
 def _session_user_or_error(
     request: HttpRequest,
 ) -> tuple[User | None, JsonResponse | None]:
-    """Resolve the current session user for JSON APIs."""
-    user = get_user_by_id(request.session.get(SESSION_KEY_USER_ID))
+    """Resolve the current session user for JSON APIs (reusing the gate's lookup)."""
+    user = get_authenticated_user(request)
     if not user:
         return None, json_error(ERROR_USER_NOT_FOUND, status=404)
     return user, None
 
 
-def _save_vault_payload(
-    user: User, encrypted_data: str, iv_binary: bytes
-) -> JsonResponse:
+def _save_vault_payload(user: User, encrypted_data: str, iv_binary: bytes) -> JsonResponse:
     """Persist a decoded vault payload and map validation/storage errors."""
     try:
         services.save_user_vault_data(user, encrypted_data, iv_binary)
@@ -220,9 +216,7 @@ class CreateShareView(View):
         return ajax_or_html(
             request,
             ajax=lambda: _share_json_response(share),
-            html=lambda: render(
-                request, TEMPLATE_SUCCESS, _success_page_context(request, share)
-            ),
+            html=lambda: render(request, TEMPLATE_SUCCESS, _success_page_context(request, share)),
         )
 
 
@@ -313,16 +307,14 @@ class UpdateEncryptedDataView(View):
     The data is encrypted client-side before being sent to the server.
 
     Unlike the redirect-style views (which use ``SessionAuthRequiredMixin``),
-    this JSON API gate uses ``require_session_auth_api`` so unauthenticated
+    this JSON API gate uses ``require_tool_auth_api("pass")`` so unauthenticated
     callers get a JSON 401 instead of an HTML redirect.
     """
 
     @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_UPDATE_DATA, method="POST", block=True
-        )
+        ratelimit(key=client_ip_key, rate=RATE_LIMIT_UPDATE_DATA, method="POST", block=True)
     )
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("pass"))
     def post(self, request: HttpRequest) -> JsonResponse:
         """Save or update the authenticated user's encrypted vault blob."""
         try:
@@ -345,24 +337,22 @@ class VaultDataView(View):
     """
     Return the authenticated user's encrypted vault blob as JSON.
 
-    The vault page (``static/js/vault.js``) fetches the blob from here after the
+    The vault page (``static/passwd/js/vault.js``) fetches the blob from here after the
     browser establishes its vault key, so ciphertext is never embedded in the
     vault page HTML (a logged-in-but-locked tab receives none). The account page
     also uses it to migrate the vault when the password changes: a new password
     derives a new vault key, so the stored blob must be read, re-encrypted under
-    the new key, and saved again (see ``static/js/account.js``).
+    the new key, and saved again (see ``static/auth/js/account.js``).
     Like ``UpdateEncryptedDataView`` this is a JSON API, so it gates with
-    ``require_session_auth_api`` (JSON 401) rather than the redirect mixin. The
+    ``require_tool_auth_api("pass")`` (JSON 401) rather than the redirect mixin. The
     returned ``encrypted_data``/``iv`` are ciphertext the server cannot read; an
     empty payload (just ``success``) means the user has no stored vault yet.
     """
 
     @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_UPDATE_DATA, method="GET", block=True
-        )
+        ratelimit(key=client_ip_key, rate=RATE_LIMIT_UPDATE_DATA, method="GET", block=True)
     )
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("pass"))
     def get(self, request: HttpRequest) -> JsonResponse:
         """Return the current user's encrypted vault blob (empty when unset)."""
         user, error_response = _session_user_or_error(request)
@@ -379,17 +369,15 @@ class DeleteShareView(View):
     The vault calls this when an entry is removed so the underlying
     ``SharedPassword`` is deleted server-side (the ``/<uuid>/`` link stops
     working immediately) rather than lingering until it expires. Like the other
-    vault JSON APIs it gates with ``require_session_auth_api`` (JSON 401). The
+    vault JSON APIs it gates with ``require_tool_auth_api("pass")`` (JSON 401). The
     delete is owner-scoped and idempotent: revoking an unknown, foreign, or
     already-deleted share still reports success.
     """
 
     @method_decorator(
-        ratelimit(
-            key=client_ip_key, rate=RATE_LIMIT_DELETE_SHARE, method="POST", block=True
-        )
+        ratelimit(key=client_ip_key, rate=RATE_LIMIT_DELETE_SHARE, method="POST", block=True)
     )
-    @method_decorator(require_session_auth_api)
+    @method_decorator(require_tool_auth_api("pass"))
     def post(self, request: HttpRequest) -> JsonResponse:
         """Delete the named share if it belongs to the authenticated user."""
         try:
@@ -433,12 +421,20 @@ class DataExportView(SessionAuthRequiredMixin, View):
     """
     GDPR-compliant data export view. Returns a JSON file containing all
     personal data held for the authenticated user.
+
+    The export carries both vaults' ciphertext, so it needs both tool grants.
+    It is reached by plain browser navigation, so a lock redirects to the
+    account page (whose unlock prompt renews both grants) instead of answering
+    the JSON 423 the vault APIs use.
     """
 
     def get(self, request: HttpRequest) -> HttpResponse:
         user = self.get_authenticated_user(request)
         if not user:
             return self.handle_missing_user(request)
+        if not all(access_state(request, user, tool)["unlocked"] for tool in VAULT_TOOLS):
+            messages.error(request, ERROR_EXPORT_LOCKED)
+            return redirect("auth:account")
 
         export = services.build_user_export(user)
 
@@ -446,4 +442,5 @@ class DataExportView(SessionAuthRequiredMixin, View):
         filename = f"proximared-export-{user.user_id}.json"
         response = HttpResponse(payload, content_type="application/json")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "no-store"
         return response

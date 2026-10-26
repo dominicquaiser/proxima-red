@@ -1,0 +1,270 @@
+.card {
+  width: 100%;
+  max-width: 720px;
+}
+
+.card__header {
+  background: var(--color-brick-red);
+  padding: 28px 32px 24px;
+  border-radius: 4px 4px 0 0;
+  position: relative;
+  overflow: hidden;
+}
+.card__eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--color-charcoal);
+  margin-bottom: 8px;
+}
+.card__title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-charcoal);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.card__title span {
+  color: var(--color-charcoal);
+  font-weight: 400;
+}
+.card__subtitle {
+  font-size: 12px;
+  color: var(--color-charcoal);
+  margin-top: 8px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
+.card__body {
+  background: var(--color-charcoal);
+  padding: 28px 32px 32px;
+  border-radius: 0 0 4px 4px;
+  border-top: none;
+}
+
+@media (max-width: 480px) {
+  .card__header {
+    padding: 20px 20px 18px;
+  }
+  .card__body {
+    padding: 20px 20px 24px;
+  }
+}
+
+.field {
+  position: relative;
+  margin-bottom: 20px;
+}
+
+.field__label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--color-putty);
+  margin-bottom: 8px;
+  transition: color 0.15s;
+}
+.field:focus-within .field__label {
+  color: var(--color-tangerine);
+}
+
+.field__input {
+  width: 100%;
+  background: var(--color-charcoal);
+  border: 1px solid var(--color-stony-gray);
+  border-radius: 2px;
+  padding: 11px 14px;
+  font-family: var(--font-primary);
+  font-size: 13px;
+  color: var(--color-parchment);
+  outline: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+  letter-spacing: 0.02em;
+}
+.field__input::placeholder {
+  color: var(--color-stony-gray);
+}
+.field__input:hover {
+  border-color: var(--color-muddy-brown);
+}
+.field__input:focus {
+  border-color: var(--color-tangerine);
+  background: var(--color-input-focus-bg);
+}
+.field__input--password {
+  padding-right: 44px;
+}
+
+/* A checkbox overlaid on two mask-tinted icons; :checked swaps which icon
+   shows. The same control is re-anchored by passwd.css on the retrieve page. */
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+.password-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+.password-toggle__icon {
+  width: 18px;
+  height: 18px;
+  background-color: var(--color-taupe);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  transition:
+    background-color 0.15s,
+    transform 0.15s;
+}
+.password-toggle__icon--visible {
+  display: block;
+  -webkit-mask-image: url("/static/icons/phosphor/eye.svg");
+  mask-image: url("/static/icons/phosphor/eye.svg");
+}
+.password-toggle__icon--hidden {
+  display: none;
+  -webkit-mask-image: url("/static/icons/phosphor/eye-slash.svg");
+  mask-image: url("/static/icons/phosphor/eye-slash.svg");
+}
+.password-toggle:hover .password-toggle__icon {
+  background-color: var(--color-warm-slate);
+}
+.password-toggle:active .password-toggle__icon {
+  transform: scale(0.85);
+}
+.password-toggle input:checked ~ .password-toggle__icon--visible {
+  display: none;
+}
+.password-toggle input:checked ~ .password-toggle__icon--hidden {
+  display: block;
+}
+
+.btn-create {
+  width: 100%;
+  background: var(--color-burnt-orange);
+  border: none;
+  border-radius: 2px;
+  color: var(--color-charcoal);
+  padding: 13px;
+  font-family: var(--font-primary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+.btn-create:hover {
+  background: var(--color-brick-red);
+  font-weight: 800;
+  transform: scale(1.01);
+}
+.btn-create:active {
+  transform: scale(0.99);
+}
+/* .btn-create on an <a> (e.g. a sign-in link that must open in a new tab, which
+   only a real anchor gives you: middle-click, open-in-new-tab, screen readers). */
+.btn-create--link {
+  display: block;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Modal shell + the shared unlock overlay (partials/_unlock_modal.html).
+   Lives here rather than in a tool's stylesheet because the unlock modal is
+   included by every tool's vault page. */
+.hidden {
+  display: none !important;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(29, 32, 33, 0.8);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 80px 24px 40px;
+  overflow-y: auto;
+  animation: modal-fade 0.15s ease;
+}
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  animation: modal-rise 0.18s ease;
+}
+@keyframes modal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Inside the modal the card stretches to the modal width. */
+.modal .card {
+  max-width: none;
+}
+/* The quiet secondary action under a modal's primary button. .unlock-signout is
+   the original (the unlock overlay's "sign out instead"); .modal-alt-action is
+   the same treatment for any other modal. */
+.unlock-signout,
+.modal-alt-action {
+  margin-top: 14px;
+  text-align: center;
+}
+.unlock-signout__btn,
+.modal-alt-action__btn {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  color: var(--color-warm-sand);
+  font-family: var(--font-primary);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+.unlock-signout__btn:hover,
+.modal-alt-action__btn:hover {
+  opacity: 1;
+}

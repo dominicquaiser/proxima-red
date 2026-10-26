@@ -13,8 +13,8 @@ USER_ID_LENGTH: Final[int] = 8
 
 # Password and salt configuration. These byte lengths are a cross-runtime
 # contract with the browser KDF and must stay in lockstep with the JS:
-#   SALT_LENGTH_BYTES        <-> KDF_SALT_LENGTH_BYTES (static/js/auth-crypto.js)
-#   AUTH_SECRET_LENGTH_BYTES <-> the 256-bit AES_KEY_LENGTH_BITS (static/js/crypto.js)
+#   SALT_LENGTH_BYTES        <-> KDF_SALT_LENGTH_BYTES (static/auth/js/auth-crypto.js)
+#   AUTH_SECRET_LENGTH_BYTES <-> the 256-bit AES_KEY_LENGTH_BITS (static/shared/js/crypto.js)
 SALT_LENGTH_BYTES: Final[int] = 32  # 32 bytes = 256 bits
 AUTH_SECRET_LENGTH_BYTES: Final[int] = 32  # PBKDF2-derived authentication secret size
 
@@ -25,10 +25,28 @@ ACCOUNT_DELETION_CONFIRMATION_TEXT: Final[str] = "DELETE"
 RATE_LIMIT_SIGNUP: Final[str] = "5/m"  # 5 signups per minute per IP
 RATE_LIMIT_SIGNIN: Final[str] = "10/m"  # 10 signin attempts per minute per IP
 RATE_LIMIT_ACCOUNT: Final[str] = "20/m"  # 20 account operations per minute per IP
+# Vault-session status/activity: each open vault tab polls once a minute plus on
+# focus/visibility, and sends at most one activity POST a minute.
+RATE_LIMIT_VAULT_SESSION: Final[str] = "120/m"
 
 # Session keys
 SESSION_KEY_USER_ID: Final[str] = "user_id"
 SESSION_KEY_AUTHENTICATED: Final[str] = "authenticated"
+# Vault grants (see ``vault_sessions.py``): a hash of the password hash that
+# revokes the session on credential rotation, the per-session salt of the
+# browser key-cache context, and one server-clock deadline per tool.
+SESSION_KEY_CREDENTIAL_VERSION: Final[str] = "credential_version"
+SESSION_KEY_VAULT_SESSION_ID: Final[str] = "vault_session_id"
+SESSION_KEY_VAULT_EXPIRES_AT: Final[str] = "vault_{tool}_expires_at"
+
+# Vault destinations the signin flow may redirect to, selected by the vetted
+# ``tool`` request parameter (see ``views.vault_url``). Auth is canonical on
+# the main site, so each tool's signin links carry its own tool key; anything
+# not in this allowlist falls back to the default.
+VAULT_TOOL_PASS: Final[str] = "pass"
+VAULT_TOOL_NOTE: Final[str] = "note"
+VAULT_TOOLS: Final[tuple[str, ...]] = (VAULT_TOOL_PASS, VAULT_TOOL_NOTE)
+DEFAULT_VAULT_TOOL: Final[str] = VAULT_TOOL_PASS
 
 # Template paths
 TEMPLATE_SIGNUP: Final[str] = "auth/signup.html"

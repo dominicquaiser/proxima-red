@@ -8,7 +8,7 @@
 # terminates TLS and proxies to 127.0.0.1:8090.
 #
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.host.yml \
-#     up -d --build db redis web cron staticproxy
+#     up -d --build db redis redis-channels web cron staticproxy
 #
 # (Or simply: `make up-host`.)  Do NOT run deployment/scripts/init-letsencrypt.sh
 # on a host-nginx server.

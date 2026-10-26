@@ -1,11 +1,12 @@
-{% extends "base.html" %} {% load static %} {% block title %}About{% endblock %} {% block meta_description %}<meta
-  name="description"
-  content="Open source web tools for private, secure sharing. End-to-end encrypted, zero-knowledge architecture, hosted in the EU, no telemetry."
-/>{% endblock %} {% block og_title %}<meta property="og:title" content="About — proxima·red" />{% endblock %} {% block og_description %}<meta
-  property="og:description"
-  content="Open source web tools for private, secure sharing. End-to-end encrypted, zero-knowledge architecture, hosted in the EU, no telemetry."
-/>{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/core.css' %}" />
+{% extends "base.html" %} {% load static %} {% block title %}About{% endblock %} {% block meta_description %}
+<meta name="description"
+  content="Open source tools for private password sharing, Markdown notes, and encrypted collaboration. Hosted in Nuremberg, Germany. No telemetry." />
+{% endblock %} {% block og_title %}
+<meta property="og:title" content="About — proxima·red" />{% endblock %} {% block og_description %}
+<meta property="og:description"
+  content="Open source tools for private password sharing, Markdown notes, and encrypted collaboration. Hosted in Nuremberg, Germany. No telemetry." />
+{% endblock %} {% block extra_css %}
+<link rel="stylesheet" href="{% static 'core/css/core.css' %}" />
 {% endblock %} {% block content %}
 
 <div class="about-hero">
@@ -47,8 +48,8 @@
     <div class="prose">
       <p>
         proxima·red is a small set of open source web tools for secure sharing and writing. It is
-        maintained by a single developer and hosted on EU infrastructure. It is not a company and
-        not building toward anything commercial.
+        maintained by a single developer and hosted on a VPS in Nuremberg, Germany. It is
+        not a company and not building toward anything commercial.
       </p>
       <p>
         The source code is public and the architecture is documented so that anyone who wants to
@@ -66,8 +67,9 @@
     </div>
     <div class="prose">
       <p>
-        The encrypted tools are built around a zero-knowledge model: the server stores only what it
-        cannot avoid storing, and never in a form it can read.
+        Password shares, encrypted note links, live notes, and vault contents use AES-256-GCM
+        encryption in your browser. The server stores and relays the encrypted content without
+        receiving the keys. Encrypted share links work like this:
       </p>
     </div>
 
@@ -79,7 +81,7 @@
           <div class="zk-step__desc">
             Your browser generates a random
             <strong>AES-256 encryption key</strong>
-            using the Web Crypto API. It never leaves your device.
+            for each share using the Web Crypto API. It is never sent to the server.
           </div>
         </div>
       </div>
@@ -88,8 +90,9 @@
         <div class="zk-step__body">
           <div class="zk-step__heading">Local encryption</div>
           <div class="zk-step__desc">
-            Your content is encrypted entirely in your browser before anything is sent. The server
-            receives only <strong>ciphertext</strong> — the encrypted result it cannot read.
+            Your content is encrypted entirely in your browser before it is uploaded. The server
+            stores <strong>ciphertext</strong> alongside the share's identifier, expiry time, and
+            access metadata.
           </div>
         </div>
       </div>
@@ -138,7 +141,6 @@
 
     <div class="tool-cards">
       <div class="tool-card">
-        <span class="tool-card__status tool-card__status--live">Active</span>
         <div class="tool-card__name">[pass·]</div>
         <div class="tool-card__domain">pass.proxima.red</div>
         <p class="tool-card__desc">
@@ -151,16 +153,22 @@
       </div>
 
       <div class="tool-card">
-        <span class="tool-card__status tool-card__status--next">Up next</span>
         <div class="tool-card__name">[note·]</div>
-        <div class="tool-card__domain">note.proxima.red</div>
+        <a class="tool-card__domain" href="{{ note_site_url }}/">note.proxima.red</a>
         <p class="tool-card__desc">
-          Encrypted note sharing. A browser-based editor for writing and sharing notes and
-          documents. Content is encrypted before it leaves your browser, using the same model as
-          [pass·]. Sharing is optional — the editor works locally without generating a link.
+          Write Markdown in your browser, share an encrypted copy, or collaborate through an encrypted
+          editable link. Live notes synchronise edits and show participants' cursors. Use the editor
+          without an account, or sign in to save notes in your encrypted vault.
         </p>
         <span class="tool-card__icon tool-card__icon--note" aria-hidden="true"></span>
       </div>
+    </div>
+    <div class="prose">
+      <p>
+        Password and note share links have a chosen lifetime of one hour, one day, one week, or
+        four weeks. An editable note can be read and changed by anyone holding its complete link.
+        Writing in the public note editor stays in your browser until you choose to share.
+      </p>
     </div>
   </section>
 
@@ -192,18 +200,22 @@
     </div>
     <div class="prose">
       <p>
-        All tools are usable without an account. An account becomes useful for managing shared
-        content across sessions — keeping track of previously shared passwords, returning to a note
-        before sharing it, or maintaining an overview of what you have shared and when.
+        Both tools support sharing without an account. An account gives you access to the
+        password vault and the note vault across devices and sessions. In the note vault, document
+        contents, note names, and folder organisation are encrypted in your browser.
       </p>
       <p>
-        Sign-up requires no email address. Each account is assigned a randomly generated eight-digit
-        ID; only that ID and the account creation date are stored unencrypted. Everything else is
-        encrypted using a key derived from your password via PBKDF2. The server holds ciphertext and
-        nothing more.
+        Sign-up requires no email address. Each account is assigned a randomly generated
+        eight-digit ID. Your vault key is derived from your password in your browser and is never
+        sent to the server. The server stores authentication data and operational metadata, as
+        described in the <a href="{% url 'core:privacy' %}">privacy policy</a>, while your vault
+        contents remain encrypted.
       </p>
       <p>
-        A forgotten password means that data is unrecoverable. There is nothing to recover it with.
+        Saved vault notes have no automatic expiry. Moving a note to Trash gives you seven days
+        to restore it before automatic deletion; you can also delete it permanently sooner.
+        Sharing a vault note creates a separate copy with its own expiry, so deleting the original
+        does not revoke that share link.
       </p>
     </div>
   </section>
@@ -268,9 +280,8 @@
       </p>
       <p>
         The source code is
-        <a href="https://github.com/dominicquaiser" target="_blank" rel="noopener noreferrer"
-          >available on GitHub</a
-        >. Bug reports and contributions are welcome via GitHub Issues.
+        <a href="https://github.com/dominicquaiser/proxima-red" target="_blank" rel="noopener noreferrer">available on
+          GitHub</a>. Bug reports and contributions are welcome via GitHub Issues.
       </p>
     </div>
   </section>
@@ -288,19 +299,15 @@
       <p>
         For feature suggestions or to get involved with the project, open an issue or start a
         discussion on
-        <a href="https://github.com/dominicquaiser" target="_blank" rel="noopener noreferrer"
-          >GitHub</a
-        >.
+        <a href="https://github.com/dominicquaiser/proxima-red" target="_blank" rel="noopener noreferrer">GitHub</a>.
       </p>
       <p>
         If you find these tools useful and want to support the project:
-        <a href="https://ko-fi.com/dominicquaiser" target="_blank" rel="noopener noreferrer"
-          >Ko-fi</a
-        >.
+        <a href="https://ko-fi.com/dominicquaiser" target="_blank" rel="noopener noreferrer">Ko-fi</a>.
       </p>
     </div>
   </section>
 </main>
 {% endblock %} {% block extra_js %}
-<script src="{% static 'js/about-hero.js' %}" defer></script>
+<script src="{% static 'core/js/about-hero.js' %}" defer></script>
 {% endblock %}

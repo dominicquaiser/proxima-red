@@ -23,9 +23,7 @@ environ.Env.read_env(BASE_DIR / ".env")
 # A clearly-marked dev-only fallback keeps local and test runs friction-free.
 # production.py requires SECRET_KEY from the environment and refuses to boot with
 # this (publicly-known) value, so it can never reach a real deployment.
-DEV_FALLBACK_SECRET_KEY = (
-    "django-insecure-1t2hbk3qe$o=0co%6g9hi^i%f9#k5va^48_@(&4qr9!3i*zarx"
-)
+DEV_FALLBACK_SECRET_KEY = "django-insecure-1t2hbk3qe$o=0co%6g9hi^i%f9#k5va^48_@(&4qr9!3i*zarx"
 SECRET_KEY = env("SECRET_KEY", default=DEV_FALLBACK_SECRET_KEY)
 
 DEBUG = env.bool("DEBUG", default=False)
@@ -34,6 +32,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1", "0.
 
 SITE_URL = env("SITE_URL", default="http://localhost:8000")
 PASS_SITE_URL = env("PASS_SITE_URL", default="http://localhost:8000")
+NOTE_SITE_URL = env("NOTE_SITE_URL", default="http://localhost:8000")
 
 
 # --- Static files ---
@@ -57,8 +56,14 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    # WebSocket routing/consumers for live-note sync (apps.note.consumers).
+    # Deliberately without daphne: `manage.py runserver` stays the plain WSGI
+    # dev server (no WS - the live client falls back to polling); WebSockets
+    # need an ASGI server (uvicorn) serving config.asgi.
+    "channels",
     "apps.core",
     "apps.passwd",
+    "apps.note",
     "apps.auth",  # Custom authentication app (table: proxima_user)
 ]
 
@@ -100,13 +105,25 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# ASGI entrypoint (HTTP + WebSocket ProtocolTypeRouter). Production and the
+# uvicorn dev server serve this; config.wsgi remains for WSGI-only runners.
+ASGI_APPLICATION = "config.asgi.application"
+
+# --- Channel layer (WebSocket group fan-out) ---
+# In-memory: correct for the single-process dev server and for tests. It does
+# NOT fan out across processes, so production.py swaps in the Redis-backed
+# layer (dedicated redis-channels service) for multi-worker gunicorn/uvicorn.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
+
 
 # --- Database ---
 # Driven by DATABASE_URL; defaults to the local SQLite file for bare-metal dev.
 
-DATABASES = {
-    "default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
-}
+DATABASES = {"default": env.db("DATABASE_URL", default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}")}
 
 
 # --- Cache ---
@@ -164,11 +181,13 @@ SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_DOMAIN = env("SESSION_COOKIE_DOMAIN", default=None)
 CSRF_COOKIE_SAMESITE = "Lax"
 
-# Strict session idle timeout, and the single source of truth for it:
-# apps/auth/services.py reads settings.SESSION_COOKIE_AGE when it calls
-# request.session.set_expiry() on sign-in and after a password change.
+# Account identity survives while notes are in use. Vault authorization has
+# separate deadlines; background requests must never refresh either timer.
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False
-SESSION_COOKIE_AGE = 30 * 60  # 30 minutes, in seconds
+PASSWORD_VAULT_TIMEOUT = 30 * 60
+NOTE_VAULT_IDLE_TIMEOUT = 7 * 24 * 60 * 60
+SESSION_COOKIE_AGE = NOTE_VAULT_IDLE_TIMEOUT
+SESSION_SAVE_EVERY_REQUEST = False
 
 # Additional security headers.
 SECURE_BROWSER_XSS_FILTER = True
@@ -192,6 +211,24 @@ SECURE_REFERRER_POLICY = "same-origin"
 # far lower risk than script injection). No third-party origins are loaded, so
 # every fetch directive stays same-origin, which also makes Subresource
 # Integrity moot here: there are no cross-origin scripts to pin.
+
+
+def _ws_origin(url):
+    """http(s):// origin -> its ws(s):// twin, for the CSP connect-src.
+
+    The live-note WebSocket is same-origin on the note host, which CSP3
+    `'self'` already covers in current browsers, but older Safari matched
+    `'self'` by scheme too - listing the wss: origin explicitly is cheap
+    insurance. (development.py overrides NOTE_SITE_URL after this string is
+    built; that staleness is harmless because the dev WS stays same-origin
+    and is covered by 'self'.)
+    """
+    for scheme, ws_scheme in (("https://", "wss://"), ("http://", "ws://")):
+        if url.startswith(scheme):
+            return ws_scheme + url[len(scheme) :]
+    return url
+
+
 CONTENT_SECURITY_POLICY = env(
     "CONTENT_SECURITY_POLICY",
     default="; ".join(
@@ -201,8 +238,8 @@ CONTENT_SECURITY_POLICY = env(
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data:",
             "font-src 'self'",
-            f"connect-src 'self' {PASS_SITE_URL}",
-            f"form-action 'self' {SITE_URL} {PASS_SITE_URL}",
+            f"connect-src 'self' {PASS_SITE_URL} {_ws_origin(NOTE_SITE_URL)}",
+            f"form-action 'self' {SITE_URL} {PASS_SITE_URL} {NOTE_SITE_URL}",
             "frame-ancestors 'none'",
             "base-uri 'none'",
             "object-src 'none'",

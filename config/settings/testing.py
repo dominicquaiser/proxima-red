@@ -21,4 +21,7 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 SITE_URL = "http://testserver"
 PASS_SITE_URL = "http://testserver"
+# Equal to the other two on purpose: the host-dispatch tie-break (pass wins)
+# keeps the all-hosts-equal behavior that existing tests rely on.
+NOTE_SITE_URL = "http://testserver"
 ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]

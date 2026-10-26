@@ -1,7 +1,7 @@
 {% extends "base.html" %} {% load static %} {% block title %}Sign Up{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/components.css' %}" />
-<link rel="stylesheet" href="{% static 'css/auth.css' %}" />
-<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+<link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'auth/css/auth.css' %}" />
+<link rel="stylesheet" href="{% static 'passwd/css/passwd.css' %}" />
 {% endblock %} {% block content %}
 <main id="main-content">
   <div class="card" id="signup-card">
@@ -26,6 +26,8 @@
         <input type="hidden" id="id_auth_secret" name="auth_secret" />
         <input type="hidden" id="id_auth_salt" name="auth_salt" />
         <input type="hidden" id="id_vault_salt" name="vault_salt" />
+        {# Vetted vault destination (see AuthFormView.requested_tool). #}
+        <input type="hidden" name="tool" value="{{ tool }}" />
 
         <div class="field">
           <label class="field__label" for="id_password">Password</label>
@@ -72,7 +74,7 @@
 
     <div class="auth-footer">
       Already have an account?
-      <a href="{% url 'auth:signin' %}" class="auth-link">Sign In</a>
+      <a href="{% url 'auth:signin' %}?tool={{ tool }}" class="auth-link">Sign In</a>
     </div>
   </div>
 
@@ -97,13 +99,13 @@
           </label>
         </div>
 
-        <a href="{% url 'auth:signin' %}" class="res__btn">Continue to Sign In</a>
+        <a href="{% url 'auth:signin' %}?tool={{ tool }}" class="res__btn">Continue to Sign In</a>
       </div>
     </div>
   </div>
 </main>
 {% endblock %} {% block extra_js %}
-<script src="{% static 'js/auth.js' %}" defer></script>
+<script src="{% static 'auth/js/auth.js' %}" defer></script>
 {% include "partials/_auth_scripts.html" %}
-<script src="{% static 'js/signup.js' %}" defer></script>
+<script src="{% static 'auth/js/signup.js' %}" defer></script>
 {% endblock %}

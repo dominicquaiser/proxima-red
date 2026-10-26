@@ -38,3 +38,12 @@ def create_user_with_password(password: str) -> User:
         auth_salt=generate_salt(),
         vault_salt=generate_salt(),
     )
+
+
+def authorize_vaults(session, user):
+    """Give a test session the grants normally issued after password verification."""
+    from types import SimpleNamespace
+
+    from apps.auth.vault_sessions import grant_access
+
+    grant_access(SimpleNamespace(session=session), user, ("pass", "note"))

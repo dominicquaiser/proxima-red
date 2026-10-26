@@ -16,16 +16,17 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 
-from .models import User
-from .exceptions import UserCreationError
 from .constants import (
-    SALT_LENGTH_BYTES,
-    MAX_USER_CREATION_RETRIES,
     LOG_INTEGRITY_ERROR,
     LOG_USER_CREATION_FAILED,
-    SESSION_KEY_USER_ID,
+    MAX_USER_CREATION_RETRIES,
+    SALT_LENGTH_BYTES,
     SESSION_KEY_AUTHENTICATED,
+    SESSION_KEY_USER_ID,
 )
+from .exceptions import UserCreationError
+from .models import User
+from .vault_sessions import grant_access, revoke_key_caches
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,7 @@ def generate_decoy_salt(user_id: str, *, purpose: str) -> str:
     return base64.b64encode(digest[:SALT_LENGTH_BYTES]).decode("utf-8")
 
 
-def create_user_with_auth_secret(
-    auth_secret: str, *, auth_salt: str, vault_salt: str
-) -> User:
+def create_user_with_auth_secret(auth_secret: str, *, auth_salt: str, vault_salt: str) -> User:
     """
     Create a new user from a client-derived authentication secret.
 
@@ -201,10 +200,10 @@ def create_user_session(request: HttpRequest, user: User) -> None:
     request.session.flush()
     request.session[SESSION_KEY_USER_ID] = user.user_id
     request.session[SESSION_KEY_AUTHENTICATED] = True
-    request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+    grant_access(request, user, ("pass", "note"))
 
 
-def regenerate_session_after_password_change(request: HttpRequest) -> None:
+def regenerate_session_after_password_change(request: HttpRequest, user: User) -> None:
     """
     Regenerate session after password change to prevent session fixation.
 
@@ -215,6 +214,7 @@ def regenerate_session_after_password_change(request: HttpRequest) -> None:
 
     Args:
         request: Django request object
+        user: The user whose credentials were just rotated (already saved)
 
     Security Note:
         Session fixation is an attack where an attacker obtains a valid session ID
@@ -225,8 +225,10 @@ def regenerate_session_after_password_change(request: HttpRequest) -> None:
     # Cycle session key (preserves data, changes session ID)
     request.session.cycle_key()
 
-    # Reset session timeout
-    request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+    # The current password was verified by PasswordChangeForm. Keep both vaults
+    # accessible while the browser re-encrypts them, and revoke old key caches.
+    revoke_key_caches(request)
+    grant_access(request, user, ("pass", "note"))
 
 
 def destroy_user_session(request: HttpRequest) -> None:

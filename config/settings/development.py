@@ -14,6 +14,13 @@ ALLOWED_HOSTS = env.list(
     "ALLOWED_HOSTS", default=["localhost", "127.0.0.1", "0.0.0.0", ".localhost"]
 )
 
+# Zero-config note-tool host for local development: browsers resolve
+# *.localhost to loopback and treat it as a secure context (so Web Crypto
+# works), and ".localhost" is covered by the ALLOWED_HOSTS default above.
+# The CSP string was already built in base.py with the base default; that is
+# harmless because `form-action 'self'` covers the editor's same-origin POST.
+NOTE_SITE_URL = env("NOTE_SITE_URL", default="http://note.localhost:8000")
+
 # Relaxed cookie security for plain-HTTP local development.
 SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False

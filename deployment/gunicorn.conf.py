@@ -9,6 +9,10 @@ import os
 
 bind = "0.0.0.0:8000"
 
+# ASGI workers: uvicorn under gunicorn's process management, serving
+# config.asgi (HTTP + the live-note WebSockets) from every worker.
+worker_class = "uvicorn_worker.UvicornWorker"
+
 workers = int(os.environ.get("GUNICORN_WORKERS", (multiprocessing.cpu_count() * 2) + 1))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", 60))
 

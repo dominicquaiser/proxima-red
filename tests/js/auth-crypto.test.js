@@ -1,5 +1,5 @@
 /**
- * Tests for static/js/auth-crypto.js - the zero-knowledge vault flow
+ * Tests for static/auth/js/auth-crypto.js - the zero-knowledge vault flow
  * (window.AuthCrypto): PBKDF2 derivation, the auth-secret/vault-key domain
  * separation, account-data encryption, and the secure-session storage.
  *
@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 
 const { loadCryptoModules, base64ByteLength, flipFirstByte, cryptoError } = require("./helpers");
 
-const { AuthCrypto, sessionStorage } = loadCryptoModules();
+const { AuthCrypto, sessionStorage, localStorage } = loadCryptoModules();
 
 // The production default is 100,000 iterations; derivation tests pass a low
 // count through the public `iterations` parameter to keep the suite fast.
@@ -354,7 +354,7 @@ describe("consumeVaultKeyFromFragment", () => {
     assert.deepEqual(replaceCalls, []);
   });
 
-  test("does not overwrite a key already stored for this origin", async () => {
+  test("a malformed fragment leaves the existing key intact but is scrubbed", async () => {
     const key = await AuthCrypto.deriveVaultKeyBase64("pw", AuthCrypto.generateSalt());
     const replaceCalls = withFragment("#" + encodeURIComponent("c2VudGluZWw="), {
       existingKey: key,
@@ -362,6 +362,6 @@ describe("consumeVaultKeyFromFragment", () => {
 
     assert.equal(AuthCrypto.consumeVaultKeyFromFragment(), false);
     assert.equal(sessionStorage.getItem(AuthCrypto.STORAGE_KEYS.masterKey), key);
-    assert.deepEqual(replaceCalls, []);
+    assert.deepEqual(replaceCalls, ["/vault/?x=1"]);
   });
 });

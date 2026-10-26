@@ -17,11 +17,9 @@ from django.shortcuts import redirect
 from .constants import (
     ERROR_SESSION_EXPIRED,
     LOG_SESSION_MISSING_USER,
-    SESSION_KEY_AUTHENTICATED,
     SUCCESS_PLEASE_SIGNIN,
 )
-from .services import get_user_by_id
-from .utils import get_authenticated_user_id, ratelimited_response
+from .utils import get_authenticated_user, get_authenticated_user_id, ratelimited_response
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +40,11 @@ class MainSiteRedirectMixin:
     is derived from the password at sign-in and held in ``sessionStorage`` (a
     single origin, not shareable across subdomains); after sign-in on the main
     site it is handed to the vault origin in the redirect URL fragment (see
-    ``static/js/auth-crypto.js`` ``consumeVaultKeyFromFragment``).
+    ``static/auth/js/auth-crypto.js`` ``consumeVaultKeyFromFragment``).
     """
 
     def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
-        return self._redirect_to_main_site(request) or super().dispatch(
-            request, *args, **kwargs
-        )
+        return self._redirect_to_main_site(request) or super().dispatch(request, *args, **kwargs)
 
     @staticmethod
     def _redirect_to_main_site(request: HttpRequest):
@@ -81,7 +77,7 @@ class SessionAuthRequiredMixin:
     signin_url = "auth:signin"
 
     def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
-        if not request.session.get(SESSION_KEY_AUTHENTICATED):
+        if not get_authenticated_user_id(request):
             messages.info(request, SUCCESS_PLEASE_SIGNIN)
             return redirect(self.signin_url)
         return super().dispatch(request, *args, **kwargs)
@@ -92,7 +88,7 @@ class SessionAuthRequiredMixin:
         if not user_id:
             return None
 
-        user = get_user_by_id(user_id)
+        user = get_authenticated_user(request)
         if not user:
             logger.warning(LOG_SESSION_MISSING_USER, user_id)
         return user
@@ -133,9 +129,7 @@ class RatelimitGateMixin:
 
     def dispatch(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
         """Return the rate-limited response when blocked, else dispatch normally."""
-        return self.handle_ratelimited(request) or super().dispatch(
-            request, *args, **kwargs
-        )
+        return self.handle_ratelimited(request) or super().dispatch(request, *args, **kwargs)
 
     def handle_ratelimited(self, request: HttpRequest):
         """Return a 429/redirect response when the request was rate limited, else None."""

@@ -13,10 +13,10 @@
       href="{% static 'icons/user-circle-favicon.svg' %}"
     />
 
-    <link rel="stylesheet" href="{% static 'css/main.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/notifications.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/components.css' %}" />
-    <link rel="stylesheet" href="{% static 'css/account.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
+    <link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+    <link rel="stylesheet" href="{% static 'auth/css/account.css' %}" />
   </head>
   <body>
     <div id="notification-container"></div>
@@ -27,9 +27,14 @@
       </a>
       <div class="header__auth">
         <a
-          href="{{ pass_site_url }}/vault/"
+          href="{{ pass_site_url }}{% url 'passwd:vault' %}"
           class="header__btn header__btn--outline"
-          >Vault</a
+          >Password Vault</a
+        >
+        <a
+          href="{{ note_site_url }}{% url 'note:vault' %}"
+          class="header__btn header__btn--outline"
+          >Note Vault</a
         >
         <form method="post" action="{% url 'auth:signout' %}">
           {% csrf_token %}
@@ -56,7 +61,11 @@
           <div class="card__title">Account Information</div>
         </div>
         <div class="card__body">
-          {# user_obj (not user/current_user): Django's auth context-processor is intentionally off, so {{ user }} would render blank — see apps/auth/context_processors.py #}
+          {% comment %} AccountView passes the account holder explicitly as
+          user_obj (apps/auth/views.py). Django's own auth context-processor is
+          intentionally not enabled, so {{ user }} renders blank here; the
+          project-wide alternative is {{ current_user }}, from
+          apps/auth/context_processors.py. {% endcomment %}
           <div class="acct-info">
             <div class="acct-info__row">
               <span class="acct-info__key">User ID</span>
@@ -89,6 +98,9 @@
             action="{% url 'auth:change_password' %}"
             data-vault-data-url="{% url 'passwd:vault_data' %}"
             data-update-data-url="{% url 'passwd:update_data' %}"
+            data-note-index-url="{% url 'note:vault_index' %}"
+            data-note-list-url="{% url 'note:vault_notes' %}"
+            data-note-migrate-url="{% url 'note:vault_migrate' %}"
             novalidate
           >
             {% csrf_token %}
@@ -149,6 +161,10 @@
 
             <button type="submit" class="btn-create">Update Password</button>
           </form>
+          <div id="vault-recovery" class="hidden">
+            <p>Your password changed, but some data could not be saved. Download a recovery copy before leaving this page. It contains unencrypted notes and saved links; store it privately.</p>
+            <button type="button" id="download-vault-recovery" class="btn-create">Download recovery copy</button>
+          </div>
         </div>
       </div>
 
@@ -250,9 +266,12 @@
     </main>
 
     {{ auth_data_json|json_script:"auth-data" }}
+    {% include "partials/_unlock_modal.html" with user_id=user_obj.user_id vault_tool="account" %}
 
     {% include "partials/_util_scripts.html" %}
     {% include "partials/_auth_scripts.html" %}
-    <script src="{% static 'js/account.js' %}" defer></script>
+    <script src="{% static 'auth/js/unlock.js' %}" defer></script>
+    <script src="{% static 'auth/js/vault-migration.js' %}" defer></script>
+    <script src="{% static 'auth/js/account.js' %}" defer></script>
   </body>
 </html>

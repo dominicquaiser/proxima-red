@@ -9,8 +9,8 @@
   property="og:description"
   content="Share a password or secret with a self-destructing link. End-to-end encrypted in your browser — the server never sees your content. Free, no account required."
 />{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/components.css' %}" />
-<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+<link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'passwd/css/passwd.css' %}" />
 {% endblock %} {% block content %}
 <main id="main-content">
   <div class="card">
@@ -56,6 +56,6 @@
     "license": "https://www.gnu.org/licenses/agpl-3.0.html"
   }
 </script>
-<script src="{% static 'js/crypto.js' %}" defer></script>
-<script src="{% static 'js/passwd.js' %}" defer></script>
+<script src="{% static 'shared/js/crypto.js' %}" defer></script>
+<script src="{% static 'passwd/js/passwd.js' %}" defer></script>
 {% endblock %}

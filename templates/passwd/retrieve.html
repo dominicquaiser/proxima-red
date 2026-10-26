@@ -6,8 +6,8 @@
   name="robots"
   content="noindex"
 />{% endblock %} {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/components.css' %}" />
-<link rel="stylesheet" href="{% static 'css/passwd.css' %}" />
+<link rel="stylesheet" href="{% static 'shared/css/components.css' %}" />
+<link rel="stylesheet" href="{% static 'passwd/css/passwd.css' %}" />
 {% endblock %} {% block content %}
 <main id="main-content">
   <div class="card">
@@ -119,6 +119,6 @@
 </main>
 
 {{ share_data_json|json_script:"share-data" }} {% endblock %} {% block extra_js %}
-<script src="{% static 'js/crypto.js' %}" defer></script>
-<script src="{% static 'js/retrieve.js' %}" defer></script>
+<script src="{% static 'shared/js/crypto.js' %}" defer></script>
+<script src="{% static 'passwd/js/retrieve.js' %}" defer></script>
 {% endblock %}
