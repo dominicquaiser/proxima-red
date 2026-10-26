@@ -8,7 +8,7 @@
     </div>
     <h1 class="page-hero__title">Privacy Policy</h1>
     <div class="page-hero__meta">
-      Regulation (EU) 2016/679 (GDPR) · § 25 TDDDG · Last updated: June 2026
+      Regulation (EU) 2016/679 (GDPR) · § 25 TDDDG · Last updated: 25 October 2026
     </div>
   </div>
 </div>
@@ -20,7 +20,7 @@
       <li><a href="#s1">Controller</a></li>
       <li><a href="#s2">Scope</a></li>
       <li><a href="#s3">Data Processed</a></li>
-      <li><a href="#s4">Cookies &amp; § 25 TDDDG</a></li>
+      <li><a href="#s4">Cookies, Browser Storage &amp; § 25 TDDDG</a></li>
       <li><a href="#s5">Third-Party Processors</a></li>
       <li><a href="#s6">International Data Transfers</a></li>
       <li><a href="#s7">Data Retention Summary</a></li>
@@ -32,14 +32,15 @@
 
   <div class="highlight-box">
     <p>
-      <strong>Overview:</strong> proxima·red provides zero-knowledge sharing tools for passwords
-      and notes. By default, all content is encrypted in your browser using AES-256-GCM before any
-      data leaves your device. The server receives and stores only ciphertext — the encryption key
-      is either embedded in the URL fragment (anonymous sharing) or derived entirely client-side
-      and never transmitted (authenticated vault). The one exception is the note tool's explicit
+      <strong>Overview:</strong> proxima·red provides zero-knowledge tools for passwords and
+      notes. By default, all content is encrypted in your browser using AES-256-GCM before any
+      content leaves your device. For encrypted content, the server receives ciphertext and the
+      metadata described below. The encryption key is either embedded in the URL fragment (share
+      links) or derived entirely client-side and never transmitted (authenticated vault). The one
+      exception is the note tool's explicit
       <em>plain-text link</em> option, which stores the note unencrypted (see Section 3.5). No
       analytics tools, tracking pixels, or third-party scripts are embedded. All assets (fonts,
-      scripts, styles) are served from this server. No request is made to any external service.
+      scripts, styles) are served from my VPS in Nuremberg, Germany.
     </p>
   </div>
 
@@ -73,9 +74,9 @@
     </div>
     <div class="prose">
       <p>
-        This policy covers all processing carried out in connection with the website proxima·red and
-        its associated services, including anonymous password sharing, anonymous note sharing,
-        registered user accounts, and the authenticated vault.
+        This policy covers proxima.red, pass.proxima.red, and note.proxima.red, including password
+        sharing, static and collaboratively editable note links, registered user accounts, and the
+        authenticated password and note vaults.
       </p>
     </div>
   </section>
@@ -100,9 +101,10 @@
         <li>User-Agent string (browser name, version, operating system)</li>
       </ul>
       <p>
-        <strong>Who processes it:</strong> The hosting provider (Hostiko, UA), acting as a
-        processor. No data processing agreement is currently in place; see
-        <a href="#s5">Section 05</a>. The controller does not have direct access to raw log files.
+        <strong>Who processes it:</strong> The controller operates the web server and application
+        on a VPS provided by netcup GmbH in Nuremberg, Germany. Access and error logs are generated
+        by the server software and container runtime and are accessible to the controller. Netcup
+        provides the underlying infrastructure as described in <a href="#s5">Section 05</a>.
       </p>
       <p>
         <strong>Purpose:</strong> Ensuring stable and secure operation — detecting attacks, abuse
@@ -113,8 +115,12 @@
         interest is the secure and reliable provision of the service.
       </p>
       <p>
-        <strong>Retention:</strong> Log files are retained for a short period (up to 7 days) and
-        then automatically deleted by the hosting provider. The controller does not retain copies.
+        <strong>Retention:</strong> No fixed automatic deletion period is currently configured for
+        application and web-server logs. They remain until removed through log rotation or
+        deletion on the VPS. Separately, Netcup may collect infrastructure logs to defend against
+        attacks and states that these are retained for a maximum of 14 days; see its
+        <a href="https://www.netcup.com/en/helpcenter/documentation/security/log-policy" rel="noopener noreferrer"
+          target="_blank">log storage policy</a>.
       </p>
 
       <h3>3.2 Session Cookie — Authenticated Users Only</h3>
@@ -159,8 +165,8 @@
         originate from this site and not a third-party page (cross-site request forgery protection).
       </p>
       <p>
-        <strong>Attributes:</strong> Not HttpOnly (must be readable by the JavaScript AJAX client) ·
-        Secure (HTTPS) · SameSite=Lax.
+        <strong>Attributes:</strong> HttpOnly in production · Secure (HTTPS) · SameSite=Lax.
+        JavaScript obtains the request token from the page's hidden form field.
       </p>
       <p>
         <strong>Purpose:</strong> Security mechanism required by the web framework to prevent CSRF
@@ -172,8 +178,8 @@
         strictly necessary for the secure operation of a service explicitly requested by the user.
       </p>
       <p>
-        <strong>Retention:</strong> Session-scoped; deleted when the browser session ends or on
-        sign-out.
+        <strong>Retention:</strong> Up to 364 days from the last time the cookie is set or
+        refreshed, using the configured CSRF cookie lifetime.
       </p>
 
       <h3>3.4 Anonymous Password Shares</h3>
@@ -191,7 +197,7 @@
         <tbody>
           <tr>
             <td><code>id</code></td>
-            <td>UUID (randomly generated, not linked to any person)</td>
+            <td>Randomly generated UUID identifying the share</td>
           </tr>
           <tr>
             <td><code>encrypted_data</code></td>
@@ -248,6 +254,11 @@
 
       <h3>3.5 Shared Notes</h3>
       <p>
+        Text written or imported into the public note editor is kept in the browser until you
+        create a share link. Saving a note to the authenticated vault sends encrypted content as
+        described in Section 3.10.
+      </p>
+      <p>
         <strong>What:</strong> When a visitor shares a note, the server stores in the database:
       </p>
       <table class="data-table">
@@ -260,7 +271,7 @@
         <tbody>
           <tr>
             <td><code>id</code></td>
-            <td>UUID (randomly generated, not linked to any person)</td>
+            <td>Randomly generated UUID identifying the note</td>
           </tr>
           <tr>
             <td><code>content</code></td>
@@ -299,11 +310,10 @@
         For encrypted notes (the default) the encryption key is never transmitted to the server; it
         is embedded solely in the URL fragment (<code>#</code>), which browsers do not include in
         HTTP requests.
-        <strong
-          >If the creator explicitly chooses the plain-text link option, the note is stored and
-          transmitted unencrypted and is readable by the server</strong
-        >
-        — the note editor states this prominently before such a link is created.
+        <strong>If the creator explicitly chooses the plain-text link option, the note is stored
+          without content encryption and is readable by the server and anyone holding the link</strong>
+        — the note editor states this prominently before such a link is created. HTTPS still
+        encrypts the connection between the browser and the server.
       </p>
       <p><strong>Purpose:</strong> Providing the note-sharing service.</p>
       <p>
@@ -316,17 +326,18 @@
         <strong>Retention:</strong> Each note is automatically deleted when its expiry timestamp is
         reached. A background job (<code>delete_expired_notes</code>) runs every minute in
         production. A note is also deleted immediately when it is accessed after its expiry time.
-        The maximum retention period is 4 weeks.
+        The maximum chosen lifetime is 4 weeks. Notes created while signed in are also deleted
+        when the creator's account is deleted. Deletion from the live database does not remove
+        copies a recipient has downloaded or copies in existing backups (see Section 7).
       </p>
       <p>
         <strong>Images hosted elsewhere are never loaded.</strong> A note is Markdown, and Markdown
         can reference an image by URL. Displaying such an image would make your browser contact
         that third-party server, telling it your IP address, your browser version, and the moment
-        you opened the note — in effect giving whoever wrote the note a read receipt on you. Notes
-        therefore render a labelled placeholder in place of any image hosted on another server,
-        naming the host it would have contacted. Nothing is requested from it. Images embedded
-        directly in the note's text (<code>data:</code> URIs) contain their own bytes, make no
-        request, and are displayed normally.
+        you opened the note. Notes therefore render a labelled placeholder in place of any image
+        hosted on another server, naming the host it would have contacted. Nothing is requested from
+        it. Images embedded directly in the note's text (<code>data:</code> URIs) contain their own
+        bytes, make no request, and are displayed normally.
       </p>
 
       <h3>3.6 Live Notes (Editable Share Links)</h3>
@@ -345,7 +356,7 @@
         <tbody>
           <tr>
             <td><code>id</code></td>
-            <td>UUID (randomly generated, not linked to any person)</td>
+            <td>Randomly generated UUID identifying the live note</td>
           </tr>
           <tr>
             <td><code>snapshot</code> / <code>snapshot_iv</code></td>
@@ -354,13 +365,21 @@
           <tr>
             <td>update log</td>
             <td>
-              AES-256-GCM ciphertext of each batch of edits (with its initialization vector and a
-              timestamp), kept until participants consolidate them into a new snapshot
+              AES-256-GCM ciphertext of each batch of edits, with an initialization vector,
+              sequence identifier, and timestamp, kept until participants consolidate them into a
+              new snapshot
             </td>
           </tr>
           <tr>
-            <td><code>created_at</code> / <code>expires_at</code></td>
-            <td>Creation and expiry timestamps (1 hour · 1 day · 1 week · 4 weeks)</td>
+            <td><code>created_at</code> / <code>updated_at</code> / <code>expires_at</code></td>
+            <td>
+              Creation, latest snapshot update, and expiry timestamps (chosen lifetime: 1 hour ·
+              1 day · 1 week · 4 weeks)
+            </td>
+          </tr>
+          <tr>
+            <td><code>snapshot_seq</code></td>
+            <td>Sequence identifier of the last update included in the snapshot</td>
           </tr>
           <tr>
             <td><code>access_count</code></td>
@@ -379,17 +398,20 @@
         links.
       </p>
       <p>
-        Editable links are always anonymous: holding the link is the entire capability, and the
-        server keeps no record of <em>which accounts</em> edit a given note. Access is not
-        restricted to named accounts, and there is no account-to-note relationship to store.
+        Access does not require an account: anyone with the complete editable link can read and
+        edit the note. If the creator is signed in when the link is created, the server associates
+        the live note with that account for export and account deletion. It does not maintain a
+        separate account-based history of which participants made individual edits.
       </p>
       <p>
         While a live note is open, each participant's browser holds a persistent connection
         (WebSocket) to the server over which encrypted edits and encrypted <em>presence</em>
-        updates — cursor positions and a randomly generated per-session display name and colour —
-        are relayed between participants. Presence data is encrypted under the same document key,
-        is never stored, and disappears when the tab closes. If the connection cannot be
-        established, the browser falls back to periodic polling over HTTPS (without presence).
+        updates — cursor positions, selections, and a randomly generated per-session display name
+        and colour — are relayed between participants. Presence data is encrypted under the same
+        document key. It is briefly buffered for delivery through an in-memory Redis channel
+        service, is not saved to the database, and expires from participants' views after a
+        disconnect. If the connection cannot be established, the browser falls back to periodic
+        polling over HTTPS (without presence).
       </p>
       <p>
         <strong>Honest limitation:</strong> collaboration makes more <em>metadata</em> visible
@@ -411,7 +433,9 @@
         <code>delete_expired_notes</code>, every minute in production), or immediately when it is
         opened after its expiry time. The maximum retention period is 4 weeks. Update-log entries
         are additionally pruned earlier whenever participants consolidate them into a new
-        encrypted snapshot.
+        encrypted snapshot. Live notes created while signed in are also deleted with the creator's
+        account. Existing backups and participants' own copies are subject to the limits described
+        in Section 7.
       </p>
 
       <h3>3.7 Registered User Accounts</h3>
@@ -451,8 +475,8 @@
         </tbody>
       </table>
       <p>
-        <strong>There is no name, e-mail address, or any other identifying attribute.</strong> The
-        user's account password is never transmitted to or stored by the server. The browser derives
+        <strong>No name or e-mail address is required; the account uses a pseudonymous ID.</strong>
+        The user's account password is never transmitted to or stored by the server. The browser derives
         a separate authentication secret (via PBKDF2-SHA256, 100,000 iterations, domain-separated)
         from the password and the <code>auth_salt</code>; only this derived secret is sent during
         sign-in. The server stores its Argon2 hash. Possession of the hash does not allow the server
@@ -465,7 +489,8 @@
       </p>
       <p>
         <strong>Purpose:</strong> Providing authenticated access to the vault and associating
-        password shares with an account for management purposes.
+        password shares, shared notes, and live notes with an account for management, export, and
+        account deletion.
       </p>
       <p>
         <strong>Legal basis:</strong> Art. 6(1)(b) GDPR — processing is necessary for the
@@ -474,14 +499,15 @@
       <p>
         <strong>Retention:</strong> Account data is retained for as long as the account exists.
         Users may request deletion of their account (see <a href="#s8">Section 08</a>). When an
-        account is deleted, all associated <code>SharedPassword</code> records and the encrypted
-        vault blob are cascade-deleted.
+        account is deleted, its password shares, shared notes, live notes and their update logs,
+        password vault blob, note vault documents, and note vault index are cascade-deleted from
+        the live database.
       </p>
 
-      <h3>3.8 Encrypted Vault Blob (ServiceData)</h3>
+      <h3>3.8 Encrypted Password Vault (ServiceData)</h3>
       <p>
-        <strong>What:</strong> Authenticated users who save data to the vault cause the server to
-        store a <code>ServiceData</code> record:
+        <strong>What:</strong> Authenticated users who save data to the password vault cause the
+        server to store a <code>ServiceData</code> record:
       </p>
       <table class="data-table">
         <thead>
@@ -512,11 +538,9 @@
       <p>
         The vault is encrypted with the vault key, which is derived entirely in the browser from the
         account password and the <code>vault_salt</code>. Password vault keys are held per tab in
-        <code>sessionStorage</code>. Notes also cache the derived key in <code>localStorage</code>
-        so other note tabs and browser restarts can reuse it within the seven-day access window.
-        Cached keys are checked against the account, session and expiry before use. Expired or revoked
-        copies are discarded when the application next checks them; closed browser origins cannot be
-        cleared remotely. The vault key is never sent to the server, which stores only opaque ciphertext.
+        <code>sessionStorage</code> and checked against the account, session, and access deadline
+        before reuse (see Section 4). The vault key is never sent to the server, which stores only
+        opaque ciphertext of the vault contents.
       </p>
       <p><strong>Purpose:</strong> Persisting the user's vault across devices and sessions.</p>
       <p><strong>Legal basis:</strong> Art. 6(1)(b) GDPR — performance of the service contract.</p>
@@ -527,10 +551,12 @@
       <h3>3.9 Rate-Limiting Counters</h3>
       <p>
         <strong>What:</strong> To prevent abuse, the service enforces per-IP rate limits on
-        sensitive endpoints (share creation: 60/h; share retrieval: 120/h; vault access: 100/h;
-        vault updates: 20/min; data export: 10/h). Rate-limit counters are keyed on the client IP
-        address and stored in a shared in-memory cache (Redis in production). The IP address used
-        for rate limiting is derived from the <code>X-Forwarded-For</code> header (resolved for the
+        sensitive endpoints, including password and note creation, retrieval, vault access,
+        updates, exports, and live-note connections. Limits vary by operation; for example,
+        password-share creation allows 60/h and note-share creation allows 30/h. Rate-limit
+        counters are keyed using the client IP address and stored in a shared in-memory cache
+        (Redis in production). The IP address used for rate limiting is derived from the
+        <code>X-Forwarded-For</code> header (resolved for the
         configured number of trusted proxies).
       </p>
       <p><strong>Purpose:</strong> Abuse prevention and protection of service availability.</p>
@@ -541,8 +567,66 @@
       </p>
       <p>
         <strong>Retention:</strong> Counters expire automatically in accordance with the rate-limit
-        window (minutes to hours). No persistent log of IP addresses is maintained by the
-        application itself.
+        window (minutes to hours). Live notes also use temporary per-document connection counters
+        to limit concurrent connections; these expire after six hours without a new connection.
+        These counters are separate from the server logs described in Section 3.1.
+      </p>
+
+      <h3>3.10 Encrypted Note Vault</h3>
+      <p>
+        <strong>What:</strong> Signed-in users can save individual notes and organise them into
+        folders. The server stores an encrypted document for each note and a separate encrypted
+        index for the vault:
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Content</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Vault note</td>
+            <td>
+              Random UUID, owning account reference, AES-256-GCM ciphertext of the document, and
+              initialization vector
+            </td>
+          </tr>
+          <tr>
+            <td>Vault index</td>
+            <td>
+              Owning account reference, AES-256-GCM ciphertext of note names, folders, folder
+              assignments, and Trash state, and initialization vector
+            </td>
+          </tr>
+          <tr>
+            <td>Document and index timestamps</td>
+            <td>Creation and last update times</td>
+          </tr>
+          <tr>
+            <td><code>trashed_at</code></td>
+            <td>Unencrypted timestamp recording when a note was moved to Trash; empty for active notes</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Note contents, names, and folder organisation are encrypted in the browser using the vault
+        key derived from the account password and public vault salt. The server can see the owning
+        account, number and size of stored documents, timestamps, and whether and when a note was
+        trashed. It cannot read the encrypted content or folder names. Creating a share link from
+        a vault note creates a separate shared or live note with its own expiry; deleting the
+        original vault note does not delete that separate share.
+      </p>
+      <p><strong>Purpose:</strong> Saving, organising, synchronising, and restoring the user's notes.</p>
+      <p><strong>Legal basis:</strong> Art. 6(1)(b) GDPR — performance of the service contract.</p>
+      <p>
+        <strong>Retention:</strong> Active vault notes have no automatic expiry and remain until
+        permanent deletion or account deletion. Notes moved to Trash can be restored for seven
+        days, after which the scheduled cleanup deletes their database rows. Choosing permanent
+        deletion removes a note earlier. Restoring a note clears its deletion timestamp. The
+        encrypted index is retained until account deletion and updated by the browser as the vault
+        changes. Existing backups are described in Section 7.
       </p>
     </div>
   </section>
@@ -550,14 +634,15 @@
   <section class="doc-section" id="s4">
     <div class="doc-section__header">
       <span class="doc-section__num">04</span>
-      <h2 class="doc-section__title">Cookies and § 25 TDDDG</h2>
+      <h2 class="doc-section__title">Cookies, Browser Storage and § 25 TDDDG</h2>
     </div>
     <div class="prose">
       <p>
         Under § 25(1) TDDDG, storing information on a user's device or accessing information already
         stored requires the user's consent unless an exception applies. Under § 25(2) Nr. 2 TDDDG,
         consent is <strong>not</strong> required if the storage or access is strictly necessary for
-        the provision of a telemedia service explicitly requested by the user.
+        the provision of a digital service explicitly requested by the user. This also applies to
+        browser storage such as <code>sessionStorage</code> and <code>localStorage</code>.
       </p>
       <p>proxima·red sets exactly two cookies:</p>
       <table class="data-table">
@@ -584,9 +669,53 @@
           </tr>
         </tbody>
       </table>
+      <p>The tools also use browser storage for encryption keys needed to access requested content:</p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Storage</th>
+            <th>Purpose and contents</th>
+            <th>Lifetime</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>sessionStorage</code></td>
+            <td>
+              Vault encryption keys and account/session context; temporary password-share keys;
+              live-note keys so reloading a tab preserves access
+            </td>
+            <td>
+              Scoped to the tab's browser session; vault keys are also checked against their access
+              deadline and invalidated when sign-out or a session change is detected
+            </td>
+          </tr>
+          <tr>
+            <td><code>localStorage</code> on the note origin</td>
+            <td>
+              Derived note-vault key with account/session context and an expiry time, for access
+              across note tabs and browser restarts
+            </td>
+            <td>
+              Usable within the seven-day note access window, renewed by foreground note activity;
+              stale or revoked copies are discarded when the application next checks them
+            </td>
+          </tr>
+        </tbody>
+      </table>
       <p>
-        No marketing, analytics, profiling, or tracking cookies are set. No consent banner is shown
-        because no consent-requiring storage operations occur.
+        Vault access is checked with the server before a cached key is reused. Closed tabs or
+        browser origins cannot be cleared remotely, so cached material can remain on the device
+        until the site is next opened or browser storage is cleared. You can remove local keys by
+        clearing the site's browser data.
+        The application does not send the keys to the server. Browser storage supports the
+        requested encrypted sharing and vault functions under
+        <a href="https://www.gesetze-im-internet.de/ttdsg/__25.html" rel="noopener noreferrer" target="_blank">§ 25(2)
+          Nr. 2 TDDDG</a>;
+        processing account-related vault data is based on Art. 6(1)(b) GDPR.
+      </p>
+      <p>
+        No marketing, analytics, profiling, or tracking cookies or browser-storage entries are set.
       </p>
     </div>
   </section>
@@ -597,27 +726,44 @@
       <h2 class="doc-section__title">Third-Party Processors (Art. 28 GDPR)</h2>
     </div>
     <div class="prose">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Processor</th>
-            <th>Role</th>
-            <th>Data involved</th>
-            <th>Safeguard</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Hostiko (UA)</td>
-            <td>Infrastructure, server, access logs</td>
-            <td>IP address, request metadata</td>
-            <td>
-              No DPA currently in place. A DPA has been requested; the provider has confirmed
-              EU-only data residency and added DPA support to their roadmap.
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="data-table-scroll" role="region" aria-label="Third-party processors" tabindex="0">
+        <table class="data-table data-table--processors">
+          <thead>
+            <tr>
+              <th scope="col">Processor</th>
+              <th scope="col">Role</th>
+              <th scope="col">Data involved</th>
+              <th scope="col">Safeguard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                netcup GmbH<br />
+                Emmy-Noether-Straße 10<br />
+                76131 Karlsruhe<br />
+                Germany
+              </td>
+              <td>VPS infrastructure in Nuremberg, Germany</td>
+              <td>
+                Connection and request metadata, server logs, account and session data, encrypted
+                shares and vault data, and any notes explicitly shared as plain text
+              </td>
+              <td>
+                Data processing agreement (Auftragsverarbeitungsvertrag) under Art. 28 GDPR;
+                processing on the controller's instructions.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The controller administers the VPS and the application services running on it. Netcup
+        provides the underlying hosting infrastructure. Information about Netcup is available in
+        its
+        <a href="https://www.netcup.com/en/contact/data-privacy" rel="noopener noreferrer" target="_blank">privacy
+          policy</a>.
+      </p>
       <p>
         No other third-party processors receive personal data. No third-party scripts, fonts,
         analytics services, CDNs, or social media integrations are used.
@@ -632,9 +778,9 @@
     </div>
     <div class="prose">
       <p>
-        The hosting provider has confirmed that server infrastructure and all associated data
-        processing is located within the EU (Warsaw, Poland). No formal transfer mechanism has been
-        established with third countries, as no such transfer is understood to take place.
+        The service and its databases are hosted on the Netcup VPS in Nuremberg, Germany, within
+        the European Union. The controller does not transfer service data to recipients outside
+        the European Economic Area as part of operating these tools.
       </p>
     </div>
   </section>
@@ -655,15 +801,20 @@
         <tbody>
           <tr>
             <td>Server access logs</td>
-            <td>Up to 7 days (deleted by hosting provider)</td>
+            <td>
+              No fixed automatic deletion period for application and web-server logs; removed
+              through VPS log rotation or deletion. Netcup's separate logs for defending against
+              attacks: up to 14 days (Section 3.1)
+            </td>
           </tr>
           <tr>
             <td>Session cookie / session record</td>
-            <td>Seven-day session lifetime, renewed by note activity or password verification; invalidated on sign-out</td>
+            <td>Seven-day session lifetime, renewed by note activity or password verification; invalidated on sign-out
+            </td>
           </tr>
           <tr>
             <td>CSRF cookie</td>
-            <td>Browser session</td>
+            <td>Up to 364 days from the last refresh</td>
           </tr>
           <tr>
             <td>Anonymous password shares</td>
@@ -682,8 +833,25 @@
             <td>Until account deletion</td>
           </tr>
           <tr>
-            <td>Encrypted vault blob</td>
+            <td>Encrypted password vault blob</td>
             <td>Until account deletion</td>
+          </tr>
+          <tr>
+            <td>Encrypted vault notes</td>
+            <td>Until permanent deletion or account deletion; trashed notes are deleted by cleanup after seven days</td>
+          </tr>
+          <tr>
+            <td>Encrypted note vault index</td>
+            <td>Until account deletion; updated by the browser as the vault changes</td>
+          </tr>
+          <tr>
+            <td>Encrypted live-note presence</td>
+            <td>Temporary relay buffers and participant memory; not saved to the database</td>
+          </tr>
+          <tr>
+            <td>Encryption keys in browser storage</td>
+            <td>Tab session or the note vault's seven-day access window; see Section 4 for renewal and local removal
+            </td>
           </tr>
           <tr>
             <td>Rate-limit counters</td>
@@ -691,6 +859,13 @@
           </tr>
         </tbody>
       </table>
+      <p>
+        The share, note, and account deletion periods above describe the live database. Database
+        backups and Netcup VPS snapshots, when created, are separate copies. No fixed automatic
+        deletion period is currently configured for these copies. Deleted records may remain in
+        them until the backup or snapshot is deleted or replaced. Deleting a share also cannot
+        remove copies saved by its recipients.
+      </p>
     </div>
   </section>
 
@@ -772,8 +947,9 @@
         appear.
       </p>
       <p>
-        Requests relating to server log data will be forwarded to the hosting provider, as the
-        controller does not retain copies.
+        Requests relating to application and web-server logs are handled by the controller.
+        Where a request concerns infrastructure logs held by Netcup, the controller will involve
+        Netcup as necessary.
       </p>
     </div>
   </section>
@@ -794,22 +970,18 @@
           Devrientstraße 5<br />
           01067 Dresden<br />
           Germany<br />
-          <a href="https://www.sdtb.sachsen.de" rel="noopener noreferrer" target="_blank"
-            >https://www.sdtb.sachsen.de</a
-          >
+          <a href="https://www.sdtb.sachsen.de" rel="noopener noreferrer"
+            target="_blank">https://www.sdtb.sachsen.de</a>
         </p>
       </div>
       <p>You may also contact the federal authority:</p>
       <div class="address-block">
         <p>
-          <strong>Bundesbeauftragter für den Datenschutz und die Informationsfreiheit (BfDI)</strong
-          ><br />
+          <strong>Bundesbeauftragter für den Datenschutz und die Informationsfreiheit (BfDI)</strong><br />
           Graurheindorfer Str. 153<br />
           53117 Bonn<br />
           Germany<br />
-          <a href="https://www.bfdi.bund.de" rel="noopener noreferrer" target="_blank"
-            >https://www.bfdi.bund.de</a
-          >
+          <a href="https://www.bfdi.bund.de" rel="noopener noreferrer" target="_blank">https://www.bfdi.bund.de</a>
         </p>
       </div>
     </div>

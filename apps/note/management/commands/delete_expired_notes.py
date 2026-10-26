@@ -1,13 +1,8 @@
-"""
-Django management command to delete expired shared notes and live notes.
+"""Delete expired shared notes, live notes, and vault notes past Trash retention.
 
-This command can be run manually or scheduled via cron to automatically clean
-up expired notes from the database. It is a lean mirror of the passwd tool's
-``delete_expired`` (each tool owns its cleanup, so the apps stay independent).
-It sweeps static shared notes, live notes (editable share links; their update
-logs cascade with them), and vault notes that have sat in the user's Trash past
-the retention window. Active vault notes have no expiry and never match: only
-the client-set ``trashed_at`` flag makes a vault note eligible.
+Run manually or schedule with cron. Live-note update logs are deleted by
+cascade. Active vault notes have no expiry; only notes with a server-side
+``trashed_at`` timestamp older than the retention window are eligible.
 
 Usage:
     python manage.py delete_expired_notes
@@ -78,9 +73,7 @@ class Command(BaseCommand):
         self._run_sweep(
             label="note",
             queryset=services.expired_notes(now=now),
-            delete=lambda batch_size: services.delete_expired_notes(
-                now=now, batch_size=batch_size
-            ),
+            delete=lambda batch_size: services.delete_expired_notes(now=now, batch_size=batch_size),
             sample_line=self._shared_note_sample,
             options=options,
         )
@@ -142,9 +135,7 @@ class Command(BaseCommand):
 
         if verbosity >= 1:
             self.stdout.write(
-                self.style.SUCCESS(
-                    f"Successfully deleted {deleted_count} expired {label}(s)."
-                )
+                self.style.SUCCESS(f"Successfully deleted {deleted_count} expired {label}(s).")
             )
 
     def _show_summary(self, label, total_count, dry_run, verbosity):
@@ -163,9 +154,7 @@ class Command(BaseCommand):
             return
         if dry_run:
             self.stdout.write(
-                self.style.WARNING(
-                    f"DRY RUN: Would delete {total_count} expired {label}(s)."
-                )
+                self.style.WARNING(f"DRY RUN: Would delete {total_count} expired {label}(s).")
             )
             return
         self.stdout.write(f"Found {total_count} expired {label}(s) to delete.")

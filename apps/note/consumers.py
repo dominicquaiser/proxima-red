@@ -109,11 +109,7 @@ def scope_client_ip(scope) -> str:
             if name == b"x-forwarded-for":
                 forwarded = value
                 break
-        parts = [
-            part.strip()
-            for part in forwarded.decode("latin1").split(",")
-            if part.strip()
-        ]
+        parts = [part.strip() for part in forwarded.decode("latin1").split(",") if part.strip()]
         if len(parts) >= trusted:
             return parts[-trusted]
     client = scope.get("client")
@@ -169,9 +165,7 @@ class TokenBucket:
             bool: True when the frame is within budget.
         """
         current = self._now()
-        self._allowance = min(
-            self._burst, self._allowance + (current - self._last) * self._rate
-        )
+        self._allowance = min(self._burst, self._allowance + (current - self._last) * self._rate)
         self._last = current
         if self._allowance < 1.0:
             return False
@@ -355,10 +349,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=WS_CLOSE_NOT_FOUND)
             return
         except ValidationError as e:
-            # services.validation_code, not e.code: model field validation
-            # raises ValidationError's dict form, which has no code attribute.
-            # Reading it directly raised AttributeError out of this handler and
-            # dropped the socket instead of sending a recoverable error frame.
+            # Model validation errors may lack a top-level code; use the safe accessor.
             if services.validation_code(e) == "pending_tail_full":
                 code = WS_ERROR_TAIL_FULL
             else:
@@ -440,9 +431,7 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
         """Forward another client's presence ciphertext."""
         if not self._ready or event.get("sender") == self.channel_name:
             return
-        await self.send_json(
-            {"type": "awareness", "payload": event["payload"], "iv": event["iv"]}
-        )
+        await self.send_json({"type": "awareness", "payload": event["payload"], "iv": event["iv"]})
 
     # --- Helpers ---
 
@@ -493,7 +482,5 @@ class LiveNoteConsumer(AsyncJsonWebsocketConsumer):
             LiveNote.DoesNotExist: If the note was deleted by the expiry sweep.
             ValidationError: Code ``pending_tail_full``.
         """
-        row, pending, prev_seq = services.append_live_update(
-            self.note_id, payload=payload, iv=iv
-        )
+        row, pending, prev_seq = services.append_live_update(self.note_id, payload=payload, iv=iv)
         return row.pk, pending, prev_seq

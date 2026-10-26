@@ -71,16 +71,12 @@ class SharedNote(models.Model):
         blank=True,
         on_delete=models.CASCADE,
         related_name="shared_notes",
-        help_text=_(
-            "Authenticated user that created this note; empty for anonymous notes"
-        ),
+        help_text=_("Authenticated user that created this note; empty for anonymous notes"),
     )
 
     content = models.TextField(
         validators=[validate_note_content],
-        help_text=_(
-            "Note body: Base64 ciphertext when encrypted, raw markdown when plain text"
-        ),
+        help_text=_("Note body: Base64 ciphertext when encrypted, raw markdown when plain text"),
     )
 
     iv = models.TextField(
@@ -152,10 +148,9 @@ class SharedNote(models.Model):
     def clean(self) -> None:
         """Enforce the cross-field rules between ``is_encrypted``, ``content``, ``iv``.
 
-        Encrypted notes must carry strict-Base64 ciphertext and an IV; a
-        plain-text note carrying an IV is a client bug worth rejecting loudly.
-        These checks live here rather than in field validators because a field
-        validator cannot see ``is_encrypted``.
+        Encrypted notes require strict-Base64 ciphertext and an IV; plain-text
+        notes require an empty IV. These checks need ``is_encrypted``, which
+        individual field validators cannot access.
 
         Returns:
             None: The model is validated in place.
@@ -241,8 +236,7 @@ class LiveNote(models.Model):
         on_delete=models.CASCADE,
         related_name="live_notes",
         help_text=_(
-            "Authenticated user that created this live note; empty for "
-            "anonymous live notes"
+            "Authenticated user that created this live note; empty for anonymous live notes"
         ),
     )
 
@@ -564,7 +558,4 @@ class VaultIndex(models.Model):
         Returns:
             str: Model metadata excluding the encrypted payload.
         """
-        return (
-            f"<VaultIndex user={self.user.user_id} "
-            f"updated={self.updated_at.isoformat()}>"
-        )
+        return f"<VaultIndex user={self.user.user_id} updated={self.updated_at.isoformat()}>"

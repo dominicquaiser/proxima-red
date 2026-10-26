@@ -68,10 +68,7 @@
     /**
      * Freeze editing and sync while leaving the buffer readable and copyable.
      *
-     * The text may exist nowhere else, so an expired or broken note stops
-     * accepting edits rather than clearing or navigating away from them.
-     * Idempotent: the first caller wins, so a later expiry cannot overwrite the
-     * error that actually stopped the session.
+     * The first terminal state wins, preserving the original failure reason.
      *
      * @param {"expired"|"error"} kind
      * @param {string} [message] Shown as a toast when given.
@@ -124,11 +121,8 @@
       return;
     }
 
-    // Undo/redo lives in Yjs, not the textarea: only "local" transactions are
-    // undoable (remote edits never are), and Yjs rebases undo items across
-    // interleaved remote changes. That is also why the native textarea stack is
-    // suppressed wholesale through the `history` handle passed to editor-core
-    // below: remote splices land via setRangeText, which corrupts that stack.
+    // Yjs rebases local undo items across remote edits. The editor's history handle
+    // routes native undo here because remote setRangeText calls bypass native history.
     const undoManager = new window.Y.UndoManager(ytext, {
       trackedOrigins: new Set(["local"]),
     });
@@ -194,12 +188,8 @@
       },
     });
 
-    // The static editors gate on size at share/save time; a live note has no
-    // submit, so nothing was checking it and the first sign of trouble was
-    // the server refusing an update. Warn on the way past the limit instead.
-    // Deliberately advisory, not a block: the sync client halts and says so
-    // if the server does refuse, and taking the keyboard away mid-sentence
-    // would strand text the user still needs to copy out.
+    // Live edits have no save step for size validation. Warn while keeping the
+    // buffer editable and copyable; sync reports any server refusal separately.
     const sizeLimitBytes = window.NoteEditorCore.MAX_NOTE_PLAINTEXT_BYTES;
     const encoder = new TextEncoder();
     let warnedTooLarge = false;
@@ -211,8 +201,6 @@
      */
     function checkSize(value) {
       const over = encoder.encode(value).length > sizeLimitBytes;
-      // Re-arms when the note drops back under, so a user who trims and then
-      // grows past the limit again is warned again rather than once a page.
       if (!over) {
         warnedTooLarge = false;
         return;

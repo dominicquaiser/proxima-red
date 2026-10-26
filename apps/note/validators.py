@@ -1,14 +1,9 @@
-"""
-Custom validators for the note sharing application.
+"""Validate shared-note content and encrypted vault/live-note payloads.
 
 Field validators cover the mode-independent rules (presence, length caps, IV
 shape). The rules that depend on whether a note is encrypted or plain text
 (Base64 content, IV required vs. forbidden) live in ``SharedNote.clean()``,
 because a plain-text note's content must *not* be required to be Base64.
-
-The tiny IV/Base64 helpers mirror ``apps.passwd.validators`` instead of
-importing them: the tools share conventions, not code (see the note in
-``apps.note.constants``).
 """
 
 from django.core.exceptions import ValidationError
@@ -77,11 +72,9 @@ def _check_encrypted_blob(
 ) -> None:
     """Apply the shared rule for an always-encrypted field: present, capped, Base64.
 
-    Vault notes, the vault index, live snapshots and live update payloads are
-    all ciphertext the client produced, so all four validate identically and
-    differ only in their cap and their wording. ``SharedNote.content`` is the
-    exception and is not routed through here: a plain-text share must *not* be
-    required to be Base64, which is why that rule lives in ``clean()``.
+    Used by vault notes, the vault index, and live snapshots/updates.
+    Shared-note content is validated separately because plain-text shares
+    are not Base64.
 
     The empty-value error is passed in already built, so each caller keeps a
     literal ``_("...")`` string that ``makemessages`` can extract.
@@ -124,9 +117,7 @@ def validate_note_content(value: str) -> None:
     """
     if not value or not value.strip():
         raise ValidationError(_("Note content cannot be empty."), code="empty_content")
-    _check_max_length(
-        value, MAX_NOTE_CONTENT_LENGTH, "Note content", "content_too_long"
-    )
+    _check_max_length(value, MAX_NOTE_CONTENT_LENGTH, "Note content", "content_too_long")
 
 
 def validate_base64_content(value: str) -> None:
@@ -206,9 +197,7 @@ def validate_required_iv(value: str) -> None:
             bytes.
     """
     if not value:
-        raise ValidationError(
-            _("An initialization vector is required."), code="missing_iv"
-        )
+        raise ValidationError(_("An initialization vector is required."), code="missing_iv")
     _check_iv_shape(value)
 
 
@@ -233,9 +222,7 @@ def validate_vault_note_content(value: str) -> None:
         value,
         max_length=MAX_VAULT_NOTE_CONTENT_LENGTH,
         label="Note content",
-        empty_error=ValidationError(
-            _("Note content cannot be empty."), code="empty_content"
-        ),
+        empty_error=ValidationError(_("Note content cannot be empty."), code="empty_content"),
     )
 
 
@@ -260,9 +247,7 @@ def validate_live_snapshot(value: str) -> None:
         value,
         max_length=MAX_LIVE_SNAPSHOT_LENGTH,
         label="Live note snapshot",
-        empty_error=ValidationError(
-            _("Live note snapshot cannot be empty."), code="empty_content"
-        ),
+        empty_error=ValidationError(_("Live note snapshot cannot be empty."), code="empty_content"),
     )
 
 
@@ -283,9 +268,7 @@ def validate_live_update_payload(value: str) -> None:
         value,
         max_length=MAX_LIVE_UPDATE_LENGTH,
         label="Live note update",
-        empty_error=ValidationError(
-            _("Live note update cannot be empty."), code="empty_content"
-        ),
+        empty_error=ValidationError(_("Live note update cannot be empty."), code="empty_content"),
     )
 
 
@@ -306,7 +289,5 @@ def validate_vault_index_data(value: str) -> None:
         value,
         max_length=MAX_VAULT_INDEX_LENGTH,
         label="Vault index data",
-        empty_error=ValidationError(
-            _("Vault index data cannot be empty."), code="empty_content"
-        ),
+        empty_error=ValidationError(_("Vault index data cannot be empty."), code="empty_content"),
     )

@@ -49,14 +49,9 @@
   /**
    * Deterministic anonymous identity for a Yjs clientID.
    *
-   * Both fields read the hash's HIGH bits. A multiplicative hash barely mixes
-   * its low bits, so the obvious `hash % N` would cluster neighbouring
-   * clientIDs onto the same name and colour. Instead the top 16 bits are scaled
-   * into range as a fixed-point multiply (`(top16 * N) >>> 16`), and the colour
-   * takes the top 3 bits directly.
-   *
-   * Two separate multipliers keep name and colour independent, so peers do not
-   * end up with a fixed name-to-colour pairing.
+   * Independent multiplicative hashes spread names and colours across client IDs.
+   * Scale the upper 16 bits into the name list and use the upper three colour
+   * bits for the eight-colour palette; low bits have poorer distribution.
    *
    * @param {number} clientId
    * @returns {{name: string, colorIndex: number}} colorIndex is 0..PALETTE_SIZE-1.
@@ -166,10 +161,10 @@
     /**
      * Encrypt and send this session's awareness state.
      *
-     * Serialized against itself: encryption is async, and two overlapping
-     * announcements could otherwise reach peers out of order and leave a stale
-     * cursor painted. A request arriving mid-flight collapses into one trailing
-     * re-send, since only the latest state is worth transmitting.
+     * Serialize encryption to preserve announcement order. Calls during an
+     * in-flight send coalesce into one trailing announcement of the latest state.
+     *
+     * @returns {Promise<void>} Resolves after sending or queuing a trailing announcement.
      */
     async function announce() {
       if (destroyed) return;
@@ -183,9 +178,7 @@
         const payload = await window.CryptoCore.encryptBytesWithKey(update, key);
         send(payload.encryptedData, payload.iv);
       } catch (error) {
-        // Presence is ephemeral and re-announced every REANNOUNCE_MS, so a
-        // failed frame needs no recovery and must not raise a toast: it would
-        // fire repeatedly for something the reader cannot act on.
+        // Periodic announcements recover ephemeral presence without repeated error toasts.
       } finally {
         announceInFlight = false;
         if (announceAgain) {
@@ -207,8 +200,7 @@
     /**
      * Publish the local selection, or null when the textarea is not focused.
      *
-     * Skips the announcement when the encoded positions are unchanged, so
-     * arrow-key repeats within one character do not each cost a frame.
+     * Unchanged encoded positions do not send another frame.
      */
     function updateLocalCursor() {
       if (destroyed) return;
@@ -250,8 +242,7 @@
         const bytes = await window.CryptoCore.decryptBytes(payload, iv, key);
         window.Y.awareness.applyAwarenessUpdate(awareness, bytes, "remote");
       } catch (error) {
-        // Undecryptable presence is dropped silently: it is ephemeral, and
-        // warning here would spam (unlike a persisted update row).
+        // Discard unreadable ephemeral frames; later announcements refresh presence.
       }
     }
 
@@ -267,11 +258,8 @@
     /**
      * Measure one remote cursor in the hidden mirror.
      *
-     * The mirror replicates the textarea's layout, so measuring a zero-width
-     * marker span inside it yields the geometry the browser will not expose for
-     * a textarea's own caret. The marker is placed before or after the selected
-     * text depending on which end `head` sits at, so a peer's caret is drawn at
-     * the end they are actually extending from.
+     * A zero-width marker in the layout mirror supplies caret geometry unavailable
+     * from the textarea. Place it at `head` to preserve selection direction.
      *
      * @param {number} anchor Selection origin, in UTF-16 code units.
      * @param {number} head Selection end the caret sits at.
@@ -311,9 +299,7 @@
     /**
      * Repaint every peer caret and selection into the overlay layer.
      *
-     * Rebuilt wholesale rather than diffed: one remote edit can move every
-     * position at once, and the peer count is capped server-side. Boxes outside
-     * the editor's viewport are dropped so a scrolled-away peer leaves nothing.
+     * Rebuild all positions after edits; omit boxes outside the editor viewport.
      */
     function render() {
       if (destroyed) return;
@@ -367,10 +353,7 @@
     }
 
     /**
-     * Clamp a peer-supplied colour into the palette.
-     *
-     * The value comes from another client, so it is treated as untrusted input
-     * rather than assumed to be one of ours.
+     * Wrap a peer-supplied numeric colour index into the palette range.
      *
      * @param {*} color
      * @returns {number} 0..PALETTE_SIZE-1, or 0 for anything non-numeric.
@@ -409,11 +392,11 @@
     function shutdown() {
       if (destroyed) return;
       awareness.setLocalState(null);
-      // Synchronous best effort: encode + send may not finish encryption
-      // before the page dies; peers fall back to the 30s timeout.
+      // Encryption may outlive the page; peers also expire after 30 seconds of silence.
       announce();
     }
 
+    /** Release presence timers, event listeners, awareness state, and overlay elements. */
     function destroy() {
       if (destroyed) return;
       destroyed = true;

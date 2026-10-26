@@ -102,16 +102,9 @@ logger = logging.getLogger(__name__)
 def _ip_ratelimit(rate: str, method: str, *, block: bool = True, name: str = ""):
     """Build the per-client-IP rate-limit decorator used by every view here.
 
-    Wraps the ``method_decorator(ratelimit(...))`` stack so each endpoint
-    declares its limit on one line instead of five.
-
-    The ``block`` choice is the meaningful part. ``block=True`` lets
-    django-ratelimit refuse the request itself, which renders ``handler403``
-    as HTML: right for the page views, where a browser is the client.
-    ``block=False`` only annotates ``request.limited``, leaving the view to
-    answer :func:`_rate_limited_json`'s JSON 429 - required wherever a fetch
-    caller must *parse* the refusal and back off, since it cannot tell an HTML
-    403 apart from a rejected CSRF token.
+    ``block=True`` rejects limited requests through the HTML 403 handler.
+    ``block=False`` sets ``request.limited``; the view must call
+    :func:`_rate_limited_json` to return JSON 429 for clients that back off.
 
     Args:
         rate (str): django-ratelimit rate string, such as ``"30/h"``.
@@ -144,9 +137,8 @@ def _validation_error_message(error: ValidationError) -> str:
 def _create_note_payload(request: HttpRequest) -> dict:
     """Extract the note form payload from the POST body.
 
-    ``is_encrypted`` arrives as ``"1"``/``"0"`` from the editor; anything but
-    an explicit ``"0"`` is treated as encrypted, so a buggy client fails
-    closed (toward the zero-knowledge default).
+    Only an explicit ``is_encrypted="0"`` selects plain-text storage; missing
+    or unexpected values retain the encrypted default.
 
     Args:
         request (HttpRequest): Incoming note creation request.
@@ -678,9 +670,8 @@ class VaultNoteTrashView(View):
     the flag that lets ``delete_expired_notes`` enforce the retention window
     server-side (see :class:`~apps.note.models.VaultNote`).
 
-    Deliberately bulk: deleting a folder trashes every note inside it in one
-    gesture, and a per-note endpoint would spend one write of the vault rate
-    limit per note. Owner-scoped and idempotent, so the client can retry.
+    Bulk updates use one rate-limited write for a folder's contents. Only the
+    owner's rows are updated; repeated trash requests refresh their timestamps.
     """
 
     @_ip_ratelimit(RATE_LIMIT_VAULT_WRITE, "POST")

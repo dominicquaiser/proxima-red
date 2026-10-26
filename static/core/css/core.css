@@ -259,6 +259,33 @@ main.page-main {
   font-weight: 400;
   white-space: nowrap;
 }
+
+.data-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+.data-table-scroll .data-table--processors {
+  display: table;
+  table-layout: fixed;
+  min-width: 640px;
+}
+.data-table--processors th:nth-child(1),
+.data-table--processors th:nth-child(4) {
+  width: 25%;
+}
+.data-table--processors th:nth-child(2) {
+  width: 18%;
+}
+.data-table--processors th:nth-child(3) {
+  width: 32%;
+}
+.data-table--processors td {
+  overflow-wrap: anywhere;
+}
+.data-table--processors td:first-child {
+  white-space: normal;
+}
+
 .tag {
   display: inline-block;
   font-size: 9px;
@@ -424,23 +451,6 @@ main.about-main {
 .tool-card:hover {
   border-color: var(--color-stony-gray);
 }
-.tool-card__status {
-  font-size: 9px;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  padding: 3px 8px;
-  border-radius: 2px;
-  display: inline-block;
-  margin-bottom: 16px;
-}
-.tool-card__status--live {
-  background: rgba(214, 93, 14, 0.12);
-  color: var(--color-burnt-orange);
-}
-.tool-card__status--next {
-  background: rgba(146, 131, 116, 0.12);
-  color: var(--color-warm-slate);
-}
 .tool-card__name {
   font-size: 22px;
   font-weight: 600;
@@ -450,6 +460,7 @@ main.about-main {
   line-height: 1;
 }
 .tool-card__domain {
+  display: block;
   font-size: 10px;
   color: var(--color-taupe);
   letter-spacing: 0.08em;

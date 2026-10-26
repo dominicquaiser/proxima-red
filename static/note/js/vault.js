@@ -1,9 +1,9 @@
 /**
  * @fileoverview Controller for the encrypted note vault page.
  *
- * The server stores note rows separately from an encrypted index. Rows are
- * saved/deleted first and the index is saved last, so the index is the commit
- * marker and reconcile() can heal drift on the next load.
+ * Note content and the encrypted index are saved separately. Content writes
+ * and permanent deletions precede index writes; reconciliation repairs drift
+ * on load. Trash and restore use their own ordering to avoid premature deletion.
  */
 (function () {
   "use strict";
@@ -60,7 +60,15 @@
     const openFolders = new Set();
     let trashOpen = false;
 
+    /**
+     * @param {string} id Note UUID.
+     * @returns {string} Note read/write URL.
+     */
     const noteUrl = (id) => noteUrlBase.replace(dummyNoteId, id);
+    /**
+     * @param {string} id Note UUID.
+     * @returns {string} Permanent-deletion URL.
+     */
     const noteDeleteUrl = (id) => noteDeleteUrlBase.replace(dummyNoteId, id);
 
     const core = window.NoteEditorCore.init({
@@ -93,6 +101,7 @@
       noteTooLarge: core.noteTooLarge,
     });
 
+    /** @param {boolean} dirty Whether the buffer differs from its saved content. */
     const setDirty = (dirty) => {
       isDirty = dirty;
       document.body.classList.toggle(NOTE_DIRTY_CLASS, dirty);
@@ -106,7 +115,7 @@
       event.returnValue = "";
     });
 
-    // A snapshot model loses unsaved work on note switches too.
+    /** @returns {boolean} Whether switching buffers may discard unsaved edits. */
     const confirmDiscard = () =>
       !isDirty || window.confirm("Discard unsaved changes to this note?");
 
@@ -117,14 +126,20 @@
       const folder = index.folders.find(
         (folderItem) => folderItem.id === (currentEntry || {}).folderId,
       );
-      const dir = document.createElement("span");
-      dir.className = "topbar__crumb-dir";
-      dir.textContent = folder ? "/" + folder.name + "/" : "/";
-      crumbEl.appendChild(dir);
+      const directory = document.createElement("span");
+      directory.className = "topbar__crumb-dir";
+      directory.textContent = folder ? "/" + folder.name + "/" : "/";
+      crumbEl.appendChild(directory);
       crumbEl.appendChild(document.createTextNode(currentName));
     };
 
-    /** Build a `nicon--<name>` span, always aria-hidden: icons are decorative. */
+    /**
+     * Build a decorative icon hidden from assistive technology.
+     *
+     * @param {string} name Suffix of the `nicon--` CSS class.
+     * @param {string} [extraClass] Additional CSS classes.
+     * @returns {HTMLSpanElement} Icon element.
+     */
     const icon = (name, extraClass) => {
       const span = document.createElement("span");
       span.className = "nicon nicon--" + name + (extraClass ? " " + extraClass : "");
@@ -135,9 +150,9 @@
     /**
      * Build the "..." button that opens a row's context menu.
      *
-     * @param {"note"|"trash"|"folder"|"unreadable"} kind Selects which menu
-     *   openCtxMenu builds; the same row type gets a different menu in Trash.
-     * @param {string} id Note or folder id.
+     * @param {"note"|"trash"|"folder"|"unreadable"} kind Context-menu variant.
+     * @param {string} id Note or folder UUID.
+     * @returns {HTMLButtonElement} Row action button.
      */
     const rowActionsButton = (kind, id) => {
       const button = document.createElement("button");
@@ -153,8 +168,9 @@
     /**
      * Build one note row for the sidebar.
      *
-     * @param {Object} note Index entry.
+     * @param {NoteEntry} note Index entry.
      * @param {"note"|"trash"} kind Which section the row is being built for.
+     * @returns {HTMLButtonElement} Sidebar note row.
      */
     const buildFileRow = (note, kind) => {
       const row = document.createElement("button");
@@ -172,12 +188,10 @@
     };
 
     /**
-     * Build a row for a server row that would not decrypt.
+     * Build a deletion-only row, using an ID prefix when the name is unreadable.
      *
-     * There is no name to show - it lives in ciphertext this key cannot open -
-     * so the row is labelled with a truncated id instead.
-     *
-     * @param {string} id
+     * @param {string} id UUID of the unreadable server row.
+     * @returns {HTMLButtonElement} Sidebar row for an unreadable note.
      */
     const buildUnreadableRow = (id) => {
       const row = document.createElement("button");
@@ -197,10 +211,10 @@
     /**
      * Build a collapsible folder section.
      *
-     * Open state is mirrored into `openFolders` so it survives renderTree()
-     * rebuilding the entire sidebar from scratch.
+     * `openFolders` preserves expanded sections across sidebar rebuilds.
      *
-     * @param {Object} folder Entry from visibleTree(), notes included.
+     * @param {{id: string, name: string, notes: NoteEntry[]}} folder Visible folder.
+     * @returns {HTMLDetailsElement} Folder section and its note rows.
      */
     const buildFolderDetails = (folder) => {
       const details = document.createElement("details");
@@ -228,21 +242,12 @@
     };
 
     /**
-     * Rebuild the whole sidebar from the current index, search term, and
-     * unreadable-row set.
+     * Build the permanent Trash section, preserving its expanded state.
      *
-     * Cheap enough to redo wholesale after every change, which keeps the
-     * optimistic-then-roll-back model in commitIndexChange a single call.
+     * @param {NoteEntry[]} notes Trashed notes matching the current search.
+     * @returns {HTMLDetailsElement} Trash section, including when empty.
      */
-    const renderTree = () => {
-      const tree = Index.visibleTree(Index.filter(index, searchTerm));
-      treeEl.replaceChildren();
-
-      tree.folders.forEach((folder) => treeEl.appendChild(buildFolderDetails(folder)));
-      tree.rootNotes.forEach((note) => treeEl.appendChild(buildFileRow(note, "note")));
-      unreadableIds.forEach((id) => treeEl.appendChild(buildUnreadableRow(id)));
-
-      // Trash is a permanent section, even when empty.
+    const buildTrashDetails = (notes) => {
       const trashDetails = document.createElement("details");
       trashDetails.dataset.trash = "1";
       if (trashOpen) trashDetails.open = true;
@@ -260,8 +265,19 @@
       trashName.textContent = "Trash";
       trashSummary.appendChild(trashName);
       trashDetails.appendChild(trashSummary);
-      tree.trash.forEach((note) => trashDetails.appendChild(buildFileRow(note, "trash")));
-      treeEl.appendChild(trashDetails);
+      notes.forEach((note) => trashDetails.appendChild(buildFileRow(note, "trash")));
+      return trashDetails;
+    };
+
+    /** Rebuild the sidebar from the index, search term, and unreadable rows. */
+    const renderTree = () => {
+      const tree = Index.visibleTree(Index.filter(index, searchTerm));
+      treeEl.replaceChildren();
+
+      tree.folders.forEach((folder) => treeEl.appendChild(buildFolderDetails(folder)));
+      tree.rootNotes.forEach((note) => treeEl.appendChild(buildFileRow(note, "note")));
+      unreadableIds.forEach((id) => treeEl.appendChild(buildUnreadableRow(id)));
+      treeEl.appendChild(buildTrashDetails(tree.trash));
 
       if (tree.folders.length === 0 && tree.rootNotes.length === 0 && unreadableIds.size === 0) {
         const empty = document.createElement("p");
@@ -274,13 +290,9 @@
     };
 
     /**
-     * Put the vault into read-only mode.
+     * Suspend writes. A message also prevents unlocking from re-enabling writes.
      *
-     * `message` is optional: the session-expiry path locks the vault but lets
-     * its own modal carry the explanation, so a toast alongside would only
-     * compete with it.
-     *
-     * @param {string} [message] Toast to show, when the caller has no modal.
+     * @param {string} [message] Error toast; omit for a recoverable session lock.
      */
     const disableVault = (message) => {
       readOnly = true;
@@ -289,19 +301,13 @@
       if (message) window.Notify.show(message, "error");
     };
 
-    // --- Expired session ---
-    //
-    // A 401 needs a full sign-in in a new tab, preserving this tab's unsaved
-    // text. VaultSession restores access after the same account signs in again.
-    // A 423 (tool grant expired) instead uses the in-place password prompt.
     /**
-     * Raise the sign-in prompt.
+     * Show the sign-in prompt while preserving the editor buffer.
      *
-     * @param {"retry"|"reload"} mode
+     * @param {"retry"|"reload"} mode Retry with the buffer or reload an unloaded vault.
      */
     const showSessionExpired = (mode) => {
       if (!sessionModal) {
-        // No modal in the DOM: still say something useful rather than nothing.
         window.Notify.show("Your session timed out. Sign in again to save your work.", "error");
         return;
       }
@@ -317,28 +323,26 @@
       sessionModal.classList.remove(HIDDEN_CLASS);
     };
 
+    /** Dismiss the sign-in prompt without changing the vault's lock state. */
     const hideSessionExpired = () => {
       if (sessionModal) sessionModal.classList.add(HIDDEN_CLASS);
     };
 
     /**
-     * Raise or clear the sign-in prompt from one reply. Last response wins.
+     * Handle session errors for each response, including both writes in a save.
      *
-     * Callers return early on true, skipping their own error toast: the modal
-     * is the message. Clearing on every non-401 matters as much as raising on
-     * a 401, because a save is two requests (row, then index) and can fail on
-     * the second. Hiding once at the end of a flow would dismiss a prompt
-     * that had just gone up.
+     * A 401 shows the sign-in modal; a 423 uses VaultSession's password prompt.
+     * Other statuses dismiss the sign-in modal. Callers skip their own error
+     * reporting when this returns true.
      *
-     * @param {Response} response
-     * @param {"retry"|"reload"} mode
-     * @returns {boolean} True when the session has expired.
+     * @param {Response} response Server reply to inspect.
+     * @param {"retry"|"reload"} mode Sign-in modal actions to offer.
+     * @returns {boolean} True when the session or tool access has expired.
      */
     const sessionIsGone = (response, mode) => {
       if (response.status === 423) return true;
       if (response.status === 401) {
-        // The 401 also reaches VaultSession (via "vault-session-error"), which
-        // locks and drops the cached keys. The editor buffer stays available.
+        // Http also emits "vault-session-error" so VaultSession drops cached keys.
         showSessionExpired(mode);
         return true;
       }
@@ -356,8 +360,7 @@
     /**
      * Encrypt and save the current index.
      *
-     * Every failure path reports rather than throws, because callers use the
-     * result to decide whether to roll their optimistic render back.
+     * Failures are reported and returned as false so callers can roll back.
      *
      * @returns {Promise<boolean>} True when the server accepted the index.
      */
@@ -385,13 +388,9 @@
     };
 
     /**
-     * Apply an index change on screen immediately, then roll it back if the
-     * save fails.
+     * Render a new index immediately and restore the previous one if saving fails.
      *
-     * Every index operation is non-mutating, so the rollback is just restoring
-     * the previous object.
-     *
-     * @param {function(Object): Object} mutate Returns the new index.
+     * @param {function(VaultIndexData): VaultIndexData} mutate Must leave its input unchanged.
      * @returns {Promise<boolean>} True when the change was persisted.
      */
     const commitIndexChange = async (mutate) => {
@@ -407,7 +406,7 @@
       return persisted;
     };
 
-    /** Reset the editor to an unsaved, unnamed note with no server row yet. */
+    /** Reset to an empty buffer with an unused default name and no server row. */
     const startNewBuffer = () => {
       currentNoteId = null;
       currentName = Index.defaultName(index);
@@ -421,10 +420,10 @@
     /**
      * Load, decrypt, and open a note, after confirming any unsaved changes.
      *
-     * A row that will not decrypt is reported and left closed rather than
-     * opening an empty buffer that a save would then overwrite it with.
+     * Failed requests or decryption leave the current buffer intact.
      *
-     * @param {string} id
+     * @param {string} id UUID of the note to open.
+     * @returns {Promise<void>} Resolves after opening or reporting a failure.
      */
     const openNote = async (id) => {
       if (id === currentNoteId) return;
@@ -467,7 +466,14 @@
       renderTree();
     };
 
-    /** Write the encrypted row before committing its index entry. */
+    /**
+     * Write the encrypted row before committing its index entry.
+     *
+     * @param {{encryptedData: string, iv: string}} payload Encrypted buffer.
+     * @returns {Promise<?{isNew: boolean, result: Object}>} Saved row metadata,
+     *   or null when session access expired.
+     * @throws {Error} If the request fails or the server rejects the row.
+     */
     const persistNoteRow = async (payload) => {
       const isNew = currentNoteId === null;
       const url = isNew ? notesUrl : noteUrl(currentNoteId);
@@ -483,6 +489,12 @@
       return { isNew, result };
     };
 
+    /**
+     * Add a saved row to the index or update its modification timestamp.
+     *
+     * @param {{isNew: boolean, result: Object}} savedRow Metadata from persistNoteRow.
+     * @returns {Promise<boolean>} Whether the index was persisted.
+     */
     const indexSavedNote = ({ isNew, result }) =>
       commitIndexChange((idx) =>
         isNew
@@ -498,10 +510,11 @@
     /**
      * Encrypt and save the buffer, creating the server row on first save.
      *
-     * The row is written before the index, so an index failure still leaves the
-     * content safely stored: reconcile() re-adopts it as an orphan on the next
-     * load. That is why the buffer is marked clean either way, and why the
-     * "saved" toast is withheld when only the row landed.
+     * A successful content write marks the buffer clean even if indexing fails.
+     * Orphan recovery re-adopts unindexed rows on load; the success toast requires
+     * both writes to succeed.
+     *
+     * @returns {Promise<void>} Resolves after saving or reporting a failure.
      */
     const saveNote = async () => {
       if (!masterKey || readOnly) {
@@ -520,21 +533,13 @@
       isSaving = true;
       try {
         const payload = await window.CryptoCore.encryptWithKey(text, masterKey);
-        // Row first, index last; reconcile() re-adopts orphan rows.
         const savedRow = await persistNoteRow(payload);
         if (!savedRow) return;
         const indexed = await indexSavedNote(savedRow);
 
-        // The row is written either way, so the buffer does match the server.
         lastSavedValue = text;
         setDirty(false);
-        if (!indexed) {
-          // Row saved, index not: the note exists but is missing from the
-          // tree until reconcile() re-adopts it on the next load. Saying
-          // "saved" here would contradict whatever persistIndex just put on
-          // screen.
-          return;
-        }
+        if (!indexed) return;
         window.Notify.show("Note saved to your vault.", "success");
       } catch (error) {
         console.error("Failed to save note:", error);
@@ -547,13 +552,11 @@
     /**
      * Record Trash state on the server rows.
      *
-     * Trash itself lives in the encrypted index; this flag is only what lets
-     * the expiry sweep delete a note once the retention window passes, even if
-     * the user never opens their vault again. Bulk on purpose: trashing a whole
-     * folder costs one write against the vault rate limit, not one per note.
+     * The encrypted index controls the sidebar; server flags let the expiry
+     * sweep enforce retention. Bulk updates use one rate-limited write per folder.
      *
-     * @param {string[]} ids Empty is a no-op success.
-     * @param {boolean} trashed
+     * @param {string[]} ids Note UUIDs; an empty list succeeds without a request.
+     * @param {boolean} trashed Set the deletion timestamp, or clear it to restore.
      * @returns {Promise<boolean>} True when the server recorded the change.
      */
     const setTrashed = async (ids, trashed) => {
@@ -578,11 +581,10 @@
     /**
      * Delete a note permanently: the server row first, then its index entry.
      *
-     * Unreadable rows have no index entry, so they only need the row deleted
-     * and a re-render. If the deleted note was open, the buffer resets rather
-     * than pointing at a row that no longer exists.
+     * Unreadable rows have no index entry. Deleting the open note resets its buffer.
      *
-     * @param {string} id
+     * @param {string} id Note UUID.
+     * @returns {Promise<void>} Resolves after deletion or reporting a failure.
      */
     const deleteNoteForever = async (id) => {
       try {
@@ -612,12 +614,10 @@
     /**
      * Swap a row's label for an inline text input.
      *
-     * Enter and blur commit; Escape cancels. `finished` guards the pair, since
-     * committing with Enter also blurs the input. An unchanged or blank name
-     * re-renders instead of committing, so renaming to nothing is a cancel.
+     * Enter and blur commit once; Escape, blank names, and unchanged names cancel.
      *
      * @param {Element} row Row or summary holding a `.tree__name`.
-     * @param {string} initialValue
+     * @param {string} initialValue Existing note or folder name.
      * @param {function(string): void} onCommit Receives the trimmed new name.
      */
     const startRename = (row, initialValue, onCommit) => {
@@ -659,6 +659,7 @@
       input.addEventListener("click", (event) => event.stopPropagation());
     };
 
+    /** @param {string} id UUID of the note to rename inline. */
     const renameNote = (id) => {
       const row = treeEl.querySelector('[data-note-id="' + id + '"]');
       const entry = index.notes.find((note) => note.id === id);
@@ -669,6 +670,7 @@
       });
     };
 
+    /** @param {string} id UUID of the folder to rename inline. */
     const renameFolder = (id) => {
       const details = treeEl.querySelector('[data-folder-id="' + id + '"]');
       const folder = index.folders.find((item) => item.id === id);
@@ -693,11 +695,11 @@
     /**
      * Build one context-menu entry.
      *
-     * @param {string} label
-     * @param {string} iconName
-     * @param {function(MouseEvent): void} onClick
-     * @param {string} [extraClass]
-     * @returns {HTMLButtonElement}
+     * @param {string} label Visible action label.
+     * @param {string} iconName Decorative icon name.
+     * @param {function(MouseEvent): void} onClick Action handler.
+     * @param {string} [extraClass] Additional CSS classes.
+     * @returns {HTMLButtonElement} Menu item with its click handler attached.
      */
     const ctxItem = (label, iconName, onClick, extraClass) => {
       const button = document.createElement("button");
@@ -713,12 +715,11 @@
     /**
      * Build a delete entry that requires a second click to confirm.
      *
-     * The first click rewrites the label in place; `armedDelete` is cleared
-     * whenever the menu closes, so the confirmation never survives it.
+     * Closing the menu clears the pending confirmation.
      *
-     * @param {string} label
-     * @param {function(): void} onConfirm
-     * @returns {HTMLButtonElement}
+     * @param {string} label Initial action label.
+     * @param {function(): void} onConfirm Action to run after the second click.
+     * @returns {HTMLButtonElement} Two-click deletion item.
      */
     const ctxDeleteItem = (label, onConfirm) => {
       const button = ctxItem(
@@ -741,11 +742,9 @@
     };
 
     /**
-     * Replace the menu with the list of folders a note can move to.
+     * Offer move destinations, omitting the note's current folder.
      *
-     * The note's current folder is omitted, since moving it there does nothing.
-     *
-     * @param {string} noteId
+     * @param {string} noteId UUID of the note to move.
      */
     const showMoveTargets = (noteId) => {
       ctxMenu.replaceChildren();
@@ -770,6 +769,10 @@
       });
     };
 
+    /**
+     * @param {string} id UUID of the note to move to Trash.
+     * @returns {Promise<void>} Resolves after index and server Trash updates are attempted.
+     */
     const moveNoteToTrash = async (id) => {
       if (id === currentNoteId) {
         setDirty(false);
@@ -782,6 +785,10 @@
       }
     };
 
+    /**
+     * @param {string} id UUID of the note to restore.
+     * @returns {Promise<void>} Resolves after attempting restoration or reporting a failure.
+     */
     const restoreTrashedNote = async (id) => {
       // Clear the flag first: a note still in Trash is recoverable, while one
       // the server still plans to delete is not.
@@ -790,17 +797,21 @@
       }
     };
 
+    /**
+     * @param {string} id Folder UUID; its active notes move to Trash.
+     * @returns {Promise<void>} Resolves after attempting deletion or reporting a failure.
+     */
     const deleteFolderToTrash = async (id) => {
-      // Folder contents move to Trash; rows stay on the server. Collect the
-      // ids before changing the index, then flag them in one bulk call.
-      const trashing = index.notes
+      // Collect active note IDs before the folder is removed from the index.
+      const noteIdsToTrash = index.notes
         .filter((note) => note.folderId === id && !note.trashed)
         .map((note) => note.id);
       if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
-        await setTrashed(trashing, true);
+        await setTrashed(noteIdsToTrash, true);
       }
     };
 
+    /** @param {string} id UUID of the active note whose actions to display. */
     const buildNoteCtxMenu = (id) => {
       ctxMenu.appendChild(
         ctxItem("Rename", "pencil-simple-line", () => {
@@ -830,6 +841,7 @@
       );
     };
 
+    /** @param {string} id UUID of the trashed note whose actions to display. */
     const buildTrashCtxMenu = (id) => {
       ctxMenu.appendChild(
         ctxItem("Restore", "arrow-counter-clockwise", () => {
@@ -840,6 +852,7 @@
       ctxMenu.appendChild(ctxDeleteItem("Delete forever", () => deleteNoteForever(id)));
     };
 
+    /** @param {string} id UUID of the folder whose actions to display. */
     const buildFolderCtxMenu = (id) => {
       ctxMenu.appendChild(
         ctxItem("Rename", "pencil-simple-line", () => {
@@ -850,7 +863,13 @@
       ctxMenu.appendChild(ctxDeleteItem("Delete folder", () => deleteFolderToTrash(id)));
     };
 
-    /** Build and position the context menu for one row. */
+    /**
+     * Build and position the context menu for one row.
+     *
+     * @param {HTMLElement} anchor Row action button used for menu positioning.
+     * @param {"note"|"trash"|"folder"|"unreadable"} kind Context-menu variant.
+     * @param {string} id Note or folder UUID.
+     */
     const openCtxMenu = (anchor, kind, id) => {
       closeCtxMenu();
       anchor.setAttribute("aria-expanded", "true");
@@ -895,7 +914,7 @@
 
       const fileRow = event.target.closest(".tree__file");
       if (fileRow) {
-        if (fileRow.dataset.unreadable) return; // nothing to open
+        if (fileRow.dataset.unreadable) return;
         const entry = index.notes.find((note) => note.id === fileRow.dataset.noteId);
         if (entry && entry.trashed) return;
         openNote(fileRow.dataset.noteId);
@@ -930,6 +949,7 @@
       }
     });
 
+    /** @param {boolean} collapsed Whether to hide the sidebar. */
     const setCollapsed = (collapsed) => {
       document.body.classList.toggle(SIDEBAR_COLLAPSED_CLASS, collapsed);
     };
@@ -941,14 +961,18 @@
       .addEventListener("click", () => setCollapsed(false));
     if (window.matchMedia(MOBILE_SIDEBAR_QUERY).matches) setCollapsed(true);
 
+    /**
+     * Load and decrypt the index, rejecting results from an outdated session key.
+     *
+     * @returns {Promise<boolean>} Whether the index is ready for reconciliation.
+     */
     const loadVaultIndex = async () => {
       const loadKey = masterKey;
       let blob;
       try {
         const { response, result } = await window.Http.getJson(indexUrl);
         if (loadKey !== masterKey) return false;
-        // "reload", not "retry": nothing loaded, so there is no buffer to
-        // preserve and no in-place retry to offer.
+        // An unloaded vault needs a reload after sign-in.
         if (sessionIsGone(response, "reload")) {
           disableVault();
           return false;
@@ -983,6 +1007,11 @@
       return true;
     };
 
+    /**
+     * List server rows for reconciliation; failures suspend vault writes.
+     *
+     * @returns {Promise<?Object[]>} Server metadata, or null if the list is unavailable.
+     */
     const loadVaultRows = async () => {
       try {
         const { response, result } = await window.Http.getJson(notesUrl);
@@ -999,8 +1028,13 @@
       }
     };
 
-    // Returns null only when the session expired; unreadable ciphertext rows
-    // stay visible as flagged rows and do not stop the rest of recovery.
+    /**
+     * Decrypt and index orphan rows, leaving failures visible as unreadable rows.
+     *
+     * @param {string[]} orphanIds Server row UUIDs missing from the index.
+     * @returns {Promise<?boolean>} Whether any rows were recovered; null when
+     *   session access expires or the key changes during recovery.
+     */
     const recoverOrphanRows = async (orphanIds) => {
       const loadKey = masterKey;
       let recovered = false;
@@ -1008,9 +1042,7 @@
         try {
           const { response, result } = await window.Http.getJson(noteUrl(id));
           if (loadKey !== masterKey) return null;
-          // Stop rather than fall through to the catch: that path files the
-          // row as "unreadable", which is a claim about the key and would
-          // stick in the UI long after signing in fixed the real problem.
+          // Session failures must not classify valid ciphertext as unreadable.
           if (sessionIsGone(response, "reload")) {
             disableVault();
             return null;
@@ -1022,8 +1054,7 @@
             loadKey,
           );
           if (loadKey !== masterKey) return null;
-          // Re-adopt at the row's own Trash state, so a note recovered from a
-          // half-finished write does not silently climb back out of Trash.
+          // Preserve server Trash state when recovering an unindexed row.
           index = Index.addNote(index, {
             id,
             name: window.NoteMarkdown.titleSlug(text, "recovered-note") + ".md",
@@ -1034,7 +1065,6 @@
           });
           recovered = true;
         } catch (error) {
-          // Surface unreadable rows, but do not adopt them into the index.
           console.error("Could not recover vault note " + id + ":", error);
           unreadableIds.add(id);
         }
@@ -1043,11 +1073,11 @@
     };
 
     /**
-     * Fetch and decrypt the index, list the note rows, reconcile the two, and
-     * adopt orphan rows.
+     * Load the index and rows, recover orphans, and repair server Trash flags.
      *
-     * Any failure before reconciliation disables the vault: continuing on a
-     * half-known index risks saving one that drops entries it could not read.
+     * Loading failures suspend writes to avoid replacing an unreadable index.
+     *
+     * @returns {Promise<void>} Resolves after loading or reporting a failure.
      */
     const loadVault = async () => {
       const loadKey = masterKey;
@@ -1066,11 +1096,7 @@
       if (!isDirty) startNewBuffer();
       else renderTree();
 
-      // Housekeeping, after the vault is on screen and normally a no-op: bring
-      // rows whose Trash flag disagrees with the index back in line, one bulk
-      // call per direction. This is what heals an interrupted trash/restore,
-      // and it is why the ordering at those call sites is an optimization
-      // rather than a correctness requirement.
+      // The index is authoritative; repair interrupted Trash writes after rendering.
       if (!readOnly) {
         const drift = Index.trashFlagDrift(index, serverNotes);
         await setTrashed(drift.trash, true);
@@ -1079,10 +1105,9 @@
     };
 
     /**
-     * Resolve the vault key, import it, then load the vault.
+     * Establish the secure session, import its key, and load the vault.
      *
-     * Each failure leaves the vault read-only with an explanation, so a locked
-     * tab never silently presents an empty vault the user might save over.
+     * @returns {Promise<void>} Resolves after initialization or disabling writes.
      */
     const initialize = async () => {
       if (!window.AuthCrypto) {

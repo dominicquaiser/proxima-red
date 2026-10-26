@@ -1,5 +1,5 @@
 /**
- * @fileoverview Controller for the note retrieve page ([note·] /view).
+ * @fileoverview Controller for the shared-note retrieval page.
  *
  * Reads #note-data, decrypts fragment-key notes, then renders through
  * NoteMarkdown.
@@ -19,7 +19,7 @@
   }
 
   /**
-   * Save the decrypted markdown as a local file, named from its first heading.
+   * Save Markdown locally, named from its first non-empty line.
    *
    * @param {string} source
    */
@@ -110,8 +110,7 @@
 
       const keyBase64 = window.location.hash.slice(1);
 
-      // Scrub the key from the address bar as early as possible; it stays in
-      // memory only. (Same posture as the passwd retrieve page.)
+      // Remove the fragment key from the address bar, keeping it only in memory.
       if (keyBase64) {
         history.replaceState(null, document.title, window.location.pathname);
       }

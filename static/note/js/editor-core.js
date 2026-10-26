@@ -52,11 +52,23 @@
    */
 
   /**
+   * @typedef {Object} EditorHandle
+   * @property {function(): string} getValue Read the current buffer.
+   * @property {function(string): void} setValue Replace text without notifying input listeners.
+   * @property {function(RemoteSplice[], number, number): void} applyRemoteSplices
+   *   Apply remote edits and selection without notifying input listeners.
+   * @property {function(): void} showEdit Select and focus the source tab.
+   * @property {function(): void} showPreview Render and select the preview tab.
+   * @property {function(): void} updateCounter Update size metadata and textarea height.
+   * @property {function(): void} downloadMarkdown Download the current buffer.
+   * @property {function(): boolean} noteTooLarge Check the byte limit and report violations.
+   * @property {function(function(string): void): void} onInput Register a local input listener.
+   */
+
+  /**
    * Find the smallest replacement window that turns previousValue into nextValue.
    *
-   * Textarea selections and Y.Text deltas both use UTF-16 code-unit offsets, so
-   * the character-by-character scan here deliberately works on JavaScript string
-   * indexes rather than Unicode code points.
+   * String indexes use UTF-16 code units, matching textarea selections and Y.Text deltas.
    *
    * @param {string} previousValue Text before the edit.
    * @param {string} nextValue Text after the edit.
@@ -83,8 +95,10 @@
   }
 
   /**
-   * @param {HTMLElement} activeTab
-   * @param {HTMLElement} inactiveTab
+   * Update tab styling and accessibility state.
+   *
+   * @param {HTMLElement} activeTab Tab to select.
+   * @param {HTMLElement} inactiveTab Tab to deselect.
    */
   function activateTab(activeTab, inactiveTab) {
     inactiveTab.classList.remove(ACTIVE_TAB_CLASS);
@@ -290,8 +304,8 @@
   /**
    * Wire up an editor surface and return the page controller handle.
    *
-   * @param {EditorElements} els
-   * @returns {Object}
+   * @param {EditorElements} els Editor DOM elements and optional history controller.
+   * @returns {EditorHandle} Buffer, display, and local input controls.
    */
   function init(els) {
     const { textarea, preview, tabEdit, tabPreview, counter, caret, editor, rail, history } = els;
@@ -343,8 +357,8 @@
     /**
      * Repaint the character/size readout and flag it once over the byte limit.
      *
-     * Counts UTF-8 bytes, not characters: the byte total is what the server cap
-     * applies to, so a note of mostly non-ASCII text is measured honestly.
+     * The UTF-8 byte limit leaves room for encryption and Base64 encoding under
+     * the server's ciphertext character cap.
      */
     function updateCounter() {
       const characterCount = textarea.value.length;
@@ -359,10 +373,8 @@
     /**
      * Apply a NoteToolbar result to the textarea.
      *
-     * Only the changed slice is inserted through execCommand("insertText") so
-     * native undo keeps working. execCommand is deprecated but remains the only
-     * zero-dependency browser API that preserves textarea undo history; the
-     * setRangeText fallback keeps the edit correct when execCommand fails.
+     * Insert only the changed slice through execCommand("insertText") to retain
+     * native undo history. Fall back to setRangeText if the command fails.
      *
      * @param {ToolbarEdit} nextEdit Result returned by window.NoteToolbar.
      */
@@ -396,9 +408,7 @@
     /** @param {"undo"|"redo"} action */
     function handleHistoryAction(action) {
       if (history) {
-        // External history (Y.UndoManager): the document change replays into
-        // the textarea via the page's delta path, so do not notify input
-        // listeners here or the edit would be queued again as local input.
+        // Yjs replays this change via remote splices; notifying input would queue it twice.
         textarea.focus();
         history[action]();
         return;
@@ -460,7 +470,9 @@
     }
 
     /**
-     * @returns {boolean} True when the note exceeds the plaintext size limit.
+     * Report size-limit violations to the user.
+     *
+     * @returns {boolean} True when the note exceeds the plaintext byte limit.
      */
     function noteTooLarge() {
       const byteCount = encoder.encode(textarea.value).length;
@@ -478,6 +490,7 @@
     }
 
     return {
+      /** @returns {string} Current editor contents, including unsaved edits. */
       getValue: function () {
         return textarea.value;
       },
@@ -493,16 +506,14 @@
       /**
        * Apply remote splices and restore the supplied selection.
        *
-       * The splices arrive in ascending pre-change coordinates (see
-       * NoteLiveBinding.spliceListFromDelta) and are applied in reverse order so
-       * no index rebasing is needed. Like setValue, this deliberately does not
-       * fire input listeners: remote edits must never be re-queued as local ones.
-       * setRangeText also bypasses native undo, which is why pages using this
-       * path must supply the external history handle.
+       * Apply ascending pre-change offsets in reverse order to avoid rebasing.
+       * Input listeners are not fired, preventing remote edits from being queued
+       * as local input. Callers must supply external history because setRangeText
+       * bypasses the native undo stack.
        *
-       * @param {Array<RemoteSplice>} splices
-       * @param {number} selStart
-       * @param {number} selEnd
+       * @param {Array<RemoteSplice>} splices Edits in ascending pre-change coordinates.
+       * @param {number} selStart Selection start in the updated buffer, in UTF-16 code units.
+       * @param {number} selEnd Selection end in the updated buffer, in UTF-16 code units.
        */
       applyRemoteSplices: function (splices, selStart, selEnd) {
         for (let i = splices.length - 1; i >= 0; i--) {

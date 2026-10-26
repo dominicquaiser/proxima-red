@@ -28,9 +28,7 @@
   // Jitter staggers concurrent compactors; server covers_seq settles races.
   const COMPACT_PENDING_THRESHOLD = 64;
   const COMPACT_JITTER_SPAN = 16;
-  // Consecutive compaction failures before the user is warned. Above a lost
-  // race or a transient 5xx, below the server's pending-tail cap, so the
-  // warning lands while edits still flow rather than after they stop.
+  // Warn after repeated failures, before the pending tail reaches the server cap.
   const COMPACT_FAILURE_LIMIT = 4;
   // Browser keepalive bodies are capped around 64KB.
   const KEEPALIVE_BODY_LIMIT = 60000;
@@ -87,18 +85,13 @@
   }
 
   /**
-   * Whether an HTTP status means "retrying this body will never work".
+   * Identify client errors that should halt retries of the current payload.
    *
-   * 404 and 409 are handled by their own branches before this is consulted.
-   * What is left splits into a client error the server will refuse forever
-   * (an oversized or malformed payload: 400, or a rejected CSRF token: 403)
-   * and something worth waiting out (429 rate limit, 408, any 5xx, a network
-   * throw). Retrying the first kind is what used to loop the same rejected
-   * update every 60s while the user watched an "offline" pill and nothing
-   * else, so the two must be told apart.
+   * Callers handle 404 (expired) and 409 (compaction needed) separately.
+   * Timeouts, rate limits, and server failures remain retryable.
    *
-   * @param {number} status
-   * @returns {boolean}
+   * @param {number} status HTTP response status.
+   * @returns {boolean} True for a 4xx status other than 408 or 429.
    */
   function isPermanentStatus(status) {
     if (status === 408 || status === 429) return false;
@@ -106,14 +99,12 @@
   }
 
   /**
-   * Whether a WebSocket error frame means the same thing.
+   * Identify WebSocket errors that should halt retries of the current payload.
    *
-   * pending_tail_full has its own compaction recovery and never reaches here.
-   * rate_limited and server_error are worth a backoff; a payload the server
-   * calls too large or unstorable will be refused identically next time.
+   * A full pending tail triggers compaction; rate limits and server errors back off.
    *
-   * @param {string} code
-   * @returns {boolean}
+   * @param {string} code Server error-frame code.
+   * @returns {boolean} True for oversized updates or invalid frames.
    */
   function isPermanentErrorCode(code) {
     return code === "update_too_large" || code === "invalid_frame";
@@ -215,13 +206,10 @@
     let status = "loading";
     let warnedBadRow = false;
     let warnedBadSnapshot = false;
-    // Consecutive failed compactions, and whether the user has been told the
-    // document can no longer be compacted (see noteCompactOutcome).
+    // Compaction failures are counted consecutively; the warning is shown once.
     let compactFailures = 0;
     let warnedCompactStuck = false;
-    // Set when the server permanently refused an update. The outbox is kept
-    // (the user's text is never silently discarded) but no longer retried,
-    // and the status pill stops claiming progress that is not happening.
+    // Halt retries of rejected updates while retaining unsaved content in outbox.
     let flushHalted = false;
 
     // WebSocket transport state. `ws` is non-null from construction attempt
@@ -234,19 +222,14 @@
     let wsFlush = null; // {txn, count} awaiting its ack
     let ackTimer = null;
     let gapFillInFlight = false;
-    // Inbound frames are applied strictly one at a time: decryption is
-    // async, and letting frame N+1's gap check run against a cursor that
-    // frame N hasn't advanced yet would trigger spurious gap fills.
+    // Serialize decryption and cursor advancement to avoid false sequence gaps.
     let wsInbox = Promise.resolve();
 
     function wsIsOpen() {
       return !!ws && ws.readyState === WebSocket.OPEN;
     }
 
-    // Stop awaiting the frame currently in flight, whether it was acked,
-    // refused, or abandoned. Deliberately leaves `outbox` alone: whether those
-    // updates were accepted is the caller's business, and keeping them is what
-    // lets a lost frame be retried over HTTP.
+    /** Clear acknowledgement state, retaining outbox updates for the caller to settle. */
     function clearWsFlushWait() {
       wsFlush = null;
       if (ackTimer) {
@@ -265,22 +248,17 @@
 
     function refreshStatus() {
       if (stopped) return;
-      // Sticky: a halted sync must not drift back to "syncing"/"offline",
-      // both of which read as "still working on it".
+      // A rejected local update keeps the error status even as remote edits arrive.
       if (flushHalted) return setStatus("error");
       if (backoffMs) setStatus("offline");
       else if (outbox.length || flushInFlight) setStatus("syncing");
       else setStatus("synced");
     }
 
-    // The server will never accept what is in the outbox. Unlike fatal() this
-    // does NOT stop(): remote edits keep arriving and the page keeps the
-    // buffer editable and downloadable, so the user can rescue their work.
-    // Deliberately not onFatal either, which the page renders as a terminal
-    // read-only state. The outbox is kept rather than dropped: the content
-    // only exists in this tab, and a discarded update has no way back (a
-    // later compaction cannot carry it, since covers_seq can only advance
-    // past snapshot_seq when some other client's row lands).
+    /**
+     * Stop retrying rejected local updates, retaining the outbox for unsaved-work checks.
+     * Remote sync and editing continue so the user can copy or download the buffer.
+     */
     function haltFlush() {
       if (flushHalted) return;
       flushHalted = true;
@@ -356,9 +334,13 @@
       }
     }
 
-    // Apply a /state/ or /updates/ body. Returns false when nothing was
-    // applied and the cursor was deliberately left where it was, so the same
-    // range is refetched rather than skipped.
+    /**
+     * Apply a server snapshot and update tail, then advance the polling cursor.
+     *
+     * @param {Object} body State or updates response.
+     * @returns {Promise<boolean>} False when the snapshot cannot be read;
+     *   the cursor stays unchanged so the missing history can be fetched again.
+     */
     async function applyServerBody(body) {
       if (body.snapshot) {
         // Our cursor predates compaction; a Yjs snapshot update is CRDT-safe.
@@ -366,10 +348,7 @@
           const bytes = await window.CryptoCore.decryptBytes(body.snapshot, body.snapshot_iv, key);
           window.Y.applyUpdate(doc, bytes, "remote");
         } catch (error) {
-          // Unlike a single bad row, an unreadable snapshot cannot be skipped
-          // past: it *is* the history our cursor is missing. Hold the cursor
-          // so a later key adoption can still recover, and say so once
-          // instead of backing off silently forever.
+          // A snapshot contains the missing history; advancing would skip it entirely.
           if (!warnedBadSnapshot) {
             warnedBadSnapshot = true;
             window.Notify.show(
@@ -392,11 +371,11 @@
 
     // --- Outbox flush ---
 
-    // Retry the flush after `delayMs`. Every retry path books the one
-    // flushTimer slot, so flush()'s finally-block guard can tell that a retry
-    // is already pending: scheduling a backed-off retry any other way lets
-    // that guard fire an immediate flush on top of it and the backoff is
-    // silently lost.
+    /**
+     * Schedule a flush in the shared timer slot, preserving backoff in flush's finally block.
+     *
+     * @param {number} delayMs Delay before retrying, in milliseconds.
+     */
     function scheduleFlushAfter(delayMs) {
       if (stopped || flushHalted || flushTimer) return;
       flushTimer = setTimeout(function () {
@@ -409,10 +388,11 @@
       scheduleFlushAfter(wsIsOpen() ? FLUSH_DEBOUNCE_WS_MS : FLUSH_DEBOUNCE_MS);
     }
 
-    // Retry after a compaction that was meant to drain a full pending tail.
-    // A drained tail earns a prompt retry; anything else has to back off, or
-    // flush and compact ping-pong at the debounce interval against a tail
-    // that cannot drain.
+    /**
+     * Retry promptly after compaction succeeds; otherwise back off against a full tail.
+     *
+     * @param {boolean} drained Whether compaction stored a snapshot.
+     */
     function scheduleFlushAfterCompact(drained) {
       if (stopped) return;
       if (drained) {
@@ -479,7 +459,6 @@
         return;
       }
       if (isPermanentStatus(response.status)) {
-        // Retrying this body is futile; say so instead of looping on it.
         haltFlush();
         return;
       }
@@ -509,9 +488,7 @@
     }
 
     async function flush(keepalive) {
-      // flushHalted guards here as well as in scheduleFlushAfter: the
-      // visibilitychange keepalive calls flush() directly, so the scheduler
-      // guard alone would let a halted outbox go back out on tab-hide.
+      // visibilitychange calls flush directly, bypassing the scheduler's guards.
       if (stopped || flushHalted || flushInFlight || !outbox.length) return;
       flushInFlight = true;
       const count = outbox.length;
@@ -530,13 +507,14 @@
       if (shouldCompact(pending, compactJitter)) compact();
     }
 
-    // Full snapshot covering every row at or below current cursor.
-    //
-    // Mostly best-effort: losing a compaction race is normal and silent. But
-    // a compaction that can never succeed (snapshot over the server cap, or
-    // the snapshot rate limit) strands the document once the pending tail
-    // fills, so repeated failures escalate rather than staying quiet.
-    // Returns whether the snapshot was stored.
+    /**
+     * Store a full snapshot covering all rows through the current cursor.
+     *
+     * Lost races do not count as failures; repeated refusals trigger a warning
+     * because an uncompacted tail eventually prevents further updates.
+     *
+     * @returns {Promise<boolean>} Whether this request stored the snapshot.
+     */
     async function compact() {
       if (stopped || compactInFlight) return false;
       compactInFlight = true;
@@ -559,8 +537,7 @@
           noteCompactOutcome(true);
           return true;
         }
-        // A plain 409 is a lost race or a stale cursor: another client's
-        // snapshot already covers us, so this is success by proxy.
+        // A 409 does not count as a failure: another snapshot may already cover us.
         noteCompactOutcome(response.status === 409);
         return false;
       } catch (error) {
@@ -571,10 +548,11 @@
       }
     }
 
-    // Escalate a compaction that keeps failing. Silent for the first few
-    // attempts (a transient 5xx or a lost race is routine); past the
-    // threshold the tail is filling with no way to drain it, which the user
-    // needs to know about because their edits stop propagating.
+    /**
+     * Count consecutive compaction failures and warn once at the configured threshold.
+     *
+     * @param {boolean} ok Whether compaction succeeded or lost a race.
+     */
     function noteCompactOutcome(ok) {
       if (ok) {
         compactFailures = 0;
@@ -583,9 +561,6 @@
       compactFailures += 1;
       if (compactFailures < COMPACT_FAILURE_LIMIT || warnedCompactStuck) return;
       warnedCompactStuck = true;
-      // Deliberately about the symptom, not the cause: the client cannot tell
-      // an oversized snapshot from a rate limit, and both end the same way
-      // for the user.
       window.Notify.show(
         "This note's history could not be saved. Editing may stop working - " +
           "copy your work somewhere safe.",
@@ -669,8 +644,6 @@
         return compact().then(scheduleFlushAfterCompact);
       }
       if (isPermanentErrorCode(msg.code)) {
-        // The socket stays open (remote edits still flow), but this payload
-        // is never going to be accepted.
         haltFlush();
         return null;
       }
@@ -762,11 +735,8 @@
       socket.onclose = function (event) {
         if (ws !== socket) return;
         ws = null;
-        // Ack never arrived: outbox still has the updates for HTTP retry.
-        // Deliberately NOT clearWsFlushWait(): flushInFlight may belong to a
-        // flushOverWs still awaiting encryption, which has not sent anything
-        // yet and clears the flag itself once its `socket closed` throw lands.
-        // Releasing it here would let a second flush start alongside it.
+        // Release only a sent frame. An encrypting flush still owns flushInFlight
+        // and clears it on failure; releasing it here could start a concurrent flush.
         if (wsFlush) {
           wsFlush = null;
           flushInFlight = false;

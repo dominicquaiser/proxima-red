@@ -1,20 +1,13 @@
-"""
-Constants for the note sharing application.
+"""Limits, expiry options, and messages for shared, vault, and live notes.
 
-This module centralizes all magic strings, configuration values, and
-constants used throughout the note app to maintain consistency
-and make updates easier.
-
-The note tool deliberately does not import from ``apps.passwd``: the two
-tools share conventions, not code, so either can diverge (e.g. different
-expiry defaults or caps) without touching the other.
+Note and password tools define their own limits so their storage budgets and
+expiry defaults can change independently.
 """
 
 from datetime import timedelta
 from typing import Final
 
-# Expiry time options mapping for note shares (same semantics as the passwd
-# tool's EXPIRY_MAP; duplicated on purpose, see module docstring).
+# Share expiry options; "1month" is a four-week duration.
 EXPIRY_MAP: Final[dict[str, timedelta]] = {
     "1hour": timedelta(hours=1),
     "1day": timedelta(days=1),
@@ -57,9 +50,7 @@ RATE_LIMIT_RETRIEVE: Final[str] = "120/h"  # 120 retrievals per hour per IP
 # MAX_NOTE_PLAINTEXT_BYTES in static/note/js/editor-core.js.
 MAX_VAULT_NOTE_CONTENT_LENGTH: Final[int] = 200_000
 
-# The encrypted vault index (folder tree + note names) is small JSON; this
-# mirrors the passwd tool's 500KB vault blob cap and is far above any
-# realistic index size, so hitting it means a client bug or abuse.
+# Character cap for the encrypted JSON index of folders and note names.
 MAX_VAULT_INDEX_LENGTH: Final[int] = 500_000
 
 # Per-user row quota: bounds worst-case storage at ~40MB of ciphertext per
@@ -77,11 +68,8 @@ VAULT_TRASH_RETENTION_DAYS: Final[int] = 7
 RATE_LIMIT_VAULT: Final[str] = "100/h"  # vault page views
 RATE_LIMIT_VAULT_READ: Final[str] = "120/m"  # index/note reads
 RATE_LIMIT_VAULT_WRITE: Final[str] = "30/m"  # index/note writes + deletes
-# Sized against the worst case rather than a typical one: a full vault (200
-# notes at the 200,000-char cap) re-encrypts in ~29 batches, because the
-# client's per-POST character budget splits them well before its note count
-# does. At 10/m the 11th batch was refused and the password change tore the
-# vault in half, so this has to clear the whole migration inside one window.
+# Allow a full 200-note vault to be re-encrypted within one rate-limit window:
+# the client's per-request character budget requires about 29 batches at the cap.
 RATE_LIMIT_VAULT_MIGRATE: Final[str] = "60/m"  # password-change re-encryption
 
 # --- Live notes (editable share links) ---
@@ -171,9 +159,7 @@ ERROR_VAULT_MISSING_FIELDS: Final[str] = (
 )
 ERROR_USER_NOT_FOUND: Final[str] = "User not found"
 ERROR_NOTE_NOT_FOUND: Final[str] = "Note not found"
-# Duplicated from apps.auth.constants on purpose (conventions, not code): the
-# live-note JSON endpoints answer 429 themselves instead of blocking to an
-# HTML 403 like the vault APIs, because the sync client must parse the reply.
+# Live-note endpoints return JSON 429 responses so the sync client can back off.
 ERROR_RATE_LIMITED: Final[str] = "Too many requests. Please try again later."
 ERROR_LIVE_MISSING_FIELDS: Final[str] = (
     "Missing required fields: encrypted data and IV are required."
@@ -181,15 +167,11 @@ ERROR_LIVE_MISSING_FIELDS: Final[str] = (
 ERROR_LIVE_INVALID_SINCE: Final[str] = (
     "Invalid 'since' parameter: a non-negative integer is required."
 )
-ERROR_LIVE_TAIL_FULL: Final[str] = (
-    "Update log is full. Save a compacted snapshot, then retry."
-)
+ERROR_LIVE_TAIL_FULL: Final[str] = "Update log is full. Save a compacted snapshot, then retry."
 ERROR_LIVE_STALE_SNAPSHOT: Final[str] = (
     "A newer snapshot already exists; the compaction was discarded."
 )
-ERROR_LIVE_COVERS_UNKNOWN: Final[str] = (
-    "The snapshot claims to cover updates that do not exist."
-)
+ERROR_LIVE_COVERS_UNKNOWN: Final[str] = "The snapshot claims to cover updates that do not exist."
 
 # Success messages
 SUCCESS_DATA_SAVED: Final[str] = "Data saved successfully."

@@ -3,14 +3,14 @@
 </p>
 <p align="center">
   <a href="./AGPL-LICENSE.md"><img src="https://img.shields.io/badge/license-AGPL--3.0-red.svg" alt="License: AGPL-3.0" /></a>
-  <img src="https://img.shields.io/github/v/release/dominicquaiser/proxima-red?sort=semver" alt="GitHub release (latest SemVer)" />
+  <img src="https://img.shields.io/github/v/release/dominicquaiser/proxima-red?sort=semver&amp;color=green" alt="GitHub release (latest SemVer)" />
   <img src="https://img.shields.io/badge/python-3.13-blue.svg" alt="Python 3.13" />
-  <img src="https://img.shields.io/badge/django-5.2-green.svg" alt="Django 5.2" />
+  <img src="https://img.shields.io/badge/django-5.2-blue.svg" alt="Django 5.2" />
 </p>
 
 ---
 
-**[proxima·red](https://proxima.red/)** is a small collection of open-source, text-focused tools designed with privacy and security in mind. The first tool, **[pass·](https://pass.proxima.red/)**, is a zero-knowledge password and secret sharer. No account required. No email. No tracking.
+**[proxima·red](https://proxima.red/)** is a small collection of open-source, text-focused tools designed with privacy and security in mind. **[pass·](https://pass.proxima.red/)** is a zero-knowledge password and secret sharer; **[note·](https://note.proxima.red/)** is a Markdown editor that shares notes as encrypted links. No account required. No email. No tracking.
 
 ## How it works
 
@@ -19,21 +19,27 @@ Encryption and decryption happen entirely in your browser using the Web Crypto A
 1. Your browser generates a random AES-256 key
 2. Your secret is encrypted locally before anything is sent
 3. The server receives and stores only the ciphertext
-4. The shareable link carries the key in its URL fragment (`#…`) — fragments are never sent in HTTP requests
+4. The shareable link carries the key in its URL fragment (`#…`) which it is never sent in the HTTP requests
 5. The recipient's browser fetches the ciphertext and decrypts it locally using the key from the fragment
 
 Even a full database compromise yields nothing readable. There is no key to steal.
 
 ## Features
 
-**Anonymous sharing — no account needed**
+**Password sharing**
 
 - Paste a password, API key, PGP key, SSH key, or any other secret
 - Optional encrypted title
 - Expiry: 60 minutes · 24 hours · 7 days · 4 weeks
 - Share a single-use link; the secret is gone when it expires
 
-**Authenticated vault — optional, no email required**
+**Markdown notes**
+
+- Write Markdown in the browser and share an encrypted snapshot as a link, or an explicit plain-text one
+- Or share an editable live link: edits merge client-side in a CRDT, with live cursors, so the server still only relays ciphertext
+- Signed in, notes can be saved to an encrypted vault with folders, search, and a trash window
+
+**Authenticated vault**
 
 - Sign up with just a password; you receive a randomly generated 8-digit ID
 - Your vault data is encrypted client-side using a key derived from your password via PBKDF2-SHA256

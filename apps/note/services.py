@@ -1,10 +1,7 @@
-"""
-Business logic and service functions for the note sharing application.
+"""Storage, expiry, and synchronization services for shared, live, and vault notes.
 
-Mirrors the structure of ``apps.passwd.services``. All cryptographic
-operations happen client-side; these functions only move note bodies in and
-out of the database. Encrypted notes are opaque ciphertext to the server;
-plain-text notes are stored as-is, which the user explicitly opted into.
+Cryptographic operations happen client-side. Encrypted note bodies remain
+opaque to the server; explicitly plain-text shares are stored as received.
 
 Grouped into three sections, in this order: shared notes (create, expire,
 count accesses), live notes (the CRDT snapshot/update-log sync backing
@@ -59,23 +56,16 @@ logger = logging.getLogger(__name__)
 def validation_code(error: ValidationError) -> str | None:
     """Return a ``ValidationError``'s stable code, or ``None`` if it has none.
 
-    The safe reader for this module's rejection vocabulary
-    (``pending_tail_full``, ``stale_snapshot``, ...). ``ValidationError`` only
-    carries a ``code`` attribute when it was built from a single message: the
-    dict form that ``Model.full_clean()`` raises has ``error_dict`` instead,
-    and touching ``.code`` on it raises ``AttributeError``. Both kinds arrive
-    at the same ``except ValidationError`` in the views and the consumer, so
-    reading the code directly there turns every field-validation failure
-    (oversized payload, non-Base64 ciphertext, bad IV length) into an
-    unhandled 500 or a dropped socket instead of the intended 400/error frame.
+    Single-message errors can carry service rejection codes such as
+    ``pending_tail_full``. Model validation can raise dictionary-shaped errors
+    without a ``code`` attribute; those use the transport's generic validation
+    response.
 
     Args:
-        error (ValidationError): The caught error, of either shape.
+        error (ValidationError): Service or model validation error.
 
     Returns:
-        str | None: The code for a single-message error, else ``None``, which
-        callers treat as "not one of ours" and fall through to their generic
-        field-validation branch.
+        str | None: Top-level code, or ``None`` when the error has none.
     """
     return getattr(error, "code", None)
 
@@ -183,9 +173,8 @@ def _delete_expired_rows(queryset: QuerySet, batch_size: int | None) -> int:
 def _delete_in_batches(queryset: QuerySet, batch_size: int) -> int:
     """Delete a queryset in fixed-size batches.
 
-    Shared by the shared-note and live-note expiry sweeps; the model is read
-    off the queryset. The count covers that model's rows only, so a cascade
-    (live-note updates) doesn't inflate the reported number.
+    Used by shared-note, live-note, and vault-Trash sweeps. Cascaded rows,
+    such as live-note updates, are excluded from the returned count.
 
     Args:
         queryset (QuerySet): Rows eligible for deletion.
@@ -550,9 +539,7 @@ def live_group_name(pk) -> str:
 # --- Note vault (authenticated) ---
 
 
-def serialize_vault_index(
-    index: VaultIndex, *, include_updated_at: bool = False
-) -> dict[str, Any]:
+def serialize_vault_index(index: VaultIndex, *, include_updated_at: bool = False) -> dict[str, Any]:
     """Return the encrypted vault index in the shape expected by clients/exports.
 
     Args:
@@ -615,9 +602,7 @@ def save_vault_index(user: User, encrypted_data: str, iv: str) -> VaultIndex:
     return index
 
 
-def serialize_vault_note(
-    note: VaultNote, *, include_content: bool = True
-) -> dict[str, Any]:
+def serialize_vault_note(note: VaultNote, *, include_content: bool = True) -> dict[str, Any]:
     """Return a vault note in the shape expected by clients/exports.
 
     Args:
@@ -679,8 +664,7 @@ def create_vault_note(user: User, *, content: str, iv: str) -> VaultNote:
     """
     if user.vault_notes.count() >= MAX_VAULT_NOTES_PER_USER:
         raise ValidationError(
-            _("Note vault is full (%(max)d notes).")
-            % {"max": MAX_VAULT_NOTES_PER_USER},
+            _("Note vault is full (%(max)d notes).") % {"max": MAX_VAULT_NOTES_PER_USER},
             code="note_quota",
         )
     note = VaultNote(user=user, content=content, iv=iv)
@@ -756,14 +740,12 @@ def delete_vault_note(user: User, pk) -> bool:
 def set_vault_notes_trashed(user: User, ids, *, trashed: bool) -> int:
     """Move the user's notes to Trash, or restore them.
 
-    One owner-scoped ``UPDATE``, so trashing a whole folder costs a single
-    query and a single request. ``QuerySet.update()`` is deliberate: it
-    bypasses ``auto_now``, leaving ``updated_at`` alone because moving a note
-    to Trash is not a content write.
+    A single owner-scoped ``UPDATE`` changes ``trashed_at`` without modifying
+    the content timestamp, ``updated_at``.
 
-    Idempotent, like ``delete_vault_note``: unknown, foreign, and already-set
-    ids are harmless no-ops. Unparseable ids are dropped rather than raising,
-    since these come straight from a client payload.
+    Unknown, foreign, and malformed IDs are ignored. Every matching row is
+    updated, including rows already in the requested state: trashing again
+    resets its retention timestamp to the current server time.
 
     Args:
         user (User): The authenticated owner.
@@ -772,7 +754,7 @@ def set_vault_notes_trashed(user: User, ids, *, trashed: bool) -> int:
             time, ``False`` clears it.
 
     Returns:
-        int: Number of rows actually updated.
+        int: Number of matching rows, including those already in the requested state.
     """
     valid_ids = []
     for value in ids:

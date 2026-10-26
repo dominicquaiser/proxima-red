@@ -1,5 +1,5 @@
 /**
- * @fileoverview Controller for the note editor page ([note·] /create).
+ * @fileoverview Controller for the public note editor page.
  *
  * Page-specific wiring only; shared editor behavior lives in editor-core.js
  * and sharing lives in share.js.

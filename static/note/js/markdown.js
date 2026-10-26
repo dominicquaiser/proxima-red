@@ -12,8 +12,7 @@
   const ABSOLUTE_URL_RE = /^[a-z][a-z0-9+.-]*:/i;
   const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
   const INTERNAL_LINKS_BOUND = "internalLinksBound";
-  // Where a blocked image's URL is parked. Not discarded, so a future opt-in
-  // "load images" control has something to restore.
+  // Preserve blocked URLs for placeholder metadata and host labels.
   const BLOCKED_SRC_ATTR = "data-blocked-src";
   const BLOCKED_IMAGE_SELECTOR = "img[" + BLOCKED_SRC_ATTR + "]";
 
@@ -64,9 +63,7 @@
   /**
    * Escape the five HTML-significant characters.
    *
-   * Used on raw author HTML so it renders as visible text instead of markup;
-   * this runs before DOMPurify rather than relying on it, so an author's
-   * `<script>` is shown, not silently dropped.
+   * Escape author HTML before sanitization so it remains visible as text.
    *
    * @param {string} text
    * @returns {string}
@@ -129,17 +126,10 @@
   });
 
   /**
-   * Whether an image URL would be refused by the page's `img-src` policy.
+   * Check whether an image URL falls outside the allowed data and same-origin sources.
    *
-   * Mirrors the CSP (`img-src 'self' data:`) exactly, so the placeholder shows
-   * up if and only if the browser would have refused the request, no silent
-   * broken-image icons left over, and nothing marked "not shown" that would
-   * actually have loaded.
-   *
-   * Blocking is a privacy decision, not just a CSP artifact: there is no image
-   * upload, so every remote image is a third-party URL whose owner would learn
-   * the reader's IP and the moment they opened the note. Full reasoning in
-   * CLAUDE.md and the privacy policy (§3.5).
+   * Allow data URLs and URLs resolving to the page origin. Blocking other
+   * origins prevents image hosts from learning when a reader opens a note.
    *
    * @param {string} src Raw `src` attribute value.
    * @param {string} origin Page origin, e.g. "https://note.proxima.red".
@@ -160,10 +150,7 @@
     return url.origin !== origin;
   }
 
-  // Strip the src off images the policy would refuse, and mark them for
-  // blockRemoteImages() below. The URL is kept in a data attribute rather than
-  // discarded: it is what a future opt-in "load images" control would restore,
-  // and it lets the placeholder name the host it would have contacted.
+  // Remove blocked sources before DOM insertion; retain the URL for the placeholder.
   window.DOMPurify.addHook("afterSanitizeAttributes", function (node) {
     if (node.tagName !== "IMG") return;
     const src = node.getAttribute("src");
@@ -186,11 +173,8 @@
   /**
    * Render markdown to sanitized HTML.
    *
-   * Images the `img-src` policy would refuse come back already stripped of
-   * their `src` (the sanitizer hook does that), so this output makes no
-   * third-party requests either. It does not carry the visible placeholder,
-   * though: that is a DOM pass. Prefer `renderInto` unless you only need the
-   * string.
+   * Sanitizer hooks remove remote image sources. Use renderInto to also add
+   * image placeholders, heading IDs, and syntax highlighting in the DOM.
    *
    * @param {string} source
    * @returns {string} Sanitized HTML, safe to assign to innerHTML.
@@ -200,10 +184,7 @@
     return window.DOMPurify.sanitize(html, {
       ALLOWED_TAGS: ALLOWED_TAGS,
       ALLOWED_ATTR: ALLOWED_ATTR,
-      // Nothing in the allowlist needs a data-* attribute, and blockRemoteImages
-      // treats data-blocked-src as proof the hook put it there. DOMPurify allows
-      // data-* by default; refusing it keeps that assumption true rather than
-      // resting on raw HTML never surviving marked's escaping.
+      // Only the sanitizer hook may supply data-blocked-src; reject author data attributes.
       ALLOW_DATA_ATTR: false,
     });
   }
@@ -228,8 +209,7 @@
    */
   function displayHost(src) {
     try {
-      // Needs the same base as isBlockedImageSrc, or a protocol-relative URL
-      // (which is blocked) has nothing to resolve against and prints raw.
+      // Use the same base as the policy check, including for protocol-relative URLs.
       return new URL(src, window.location.origin).host || src;
     } catch (error) {
       return src;
@@ -239,11 +219,8 @@
   /**
    * Replace src-stripped images with a labelled placeholder.
    *
-   * Runs after DOMPurify on the live DOM, like `highlightAll`: the placeholder
-   * is built with `createElement`/`textContent` and never passes back through
-   * the sanitizer, so no markup from the note can reach it. Without this the
-   * reader would just get a broken-image icon and a console CSP violation with
-   * nothing explaining either.
+   * Runs after sanitization. Placeholder labels use textContent so image URLs
+   * and alt text remain text when inserted into the live DOM.
    *
    * @param {Element} container
    */
