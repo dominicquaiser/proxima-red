@@ -7,31 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-26
+
+Adds a second tool, **`[note·]`**, on the `note.` subdomain alongside `[pass·]`, and moves the server to ASGI. Existing deployments need the steps under *Upgrading*.
+
+### Upgrading
+
+- **New subdomain**: set `NOTE_SITE_URL`, add the note host to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`, create its DNS record, and re-run `deployment/scripts/init-letsencrypt.sh` so the certificate covers it (see `docs/deployment.md`).
+- **`SITE_URL`, `PASS_SITE_URL` and `NOTE_SITE_URL` are now required in production**. An unset one used to fall back to `http://localhost:8000` and silently 404 that tool; startup now fails instead.
+- **ASGI runtime**: the app runs `config.asgi` under gunicorn with uvicorn workers, and needs a second Redis instance, `redis-channels`, for WebSocket fan-out (bundled in `docker-compose.prod.yml`; override with `CHANNEL_REDIS_URL`).
+- **Running your own host nginx**: forward the WebSocket upgrade on `/ws/` (see `deployment/nginx/host.conf`). Without it, live notes fall back to polling.
+- The `cron` service now also runs `delete_expired_notes` every minute.
+
 ### Added
 
-- **`[note·]` real-time collaboration**: live notes sync over WebSockets (sub-second, coloured cursors with Greek-letter name flags in the margin), with HTTP polling as automatic fallback. Undo moved to Y.UndoManager on the live page. Runtime now serves ASGI (gunicorn + uvicorn workers, Django Channels, dedicated `redis-channels` layer).
-- **`[note·]` editable share links (live notes)**: "Editable link" share option creates a collaboratively-editable CRDT (Yjs) document merged client-side; server stores an encrypted snapshot + append-only encrypted update log it can't read. Same expiry model as other shares; swept by `delete_expired_notes`.
-- **`[note·]` note vault** at `note.…/vault/`: file manager + editor, folder tree, search, rename/move, Trash. Notes + folder structure encrypted client-side under the vault key — server never learns names or content. Password change transparently re-encrypts the note vault alongside the password vault; GDPR export now includes it.
-- **Per-tool sign-in destinations**: signin/signup accept a `tool` param so note sign-ins land on the note vault; `/vault/` is host-dispatched.
-- **`[note·]` encrypted note sharing** on the `note.` subdomain: markdown editor with live preview, formatting rail, `.md` download. AES-256-GCM by default (fragment key), with a flagged plain-text link option.
-- **`NOTE_SITE_URL`** env var, mirroring `PASS_SITE_URL`.
-- **`delete_expired_notes`** management command, run every minute alongside `delete_expired`.
+**`[note·]` encrypted markdown notes**
 
-### Fixed
+- Markdown editor with live preview, a formatting rail, syntax-highlighted code blocks and `.md` download.
+- Share links encrypted with AES-256-GCM, with the key in the URL fragment and the same expiry options as password shares. A plain-text link is available on request and clearly flagged.
+- **Editable links (live notes)**: everyone with the link edits the same document in real time, with coloured cursors and name flags. Edits are merged in the browser (Yjs CRDT); the server stores only an encrypted snapshot and update log. Syncs over WebSockets, with HTTP polling as fallback.
+- **Note vault** at `note.…/vault/`: folders, search, rename/move, and a Trash the server empties after 7 days. Content, names and folder structure are encrypted under the account's vault key.
+- Images hosted elsewhere are never loaded in rendered notes; a labelled placeholder shows instead, so a note's author can't see who reads it.
 
-- **`[note·]` live-note sync no longer 500s or drops the socket on a rejected payload**: reading `ValidationError.code` in the update/snapshot endpoints and the WebSocket consumer crashed with `AttributeError` whenever the error came from model field validation (oversized, non-Base64, or bad-IV payloads), whose dict form carries no code. Those now answer a JSON 400 / a recoverable `invalid_frame` error frame as intended.
-- **`[note·]` a permanently rejected live update no longer retries forever in silence**: the sync client told transient failures (429, 5xx, network) apart from ones the server will always refuse, and retried both every 60s while showing only an "offline" pill. Permanent rejections now halt syncing with a clear message, keeping the outbox and leaving the editor readable, editable and downloadable so work can be rescued.
-- **`[note·]` the live editor warns when a note passes the size limit**: the static editors gate on size at share/save time, but a live note has no submit, so nothing checked it until the server refused an update. Crossing the limit (from local typing, a collaborator's edit, or the loaded document) now warns.
+**Accounts**
 
-- **`[note·]` a password change no longer tears the note vault in half**: the client re-encrypts the vault in batches, but `/vault/migrate/` allowed only 10/min against the ~29 batches a full vault needs, so the 11th was refused mid-flight. Because the change had already rotated `vault_salt`, the old key survived only in that page's memory and the abandoned rows became unrecoverable — and with the index (written last) still under the old key, the whole vault failed to open. The endpoint now answers a parseable JSON 429, the client retries it, batches are larger, and the limit clears a full vault in one window.
+- Sign-in and sign-up take a `tool` parameter, so each tool's Sign In lands on its own vault.
+- Changing the password also re-encrypts the note vault, and offers a plaintext recovery download if re-encryption fails.
+- The GDPR export covers both vaults and every share, note and live note.
 
-- **`[note·]` the note vault's cross-tab key no longer lingers on disk indefinitely**: the key is mirrored into `localStorage` so sibling tabs can reuse it, but that store is origin-scoped, so only a sign-out on the note host itself cleared it — signing out on the main site or the pass subdomain left it behind. It now carries an expiry tied to `SESSION_COOKIE_AGE` (refreshed on use, server-supplied so the two can't drift) and is cleared on any 401 from a vault API.
-- **Production requires `SITE_URL`, `PASS_SITE_URL` and `NOTE_SITE_URL`**: `docs/deployment.md` already marked all three prod-required, but an unset one silently fell back to `http://localhost:8000`, and since host dispatch compares the request host against them the affected tool simply vanished — the note editor, `/<uuid>/` retrieves, the vault dispatch and every `/live/` page 404ing, with `robots.txt`/`sitemap.xml` serving the main-site variant everywhere. Deployments now fail fast instead.
+**`[pass·]`**
+
+- Deleting a vault entry takes a confirming second click.
+- New favicons.
 
 ### Changed
 
-- Static assets reorganized into per-tool folders (`static/{shared,core,auth,passwd,note}/{css,js}/`).
-- Note editor's shared machinery extracted into `editor-core.js` / `share.js`, reused by the public editor and vault.
+- **Vault access**: the account sign-in now lasts seven days, and each vault has its own access window, replacing the single 30-minute idle timeout. The password vault locks 30 minutes after the password was entered, even while in use; the note vault locks after seven days without use. A locked vault reopens with the password in place.
+- The password vault no longer embeds its ciphertext in the page; it is fetched only once the vault is unlocked. The unlock modal can't be dismissed and offers to sign out instead.
+- The password vault's size cap rose from 50 KB to 500 KB; single shares stay at 50 KB.
+- Static assets moved into per-tool folders (`static/{shared,core,auth,passwd,note}/`).
+
+### Fixed
+
+- A rate-limited or otherwise non-JSON response now shows a readable error instead of `Unexpected token '<'`.
 
 ## [1.1.0] — 2026-06-21
 
@@ -72,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automated deletion of expired shares via a management command (`delete_expired`)
 - Rate limiting on auth and share endpoints
 
-[Unreleased]: https://github.com/dominicquaiser/proxima-red/compare/1.1.0...HEAD
+[Unreleased]: https://github.com/dominicquaiser/proxima-red/compare/2.0.0...HEAD
+[2.0.0]: https://github.com/dominicquaiser/proxima-red/compare/1.1.0...2.0.0
 [1.1.0]: https://github.com/dominicquaiser/proxima-red/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/dominicquaiser/proxima-red/releases/tag/1.0.0
