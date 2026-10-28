@@ -101,6 +101,19 @@ def vault_url(tool: str = DEFAULT_VAULT_TOOL) -> str:
     return f"{settings.PASS_SITE_URL}{reverse('passwd:vault')}"
 
 
+def requested_tool(request: HttpRequest) -> str:
+    """Return the vetted vault tool requested by the ``tool`` parameter.
+
+    Each tool's signin/signup links carry ``?tool=<key>`` so the flow can land
+    the user back on that tool's vault, and its sign-out form posts the key so
+    the sign-in page it lands on keeps it. POST wins over GET (a form
+    re-submits the value it was rendered with); anything not in the allowlist
+    falls back to the default.
+    """
+    tool = request.POST.get("tool") or request.GET.get("tool") or ""
+    return tool if tool in VAULT_TOOLS else DEFAULT_VAULT_TOOL
+
+
 class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
     """
     Shared scaffolding for the public signup and signin pages.
@@ -115,21 +128,10 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
 
     form_class = None
 
-    def requested_tool(self, request: HttpRequest) -> str:
-        """Return the vetted vault tool requested by the ``tool`` parameter.
-
-        The signin/signup links on each tool's pages carry ``?tool=<key>`` so
-        the flow can land the user back on that tool's vault. POST wins over
-        GET (the form re-submits the value it was rendered with); anything not
-        in the allowlist falls back to the default.
-        """
-        tool = request.POST.get("tool") or request.GET.get("tool") or ""
-        return tool if tool in VAULT_TOOLS else DEFAULT_VAULT_TOOL
-
     def redirect_if_authenticated(self, request: HttpRequest):
         """Return a redirect to the vault for an already-authenticated session, else None."""
         if get_authenticated_user_id(request):
-            return redirect(vault_url(self.requested_tool(request)))
+            return redirect(vault_url(requested_tool(request)))
         return None
 
     def get(self, request: HttpRequest) -> HttpResponse:
@@ -137,7 +139,7 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
         return self.redirect_if_authenticated(request) or render(
             request,
             self.template_name,
-            {"form": self.form_class(), "tool": self.requested_tool(request)},
+            {"form": self.form_class(), "tool": requested_tool(request)},
         )
 
     def render_form(
@@ -148,7 +150,7 @@ class AuthFormView(MainSiteRedirectMixin, RatelimitGateMixin, View):
         return render(
             request,
             self.template_name,
-            {"form": form or self.form_class(), "tool": self.requested_tool(request)},
+            {"form": form or self.form_class(), "tool": requested_tool(request)},
             **kwargs,
         )
 
@@ -409,7 +411,7 @@ class SigninView(AuthFormView):
             logger.error(LOG_SIGNIN_ERROR, exception_type(e))
             return self.exception_response(request, ERROR_UNEXPECTED)
 
-        tool = self.requested_tool(request)
+        tool = requested_tool(request)
         return ajax_or_html(
             request,
             ajax=lambda: json_ok(
@@ -440,12 +442,17 @@ class SignoutView(RatelimitGateMixin, View):
     ratelimit_redirect = "auth:signin"
 
     def post(self, request: HttpRequest) -> HttpResponse:
-        """Destroy the session and return the AJAX or redirect response."""
+        """Destroy the session and return the AJAX or redirect response.
+
+        The redirect keeps the vetted ``tool`` the form posted, so signing back
+        in from the page it lands on reopens the vault the user just left.
+        """
         services.destroy_user_session(request)
+        signin_url = f"{reverse('auth:signin')}?tool={requested_tool(request)}"
         return ajax_or_html(
             request,
             ajax=lambda: json_ok(SUCCESS_SIGNOUT),
-            html=lambda: flash_and_redirect(request, SUCCESS_SIGNOUT, "auth:signin"),
+            html=lambda: flash_and_redirect(request, SUCCESS_SIGNOUT, signin_url),
         )
 
 

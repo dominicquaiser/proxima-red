@@ -74,9 +74,11 @@ class NoteVaultViewTests(VaultTestCase):
     NOTE_HOST = {"HTTP_HOST": "note.proxima.red"}
 
     def test_unauthenticated_redirects_to_signin(self):
+        """The redirect carries the tool, so signing in reopens this vault."""
         response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse("auth:signin"), response.url)
+        self.assertRedirects(
+            response, f"{reverse('auth:signin')}?tool=note", fetch_redirect_response=False
+        )
 
     def test_authenticated_renders_vault(self):
         self._authenticate()
@@ -84,6 +86,12 @@ class NoteVaultViewTests(VaultTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "note/vault.html")
         self.assertContains(response, self.user.user_id)
+
+    def test_signout_form_posts_the_note_tool(self):
+        """Sign-out hands the tool on to the sign-in page it lands on."""
+        self._authenticate()
+        response = self.client.get(reverse("note:vault"), **self.NOTE_HOST)
+        self.assertContains(response, 'name="tool" value="note"')
 
     def test_vault_page_hands_the_client_its_trash_settings(self):
         """The Trash endpoint and retention window reach the page.

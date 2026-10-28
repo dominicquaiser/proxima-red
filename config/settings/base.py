@@ -95,6 +95,9 @@ TEMPLATES = [
                 # Custom session user as {{ current_user }} (see the note on
                 # MIDDLEWARE re: why Django's auth processor is not used).
                 "apps.auth.context_processors.current_user",
+                # The host's vault tool as {{ host_tool }}, so the shared
+                # header's auth links land on the vault the user came from.
+                "apps.auth.context_processors.host_tool",
                 # Absolute base URLs for the two domains (proxima.red /
                 # pass.proxima.red) so templates can build cross-domain links.
                 "apps.core.context_processors.site_urls",

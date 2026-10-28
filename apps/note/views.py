@@ -27,12 +27,13 @@ from collections.abc import Callable
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
-from django.urls import reverse
+from django.urls import reverse, reverse_lazy
 from django.utils.decorators import method_decorator
+from django.utils.text import format_lazy
 from django.views.generic import View
 from django_ratelimit.decorators import ratelimit
 
-from apps.auth.constants import SESSION_KEY_USER_ID
+from apps.auth.constants import SESSION_KEY_USER_ID, VAULT_TOOL_NOTE
 from apps.auth.mixins import SessionAuthRequiredMixin
 from apps.auth.models import User
 from apps.auth.utils import (
@@ -479,6 +480,10 @@ class NoteVaultView(SessionAuthRequiredMixin, View):
     has established its vault key, so a logged-in-but-locked tab never receives
     ciphertext in the page HTML.
     """
+
+    # Signed-out visitors sign in on the main site; the tool brings them back
+    # here instead of to the default (password) vault.
+    signin_url = format_lazy("{}?tool={}", reverse_lazy("auth:signin"), VAULT_TOOL_NOTE)
 
     def get(self, request: HttpRequest) -> HttpResponse:
         """Render the vault shell (no encrypted data embedded).

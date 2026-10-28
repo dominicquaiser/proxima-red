@@ -11,7 +11,7 @@
     />
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#1D2021" />
-    <link rel="icon" type="image/svg+xml" href="{% static 'icons/note-pencil-favicon.svg' %}" />
+    <link rel="icon" type="image/svg+xml" href="{% static 'icons/note-favicon.svg' %}" />
     <link rel="stylesheet" href="{% static 'shared/css/main.css' %}" />
     <link rel="stylesheet" href="{% static 'shared/css/notifications.css' %}" />
     <link rel="stylesheet" href="{% static 'note/css/shared.css' %}" />
@@ -107,16 +107,16 @@
             {% if is_authenticated %}
             <a href="{{ site_url }}/vault/" class="mobile-menu__link">Vault</a>
             {% else %}
-            <a href="{{ site_url }}/auth/signin/" class="mobile-menu__link">Sign In</a>
-            <a href="{{ site_url }}/auth/signup/" class="mobile-menu__link">Sign Up</a>
+            <a href="{{ site_url }}/auth/signin/?tool=note" class="mobile-menu__link">Sign In</a>
+            <a href="{{ site_url }}/auth/signup/?tool=note" class="mobile-menu__link">Sign Up</a>
             {% endif %}
           </nav>
         </details>
         {% if is_authenticated %}
         <a href="{{ site_url }}/vault/" class="header__btn header__btn--outline">Vault</a>
         {% else %}
-        <a href="{{ site_url }}/auth/signin/" class="header__btn header__btn--outline">Sign In</a>
-        <a href="{{ site_url }}/auth/signup/" class="header__btn header__btn--solid">Sign Up</a>
+        <a href="{{ site_url }}/auth/signin/?tool=note" class="header__btn header__btn--outline">Sign In</a>
+        <a href="{{ site_url }}/auth/signup/?tool=note" class="header__btn header__btn--solid">Sign Up</a>
         {% endif %}
       </div>
     </header>

@@ -4,6 +4,7 @@ import base64
 from datetime import timedelta
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
@@ -340,6 +341,11 @@ class SigninViewTests(TestCase):
         response = self.client.get(self.signin_url, {"tool": "note"})
         self.assertContains(response, 'name="tool" value="note"')
 
+    def test_signin_header_links_keep_the_requested_tool(self):
+        """The shared header prefers the page's tool over the host's default."""
+        response = self.client.get(self.signin_url, {"tool": "note"})
+        self.assertContains(response, f"{settings.SITE_URL}/auth/signup/?tool=note")
+
     def test_signin_authenticate_errors_are_logged_without_raw_details(self):
         """An authentication-service failure returns a generic sanitized error."""
         raw_detail = "connection to server at proxima_user failed"
@@ -655,6 +661,19 @@ class SignoutViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["success"])
         self.assertFalse(self.client.session.get("authenticated", False))
+
+    def test_signout_redirect_keeps_the_posted_tool(self):
+        """Signing out of the note vault lands on a sign-in page for it."""
+        response = self.client.post(self.signout_url, {"tool": "note"})
+        self.assertRedirects(
+            response, f"{reverse('auth:signin')}?tool=note", fetch_redirect_response=False
+        )
+
+    def test_signout_unknown_tool_falls_back_to_pass(self):
+        response = self.client.post(self.signout_url, {"tool": "https://evil.example"})
+        self.assertRedirects(
+            response, f"{reverse('auth:signin')}?tool=pass", fetch_redirect_response=False
+        )
 
     def test_signout_get_not_allowed(self):
         """GET must not sign the user out (logout-CSRF protection)."""

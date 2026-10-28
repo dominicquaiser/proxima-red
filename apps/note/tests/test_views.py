@@ -199,6 +199,13 @@ class RetrieveNoteViewTests(TestCase):
 
         self.assertNotContains(response, "not end-to-end encrypted")
 
+    def test_header_auth_links_land_on_the_note_vault(self):
+        """Signing up from a shared note must not end in the password vault."""
+        response = self.client.get(f"/{make_note().id}/", **NOTE_HOST)
+
+        self.assertContains(response, "https://proxima.red/auth/signup/?tool=note")
+        self.assertContains(response, "https://proxima.red/auth/signin/?tool=note")
+
     def test_plain_text_note_renders_raw_content_without_js(self):
         """A plain-text note is server-readable, so the <noscript> fallback
         shows its raw text (unformatted) for visitors without JavaScript."""

@@ -1,8 +1,8 @@
-"""Tests for the auth template context processor (``current_user``)."""
+"""Tests for the auth template context processors."""
 
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 
-from apps.auth.context_processors import current_user
+from apps.auth.context_processors import current_user, host_tool
 from apps.auth.tests.factories import create_user_with_password
 
 
@@ -36,3 +36,30 @@ class CurrentUserContextProcessorTests(TestCase):
         session = {"authenticated": True, "user_id": "99999999"}
         context = current_user(self._request(session))
         self.assertFalse(context["current_user"])
+
+
+@override_settings(
+    SITE_URL="https://proxima.red",
+    PASS_SITE_URL="https://pass.proxima.red",
+    NOTE_SITE_URL="https://note.proxima.red",
+    ALLOWED_HOSTS=["proxima.red", "pass.proxima.red", "note.proxima.red"],
+)
+class HostToolContextProcessorTests(SimpleTestCase):
+    """host_tool names the vault the shared header's auth links land on."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _host_tool(self, host):
+        return host_tool(self.factory.get("/", HTTP_HOST=host))["host_tool"]
+
+    def test_note_host_lands_on_the_note_vault(self):
+        self.assertEqual(self._host_tool("note.proxima.red"), "note")
+
+    def test_other_hosts_land_on_the_default_vault(self):
+        self.assertEqual(self._host_tool("pass.proxima.red"), "pass")
+        self.assertEqual(self._host_tool("proxima.red"), "pass")
+
+    def test_disallowed_host_falls_back_instead_of_raising(self):
+        """The error page for a junk Host header renders the same header."""
+        self.assertEqual(self._host_tool("evil.example"), "pass")

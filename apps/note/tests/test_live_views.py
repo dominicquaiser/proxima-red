@@ -169,6 +169,14 @@ class LiveNotePageViewTests(LiveViewTestCase):
         self.assertEqual(self.client.get(url, **PASS_HOST).status_code, 404)
         self.assertEqual(self.client.get(url, **MAIN_HOST).status_code, 404)
 
+    def test_header_auth_links_land_on_the_note_vault(self):
+        note = make_live_note()
+
+        response = self.client.get(reverse("note:live", args=[note.id]), **NOTE_HOST)
+
+        self.assertContains(response, "https://proxima.red/auth/signup/?tool=note")
+        self.assertContains(response, "https://proxima.red/auth/signin/?tool=note")
+
     def test_expired_note_is_deleted_and_shows_expired_page(self):
         note = make_live_note(expires_at=timezone.now() - timedelta(minutes=1))
 
