@@ -176,18 +176,31 @@
       caret.classList.add(CARET_VISIBLE_CLASS);
     }
 
+    function resetCaretBlink() {
+      // Restart at the visible frame on each edit or cursor movement.
+      caret.getAnimations().forEach(function (animation) {
+        animation.currentTime = 0;
+      });
+    }
+
+    function positionAndResetCaret() {
+      positionCaret();
+      resetCaretBlink();
+    }
+
     function enableCustomCaret() {
       textarea.classList.add(CUSTOM_CARET_CLASS);
-      window.requestAnimationFrame(positionCaret);
+      window.requestAnimationFrame(positionAndResetCaret);
     }
 
     textarea.addEventListener("focus", enableCustomCaret);
     textarea.addEventListener("blur", hideCaret);
+    textarea.addEventListener("keydown", resetCaretBlink);
     textarea.addEventListener("input", function () {
-      window.requestAnimationFrame(positionCaret);
+      window.requestAnimationFrame(positionAndResetCaret);
     });
-    textarea.addEventListener("click", positionCaret);
-    textarea.addEventListener("keyup", positionCaret);
+    textarea.addEventListener("click", positionAndResetCaret);
+    textarea.addEventListener("keyup", positionAndResetCaret);
     textarea.addEventListener("compositionstart", function () {
       composing = true;
       textarea.classList.remove(CUSTOM_CARET_CLASS);
@@ -198,7 +211,7 @@
       enableCustomCaret();
     });
     document.addEventListener("selectionchange", function () {
-      if (document.activeElement === textarea) positionCaret();
+      if (document.activeElement === textarea) positionAndResetCaret();
     });
     editor.addEventListener("scroll", positionCaret, { passive: true });
     window.addEventListener("resize", positionCaret);

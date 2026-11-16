@@ -93,7 +93,7 @@
   // Disable raw author HTML by rendering it as text before sanitization.
   window.marked.use({
     gfm: true,
-    breaks: false,
+    breaks: true,
     renderer: {
       html(token) {
         return escapeHtml(token.text);

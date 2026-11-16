@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A failed vault save now restores what is actually stored instead of overwriting newer changes. A new `[pass·]` share whose vault save fails is revoked rather than left live without a vault entry.
 - Changes made while a vault is still loading are refused instead of replacing everything stored.
 - Restoring a `[note·]` vault note during a pending save no longer leaves it scheduled for automatic deletion. Trash operations, including folder deletions, now finish in order.
+- `[note·]` preserves line breaks in previews and shared notes instead of collapsing them into spaces.
+- The `[note·]` editor cursor stays visible while typing or moving it; blinking resumes when editing pauses.
 - Opening a password share removes the key from the address bar straight away, not only once the secret is revealed or copied.
 
 ## [2.0.0] — 2026-10-26
