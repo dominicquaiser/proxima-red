@@ -1,6 +1,7 @@
 /**
  * @fileoverview Logic for the share retrieve page (/<uuid>/).
- * Decrypts the secret on demand using the key from the URL fragment.
+ * Decrypts the secret on demand using the key from the URL fragment, which is
+ * removed from the address bar as soon as the page loads.
  */
 (function () {
   "use strict";
@@ -10,6 +11,16 @@
   const MASKED_SECRET = "*".repeat(32);
 
   document.addEventListener("DOMContentLoaded", () => {
+    // The key lives only in the URL fragment. Take it into memory and remove it
+    // from the address bar straight away, as note-view.js does: the title is
+    // decrypted on load, so waiting until the secret is revealed would leave
+    // the key in the URL and the browser history for anyone who only reads the
+    // title. Done before anything else so no early exit can skip it.
+    const keyBase64 = window.location.hash.slice(1);
+    if (keyBase64) {
+      history.replaceState(null, document.title, window.location.pathname);
+    }
+
     // --- State ---
     let decryptedText = null;
     let isDecrypted = false;
@@ -41,10 +52,6 @@
     const shareData = JSON.parse(shareDataElement.textContent);
     const { ciphertext, iv, encrypted_title, title_iv, expires_at } = shareData;
 
-    // The key lives only in the URL fragment. Capture it once up front so it is
-    // still available after decryptSecret() strips the fragment from the URL.
-    const keyBase64 = window.location.hash.slice(1);
-
     /**
      * Shows one UI state ('locked', 'decrypting', 'error') and hides the others.
      * @param {string} state
@@ -69,14 +76,18 @@
 
       showState("decrypting");
       try {
-        if (!keyBase64) throw new Error("No decryption key found in URL.");
+        if (!keyBase64) {
+          // Also what a reload shows, since the key left the URL on first load.
+          throw new Error(
+            "The decryption key is missing from the link. Open the complete link " +
+              "again, including everything after the # character.",
+          );
+        }
         if (!ciphertext || !iv) throw new Error("Encrypted data is missing.");
 
         const plaintext = await window.PasswordCrypto.decryptPassword(ciphertext, iv, keyBase64);
         decryptedText = plaintext;
         isDecrypted = true;
-
-        history.replaceState(null, document.title, window.location.pathname);
 
         showState("locked");
         return plaintext;

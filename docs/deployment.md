@@ -103,29 +103,29 @@ Docker Compose reads `.env` for two purposes: interpolating `${VAR}` references 
 
 ### Environment variables
 
-| Variable                        | Required    | Example                                        | Description                                                                                                                                                                                                                     |
-| ------------------------------- | ----------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SECRET_KEY`                    | **prod**    | _(50+ random chars)_                           | Django cryptographic key. Generate with the command below.                                                                                                                                                                      |
-| `DEBUG`                         | no          | `False`                                        | Never enable in production. Ignored by the dev settings (always `True`).                                                                                                                                                        |
-| `ALLOWED_HOSTS`                 | **prod**    | `proxima.red,pass.proxima.red,note.proxima.red` | Comma-separated hostnames Django will serve.                                                                                                                                                                                    |
-| `CSRF_TRUSTED_ORIGINS`          | **prod**    | `https://proxima.red,https://pass.proxima.red,https://note.proxima.red` | Comma-separated, **scheme-qualified** origins for cross-origin POSTs.                                                                                                                                                           |
-| `SITE_URL`                      | **prod**    | `https://proxima.red`                          | Canonical base URL of the main site (no trailing slash); the shared origin that serves the auth flow (sign in/up, account). Used in the `Content-Security-Policy` `form-action` directive.                                      |
-| `PASS_SITE_URL`                 | **prod**    | `https://pass.proxima.red`                     | Base URL of the vault subdomain (no trailing slash). After sign-in on `SITE_URL` the vault key is handed here in the redirect URL fragment. Used in CSP `connect-src` and `form-action`. Equal to `SITE_URL` for single-domain. |
-| `NOTE_SITE_URL`                 | **prod**    | `https://note.proxima.red`                     | Base URL of the note tool's subdomain (no trailing slash). Requests on this host are dispatched to the note editor / note retrieval. Used in CSP `form-action`. Equal to `SITE_URL` for single-domain.                          |
-| `SESSION_COOKIE_DOMAIN`         | no          | `.proxima.red`                                 | Cookie domain shared across subdomains (leading dot). Required when the vault runs on a different subdomain from the main site.                                                                                                 |
-| `DATABASE_URL`                  | **prod**    | `postgres://user:pass@db:5432/proximared`      | Django database DSN. Host is the Compose service name `db`.                                                                                                                                                                     |
-| `POSTGRES_DB`                   | yes         | `proximared`                                   | Database name created by the `db` container.                                                                                                                                                                                    |
-| `POSTGRES_USER`                 | yes         | `proximared`                                   | Database role.                                                                                                                                                                                                                  |
-| `POSTGRES_PASSWORD`             | yes         | _(strong password)_                            | Database password. Must match `DATABASE_URL`.                                                                                                                                                                                   |
-| `CONN_MAX_AGE`                  | no          | `60`                                           | Max age of DB connections in seconds (production only). Defaults to `60`.                                                                                                                                                       |
-| `DOMAIN`                        | **prod**    | `proxima.red`                                  | Primary domain; used by nginx for the certificate and default vhost.                                                                                                                                                            |
-| `CERTBOT_EMAIL`                 | **prod**    | `admin@example.com`                            | Contact address for Let's Encrypt expiry notices.                                                                                                                                                                               |
-| `RATELIMIT_TRUSTED_PROXY_COUNT` | no          | `1`                                            | Trusted reverse-proxy hops for reading the real client IP from `X-Forwarded-For`. Production defaults to `1` (nginx); raise for each additional proxy layer (e.g. a CDN).                                                       |
-| `REDIS_URL`                     | no          | `redis://redis:6379/0`                         | Rate-limit counter cache. Defaults to the bundled `redis` service.                                                                                                                                                              |
-| `CHANNEL_REDIS_URL`             | no          | `redis://redis-channels:6379/0`                | Channel layer for WebSocket fan-out (live-note sync). Defaults to the bundled `redis-channels` service; keep it on a `noeviction` instance.                                                                                     |
-| `GUNICORN_WORKERS`              | no          | `3`                                            | Worker process count (uvicorn ASGI workers under gunicorn). Defaults to `(2 × CPU cores) + 1`.                                                                                                                                  |
-| `GUNICORN_TIMEOUT`              | no          | `60`                                           | Worker timeout in seconds. Defaults to `60`.                                                                                                                                                                                    |
-| `STAGING`                       | no (script) | `1`                                            | When set for `init-letsencrypt.sh`, uses the Let's Encrypt staging CA.                                                                                                                                                          |
+| Variable | Required | Example | Description |
+| --- | --- | --- | --- |
+| `SECRET_KEY` | **prod** | _(50+ random chars)_ | Django cryptographic key. Generate with the command below. |
+| `DEBUG` | no | `False` | Never enable in production. Ignored by the dev settings (always `True`). |
+| `ALLOWED_HOSTS` | **prod** | `proxima.red,pass.proxima.red,note.proxima.red` | Comma-separated hostnames Django will serve. |
+| `CSRF_TRUSTED_ORIGINS` | **prod** | `https://proxima.red,https://pass.proxima.red,https://note.proxima.red` | Comma-separated, **scheme-qualified** origins for cross-origin POSTs. |
+| `SITE_URL` | **prod** | `https://proxima.red` | Canonical base URL of the main site (no trailing slash); the shared origin that serves the auth flow (sign in/up, account). Used in the `Content-Security-Policy` `form-action` directive. |
+| `PASS_SITE_URL` | **prod** | `https://pass.proxima.red` | Base URL of the vault subdomain (no trailing slash). After sign-in on `SITE_URL` the vault key is handed here in the redirect URL fragment. Used in CSP `connect-src` and `form-action`. Equal to `SITE_URL` for single-domain. |
+| `NOTE_SITE_URL` | **prod** | `https://note.proxima.red` | Base URL of the note tool's subdomain (no trailing slash). Requests on this host are dispatched to the note editor / note retrieval. Used in CSP `form-action`. Equal to `SITE_URL` for single-domain. |
+| `SESSION_COOKIE_DOMAIN` | no | `.proxima.red` | Cookie domain shared across subdomains (leading dot). Required when the vault runs on a different subdomain from the main site. |
+| `DATABASE_URL` | **prod** | `postgres://user:pass@db:5432/proximared` | Django database DSN. Host is the Compose service name `db`. |
+| `POSTGRES_DB` | yes | `proximared` | Database name created by the `db` container. |
+| `POSTGRES_USER` | yes | `proximared` | Database role. |
+| `POSTGRES_PASSWORD` | yes | _(strong password)_ | Database password. Must match `DATABASE_URL`. |
+| `CONN_MAX_AGE` | no | `60` | Max age of DB connections in seconds (production only). Defaults to `60`. |
+| `DOMAIN` | **prod** | `proxima.red` | Primary domain; used by nginx for the certificate and default vhost. |
+| `CERTBOT_EMAIL` | **prod** | `admin@example.com` | Contact address for Let's Encrypt expiry notices. |
+| `RATELIMIT_TRUSTED_PROXY_COUNT` | no | `1` | Trusted reverse-proxy hops for reading the real client IP from `X-Forwarded-For`. Production defaults to `1` (nginx); raise for each additional proxy layer (e.g. a CDN). |
+| `REDIS_URL` | no | `redis://redis:6379/0` | Rate-limit counter cache. Defaults to the bundled `redis` service. |
+| `CHANNEL_REDIS_URL` | no | `redis://redis-channels:6379/0` | Channel layer for WebSocket fan-out (live-note sync). Defaults to the bundled `redis-channels` service; keep it on a `noeviction` instance. |
+| `GUNICORN_WORKERS` | no | `3` | Worker process count (uvicorn ASGI workers under gunicorn). Defaults to `(2 × CPU cores) + 1`. |
+| `GUNICORN_TIMEOUT` | no | `60` | Worker timeout in seconds. Defaults to `60`. |
+| `STAGING` | no (script) | `1` | When set for `init-letsencrypt.sh`, uses the Let's Encrypt staging CA. |
 
 > `DJANGO_SETTINGS_MODULE` is **not** set in `.env` — each Compose service selects the correct settings module itself (development vs production).
 
@@ -437,6 +437,23 @@ dcp run --rm web python manage.py delete_expired --dry-run
 dcp run --rm web python manage.py delete_expired --statistics
 dcp run --rm web python manage.py delete_expired_notes --dry-run
 ```
+
+### Takedown requests
+
+A removal request identifies a share or note by its link. The UUID in the link's path is its ID; the key after `#` never reaches the server and isn't needed. Preview with `--dry-run`, then delete:
+
+```bash
+# Password share: https://pass.…/<uuid>/#key
+dcp run --rm web python manage.py delete_share <uuid> --dry-run
+dcp run --rm web python manage.py delete_share <uuid>
+
+# Shared note: https://note.…/<uuid>/ (plus #key when encrypted)
+# Live note:   https://note.…/live/<uuid>/#key
+dcp run --rm web python manage.py delete_note <uuid> --dry-run
+dcp run --rm web python manage.py delete_note <uuid>
+```
+
+Both commands print metadata only (kind, creation and expiry time, access count), never contents. A plain-text note is the only content the server can read; to check an encrypted share or note before removing it, open the reported link.
 
 ### TLS certificate renewal
 

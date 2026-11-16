@@ -56,6 +56,9 @@
   // Label restored on the create-modal submit button when it is idle.
   const CREATE_LINK_LABEL = "Create Encrypted Link";
 
+  // Shown when a change is attempted before the stored links have loaded.
+  const VAULT_LOADING_MESSAGE = "Your saved links are still loading. Try again in a moment.";
+
   // Tag constraints. Tags live inside the encrypted vault blob (one normalized,
   // lower-cased string each); these bound their length and per-share count.
   const MAX_TAG_LENGTH = 24;
@@ -164,12 +167,10 @@
     const deleteEndpoint = mainContent?.dataset.deleteUrl || DELETE_ENDPOINT;
 
     // --- State ---
+    // The shown share list. While the vault is loaded only `saves` (see
+    // Persistence) assigns it, so what is on screen is what gets saved.
     let userShares = [];
     let masterKey = null;
-    let isPersisting = false;
-    // Bumped by every lock, so a save that was in flight when the vault locked
-    // knows its rollback snapshot is decrypted data that must not come back.
-    let lockEpoch = 0;
     let isCopyingLink = false;
     let armedRemoveBtn = null;
     let armedRemoveTimer = null;
@@ -427,10 +428,12 @@
     // --- Persistence ---
 
     // Fetch the encrypted vault blob from the server (it is no longer embedded in
-    // the page) and decrypt it under the session key. A failed fetch disables the
-    // vault rather than rendering an empty one, so a transient error can't lead to
-    // a later save overwriting the stored blob with nothing; an empty payload (no
-    // blob stored yet) renders an empty vault normally.
+    // the page), decrypt it under the session key, and hand it to `saves`. No
+    // save is accepted before that: one sent from the empty pre-load list would
+    // replace every stored link. A failed fetch disables the vault rather than
+    // rendering an empty one, so a transient error can't lead to a later save
+    // overwriting the stored blob with nothing; an empty payload (no blob stored
+    // yet) loads an empty vault normally.
     const loadSavedShares = async () => {
       const loadKey = masterKey;
       if (!masterKey) {
@@ -462,48 +465,45 @@
       // success is guaranteed by the check above; only the data fields are
       // still in question, and their absence just means an empty vault.
       if (!blob.encrypted_data || !blob.iv) {
-        renderShares();
+        saves.load([]);
         return;
       }
 
+      let shares;
       try {
         const decrypted = await window.AuthCrypto.decryptAccountData(
           blob.encrypted_data,
           blob.iv,
           loadKey,
         );
-        if (loadKey !== masterKey) return;
-        userShares = Array.isArray(decrypted?.shares) ? decrypted.shares : [];
-        userShares.forEach((share) => {
-          share.tags = normalizeTagList(share.tags);
-        });
+        shares = Array.isArray(decrypted?.shares) ? decrypted.shares : [];
       } catch (error) {
+        if (loadKey !== masterKey) return;
         console.error("Failed to decrypt saved vault data:", error);
-        userShares = [];
+        shares = [];
         window.Notify.show(
           "Could not decrypt your saved links. You may need to resave them.",
           "error",
         );
       }
+      if (loadKey !== masterKey) return;
 
-      renderShares();
+      shares.forEach((share) => {
+        share.tags = normalizeTagList(share.tags);
+      });
+      saves.load(shares);
     };
 
-    const persistUserShares = async () => {
+    // Encrypt and save one whole share list. Only `saves` calls this, one save
+    // at a time; it reports failures itself and resolves to whether the server
+    // accepted the list.
+    const persistUserShares = async (shares) => {
       if (!masterKey) {
         return false;
       }
-      if (isPersisting) {
-        return true;
-      }
-
-      isPersisting = true;
 
       try {
-        const encryptedPayload = await window.AuthCrypto.encryptAccountData(
-          { shares: userShares },
-          masterKey,
-        );
+        const encryptedPayload = await window.AuthCrypto.encryptAccountData({ shares }, masterKey);
 
         if (!window.Http.getCsrfToken()) {
           throw new Error("Missing CSRF token");
@@ -533,29 +533,26 @@
           window.Notify.show("We could not save your vault data. Please try again.", "error");
         }
         return false;
-      } finally {
-        isPersisting = false;
       }
     };
 
-    // Apply an optimistic change to userShares and persist it, rolling back and
-    // re-rendering if the encrypted vault blob fails to save. `mutate` returns the
-    // new shares array; resolves to whether the change was persisted. A lock
-    // during the save has already cleared the list, so the rollback is skipped:
-    // the unlock reloads the shares from the server instead.
-    const commitShareChange = async (mutate) => {
-      const previousShares = userShares;
-      const epoch = lockEpoch;
-      userShares = mutate(userShares);
-      renderShares();
-
-      const persisted = await persistUserShares();
-      if (!persisted && epoch === lockEpoch) {
-        userShares = previousShares;
+    // Every save replaces the whole encrypted list, so saves go through one
+    // queue (static/shared/js/save-queue.js): one at a time, a change made
+    // during a save is sent right after it, and a failed save restores the
+    // last list the server accepted. The lock clears it via saves.reset().
+    const saves = window.SaveQueue.create({
+      persist: persistUserShares,
+      show: (shares) => {
+        userShares = shares;
         renderShares();
-      }
-      return persisted;
-    };
+      },
+    });
+
+    // Show a change at once and save it. `mutate` returns the new shares array
+    // and must leave its input unchanged; resolves to whether the server
+    // accepted a vault that includes the change (false also before the vault
+    // has loaded, which callers check up front where it matters).
+    const commitShareChange = (mutate) => saves.commit(mutate);
 
     // --- Event handlers ---
 
@@ -566,6 +563,12 @@
 
       if (!masterKey) {
         window.Notify.show("Secure session missing. Please sign in again.", "error");
+        return;
+      }
+      // Checked before the share exists server-side: once created, a share the
+      // vault can't save has to be revoked again (see below).
+      if (!saves.ready) {
+        window.Notify.show(VAULT_LOADING_MESSAGE, "info");
         return;
       }
       if (!shareFormController) {
@@ -608,6 +611,12 @@
         // Optimistically add the share, rolling back if the vault blob won't persist.
         const persisted = await commitShareChange((shares) => [newShare, ...shares]);
         if (!persisted) {
+          // The vault entry was the only place this share's key was kept, so
+          // revoke the share rather than leave a live link nobody can see,
+          // copy, or revoke.
+          if (!(await revokeShare(newShare.id))) {
+            console.error("Could not revoke a share that was not saved to the vault:", newShare.id);
+          }
           return;
         }
 
@@ -835,9 +844,20 @@
             );
             return;
           }
+          if (!saves.ready) {
+            window.Notify.show(VAULT_LOADING_MESSAGE, "info");
+            return;
+          }
           openModal();
         });
       }
+
+      // A change on screen is only stored once its save has finished.
+      window.addEventListener("beforeunload", (event) => {
+        if (!saves.busy) return;
+        event.preventDefault();
+        event.returnValue = "";
+      });
 
       if (modalClose) {
         modalClose.addEventListener("click", closeModal);
@@ -933,7 +953,10 @@
         tool: "pass",
         userId: document.getElementById("unlock-modal").dataset.userId,
         onLock: () => {
-          lockEpoch++;
+          // Drops changes not yet sent, and keeps a save still running from
+          // restoring anything: the decrypted list must not come back while
+          // locked. Unlocking loads it afresh.
+          saves.reset();
           document.getElementById("main-content").inert = true;
           masterKey = null;
           userShares = [];

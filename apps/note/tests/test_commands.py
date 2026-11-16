@@ -1,9 +1,17 @@
-"""Tests for the delete_expired_notes management command."""
+"""
+Tests for the note app's management commands.
 
+Covers delete_expired_notes (the scheduled sweeps) and delete_note (single-note
+takedown removal).
+"""
+
+import uuid
 from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -161,3 +169,117 @@ class DeleteTrashedVaultNotesCommandTests(TestCase):
         self.due.delete()
         output = run_command()
         self.assertIn("No expired trashed vault notes to delete.", output)
+
+
+def run_delete_note(*args, **kwargs):
+    """Run delete_note and return its stdout."""
+    out = StringIO()
+    call_command("delete_note", *args, stdout=out, **kwargs)
+    return out.getvalue()
+
+
+class DeleteNoteCommandTests(TestCase):
+    """delete_note: takedown removal of one shared or live note by its UUID."""
+
+    def test_deletes_a_plain_text_shared_note(self):
+        note = make_plain_note()
+
+        output = run_delete_note(str(note.pk))
+
+        self.assertFalse(SharedNote.objects.filter(pk=note.pk).exists())
+        self.assertIn(f"Successfully deleted plain-text shared note {note.pk}.", output)
+
+    def test_deletes_an_encrypted_shared_note(self):
+        note = make_note()
+
+        output = run_delete_note(str(note.pk))
+
+        self.assertFalse(SharedNote.objects.filter(pk=note.pk).exists())
+        self.assertIn(f"Successfully deleted encrypted shared note {note.pk}.", output)
+
+    def test_deletes_a_live_note_with_its_updates(self):
+        note = make_live_note()
+        make_live_update(note)
+        kept = make_live_update(make_live_note())
+
+        output = run_delete_note(str(note.pk))
+
+        self.assertFalse(LiveNote.objects.filter(pk=note.pk).exists())
+        self.assertEqual(
+            list(LiveNoteUpdate.objects.values_list("pk", flat=True)), [kept.pk]
+        )
+        self.assertIn(f"Successfully deleted live note {note.pk}.", output)
+
+    def test_deletes_only_the_named_note(self):
+        target = make_plain_note()
+        other_note = make_plain_note()
+        other_live = make_live_note()
+
+        run_delete_note(str(target.pk))
+
+        self.assertTrue(SharedNote.objects.filter(pk=other_note.pk).exists())
+        self.assertTrue(LiveNote.objects.filter(pk=other_live.pk).exists())
+
+    def test_dry_run_does_not_delete(self):
+        note = make_plain_note()
+
+        output = run_delete_note(str(note.pk), "--dry-run")
+
+        self.assertTrue(SharedNote.objects.filter(pk=note.pk).exists())
+        self.assertIn(f"DRY RUN: Would delete plain-text shared note {note.pk}.", output)
+
+    def test_invalid_uuid_raises(self):
+        with self.assertRaisesMessage(CommandError, "not a valid note UUID"):
+            run_delete_note("not-a-uuid")
+
+    def test_unknown_uuid_raises(self):
+        with self.assertRaisesMessage(CommandError, "No shared note or live note found"):
+            run_delete_note(str(uuid.uuid4()))
+
+    def test_vault_notes_are_never_matched(self):
+        """Vault notes have no public link, so no takedown id can reach one."""
+        vault_note = make_vault_note(create_user_with_password("correct horse battery staple"))
+
+        with self.assertRaises(CommandError):
+            run_delete_note(str(vault_note.pk))
+
+        self.assertTrue(VaultNote.objects.filter(pk=vault_note.pk).exists())
+
+    def test_output_never_includes_note_content(self):
+        """Metadata only: neither a plain-text body nor ciphertext is printed."""
+        body = "MARKER-reported-plain-text-body"
+        plain = make_plain_note(content=body)
+        live = make_live_note()
+
+        output = run_delete_note(str(plain.pk), "--dry-run")
+        output += run_delete_note(str(live.pk), "--dry-run")
+
+        self.assertNotIn(body, output)
+        self.assertNotIn(live.snapshot, output)
+        self.assertIn(f"Plain-text shared note {plain.pk} | created", output)
+        self.assertIn(f"Live note {live.pk} | created", output)
+
+    def test_verbosity_zero_deletes_silently(self):
+        note = make_plain_note()
+
+        output = run_delete_note(str(note.pk), verbosity=0)
+
+        self.assertFalse(SharedNote.objects.filter(pk=note.pk).exists())
+        self.assertEqual(output, "")
+
+    def test_dry_run_verbosity_zero_is_silent(self):
+        note = make_live_note()
+
+        output = run_delete_note(str(note.pk), "--dry-run", verbosity=0)
+
+        self.assertTrue(LiveNote.objects.filter(pk=note.pk).exists())
+        self.assertEqual(output, "")
+
+    def test_deletion_error_is_wrapped_as_command_error(self):
+        note = make_plain_note()
+
+        with patch.object(SharedNote, "delete", side_effect=RuntimeError("db down")):
+            with self.assertRaisesMessage(CommandError, "Error during deletion"):
+                run_delete_note(str(note.pk))
+
+        self.assertTrue(SharedNote.objects.filter(pk=note.pk).exists())

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `delete_note` management command for takedown requests: deletes one shared note or live note by the UUID in its link, as `delete_share` does for password shares (see *Takedown requests* in `docs/deployment.md`).
+
+### Fixed
+
+- **Vault changes could be lost.** `[pass·]` skipped a change made while another save was still running, so it was gone after a reload. `[note·]` could run two saves at once and keep the older one. Both vaults now save one change at a time and send changes made in the meantime right after.
+- A failed vault save now restores what is actually stored instead of overwriting newer changes. A new `[pass·]` share whose vault save fails is revoked rather than left live without a vault entry.
+- Changes made while a vault is still loading are refused instead of replacing everything stored.
+- Restoring a `[note·]` vault note during a pending save no longer leaves it scheduled for automatic deletion. Trash operations, including folder deletions, now finish in order.
+- Opening a password share removes the key from the address bar straight away, not only once the secret is revealed or copied.
+
 ## [2.0.0] — 2026-10-26
 
 Adds a second tool, **`[note·]`**, on the `note.` subdomain alongside `[pass·]`, and moves the server to ASGI. Existing deployments need the steps under *Upgrading*.

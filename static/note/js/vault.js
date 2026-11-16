@@ -4,6 +4,8 @@
  * Note content and the encrypted index are saved separately. Content writes
  * and permanent deletions precede index writes; reconciliation repairs drift
  * on load. Trash and restore use their own ordering to avoid premature deletion.
+ * Index saves are serialized through window.SaveQueue (save-queue.js), so a
+ * later change is never overwritten by an earlier save that lands last.
  */
 (function () {
   "use strict";
@@ -17,6 +19,7 @@
   const MENU_OFFSET_PX = 4;
   const VIEWPORT_GUTTER_PX = 8;
   const UNREADABLE_ID_PREFIX_LENGTH = 8;
+  const VAULT_LOADING_MESSAGE = "Your vault is still loading. Try again in a moment.";
 
   document.addEventListener("DOMContentLoaded", function () {
     const main = document.getElementById("main-content");
@@ -54,6 +57,8 @@
     let isDirty = false;
     let isSaving = false;
     let searchTerm = "";
+    let trashChanges = Promise.resolve();
+    let pendingTrashChanges = 0;
 
     // Rows that cannot decrypt stay outside the index and can only be deleted.
     const unreadableIds = new Set();
@@ -109,8 +114,9 @@
 
     core.onInput(() => setDirty(core.getValue() !== lastSavedValue));
 
+    // Buffer edits, index saves, and Trash operations waiting for either write.
     window.addEventListener("beforeunload", (event) => {
-      if (!isDirty) return;
+      if (!isDirty && !saves.busy && pendingTrashChanges === 0) return;
       event.preventDefault();
       event.returnValue = "";
     });
@@ -358,19 +364,20 @@
     }
 
     /**
-     * Encrypt and save the current index.
+     * Encrypt and save one whole index. Only `saves` calls this, one save at a time.
      *
-     * Failures are reported and returned as false so callers can roll back.
+     * Failures are reported and returned as false so `saves` can roll back.
      *
+     * @param {VaultIndexData} idx Index to save.
      * @returns {Promise<boolean>} True when the server accepted the index.
      */
-    const persistIndex = async () => {
+    const persistIndex = async (idx) => {
       if (!masterKey || readOnly) return false;
       try {
         if (!window.Http.getCsrfToken()) {
           throw new Error("Missing CSRF token");
         }
-        const payload = await window.AuthCrypto.encryptAccountData(index, masterKey);
+        const payload = await window.AuthCrypto.encryptAccountData(idx, masterKey);
         const { response, result } = await window.Http.postForm(indexUrl, {
           encrypted_data: payload.encryptedData,
           iv: payload.iv,
@@ -387,23 +394,38 @@
       }
     };
 
+    // Every save replaces the whole encrypted index, so saves go through one
+    // queue (static/shared/js/save-queue.js): one at a time, a change made
+    // during a save is sent right after it, and a failed save restores the
+    // last index the server accepted. It accepts changes only after loadVault.
+    const saves = window.SaveQueue.create({
+      persist: persistIndex,
+      show: (idx) => {
+        index = idx;
+        // A failed save can restore an older name for the open note.
+        const openEntry = index.notes.find((note) => note.id === currentNoteId);
+        if (openEntry) currentName = openEntry.name;
+        renderTree();
+      },
+    });
+
     /**
-     * Render a new index immediately and restore the previous one if saving fails.
+     * Render an index change immediately and save it after any save in flight.
+     *
+     * A failed save restores the last index the server accepted. Changes are
+     * refused until the stored index has loaded: a save made from the empty
+     * pre-load index would replace the whole vault.
      *
      * @param {function(VaultIndexData): VaultIndexData} mutate Must leave its input unchanged.
-     * @returns {Promise<boolean>} True when the change was persisted.
+     * @returns {Promise<boolean>} True once the server accepted an index that
+     *   includes the change.
      */
-    const commitIndexChange = async (mutate) => {
-      const previousIndex = index;
-      index = mutate(index);
-      renderTree();
-
-      const persisted = await persistIndex();
-      if (!persisted) {
-        index = previousIndex;
-        renderTree();
+    const commitIndexChange = (mutate) => {
+      if (!saves.ready) {
+        if (!readOnly) window.Notify.show(VAULT_LOADING_MESSAGE, "info");
+        return Promise.resolve(false);
       }
-      return persisted;
+      return saves.commit(mutate);
     };
 
     /** Reset to an empty buffer with an unused default name and no server row. */
@@ -521,6 +543,11 @@
         window.Notify.show("Secure session missing. Please sign in again.", "error");
         return;
       }
+      // Checked before the row is written, since its index entry can't be saved yet.
+      if (!saves.ready) {
+        window.Notify.show(VAULT_LOADING_MESSAGE, "info");
+        return;
+      }
       if (isSaving) return;
 
       const text = core.getValue();
@@ -576,6 +603,27 @@
         window.Notify.show("Could not update Trash. Please try again.", "error");
         return false;
       }
+    };
+
+    /**
+     * Serialize whole Trash operations, including their server flag writes.
+     * Index saves alone can coalesce a trash and restore into one active index,
+     * then let the earlier trash's flag write run after the restore cleared it.
+     * Folder deletions and startup flag repairs must use this same ordering.
+     *
+     * @param {function(): Promise<void>} change Both writes in one operation.
+     * @returns {Promise<void>} Resolves after the operation finishes.
+     */
+    const queueTrashChange = (change) => {
+      pendingTrashChanges += 1;
+      const operation = trashChanges.then(change);
+      // A failed operation must not prevent later restores from running.
+      trashChanges = operation
+        .catch(() => {})
+        .finally(() => {
+          pendingTrashChanges -= 1;
+        });
+      return operation;
     };
 
     /**
@@ -664,9 +712,9 @@
       const row = treeEl.querySelector('[data-note-id="' + id + '"]');
       const entry = index.notes.find((note) => note.id === id);
       if (!row || !entry) return;
+      // `saves` updates currentName (and the breadcrumb) for the open note.
       startRename(row, entry.name, (value) => {
         commitIndexChange((idx) => Index.renameNote(idx, id, value));
-        if (id === currentNoteId) currentName = value;
       });
     };
 
@@ -773,43 +821,47 @@
      * @param {string} id UUID of the note to move to Trash.
      * @returns {Promise<void>} Resolves after index and server Trash updates are attempted.
      */
-    const moveNoteToTrash = async (id) => {
+    const moveNoteToTrash = (id) => {
       if (id === currentNoteId) {
         setDirty(false);
         startNewBuffer();
       }
-      // Index first, then the flag. The reverse order could leave a note the
-      // user still sees as active carrying a deletion flag.
-      if (await commitIndexChange((idx) => Index.trashNote(idx, id))) {
-        await setTrashed([id], true);
-      }
+      return queueTrashChange(async () => {
+        // Index first, then the flag. The reverse order could leave a note the
+        // user still sees as active carrying a deletion flag.
+        if (await commitIndexChange((idx) => Index.trashNote(idx, id))) {
+          await setTrashed([id], true);
+        }
+      });
     };
 
     /**
      * @param {string} id UUID of the note to restore.
      * @returns {Promise<void>} Resolves after attempting restoration or reporting a failure.
      */
-    const restoreTrashedNote = async (id) => {
-      // Clear the flag first: a note still in Trash is recoverable, while one
-      // the server still plans to delete is not.
-      if (await setTrashed([id], false)) {
-        await commitIndexChange((idx) => Index.restoreNote(idx, id));
-      }
-    };
+    const restoreTrashedNote = (id) =>
+      queueTrashChange(async () => {
+        // Clear the flag first: a note still in Trash is recoverable, while one
+        // the server still plans to delete is not.
+        if (await setTrashed([id], false)) {
+          await commitIndexChange((idx) => Index.restoreNote(idx, id));
+        }
+      });
 
     /**
      * @param {string} id Folder UUID; its active notes move to Trash.
      * @returns {Promise<void>} Resolves after attempting deletion or reporting a failure.
      */
-    const deleteFolderToTrash = async (id) => {
-      // Collect active note IDs before the folder is removed from the index.
-      const noteIdsToTrash = index.notes
-        .filter((note) => note.folderId === id && !note.trashed)
-        .map((note) => note.id);
-      if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
-        await setTrashed(noteIdsToTrash, true);
-      }
-    };
+    const deleteFolderToTrash = (id) =>
+      queueTrashChange(async () => {
+        // Collect active IDs when this operation starts, after earlier changes.
+        const noteIdsToTrash = index.notes
+          .filter((note) => note.folderId === id && !note.trashed)
+          .map((note) => note.id);
+        if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
+          await setTrashed(noteIdsToTrash, true);
+        }
+      });
 
     /** @param {string} id UUID of the active note whose actions to display. */
     const buildNoteCtxMenu = (id) => {
@@ -1091,17 +1143,22 @@
       const recovered = await recoverOrphanRows(outcome.orphanIds);
       if (recovered === null) return;
 
-      if (outcome.changed || recovered) await persistIndex();
+      // Changes are accepted from here on. The reconciled index is derived from
+      // what the server holds, so it is the restore point for failed saves even
+      // before the repair save below has landed.
+      saves.load(index);
+      if (outcome.changed || recovered) await commitIndexChange((idx) => idx);
       vaultLoaded = true;
       if (!isDirty) startNewBuffer();
       else renderTree();
 
       // The index is authoritative; repair interrupted Trash writes after rendering.
-      if (!readOnly) {
+      await queueTrashChange(async () => {
+        if (readOnly) return;
         const drift = Index.trashFlagDrift(index, serverNotes);
         await setTrashed(drift.trash, true);
         await setTrashed(drift.restore, false);
-      }
+      });
     };
 
     /**
