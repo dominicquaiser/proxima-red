@@ -13,7 +13,7 @@ from django.core.exceptions import DisallowedHost
 from django.http import HttpRequest
 from django.utils.functional import SimpleLazyObject
 
-from apps.core.hosts import is_note_site
+from apps.core.hosts import is_main_site, is_note_site
 
 from .constants import DEFAULT_VAULT_TOOL, VAULT_TOOL_NOTE
 from .services import get_user_by_id
@@ -42,15 +42,16 @@ def host_tool(request: HttpRequest) -> dict:
 
     Auth lives on the main site, so the shared header's Sign In / Sign Up
     links must say which vault the flow should land on: ``note`` on the note
-    host, the default everywhere else. The auth pages pass their own vetted
-    ``tool``, which the header prefers.
+    host and on the main site (which has no vault of its own), the default
+    everywhere else. The auth pages pass their own vetted ``tool``, which the
+    header prefers.
 
     ``get_host()`` raises ``DisallowedHost`` for a junk ``Host`` header, and
     the error page rendered for that request uses the same header, so it falls
     back to the default instead of turning a clean 400 into a 500.
     """
     try:
-        on_note_host = is_note_site(request)
+        leads_to_notes = is_note_site(request) or is_main_site(request)
     except DisallowedHost:
-        on_note_host = False
-    return {"host_tool": VAULT_TOOL_NOTE if on_note_host else DEFAULT_VAULT_TOOL}
+        leads_to_notes = False
+    return {"host_tool": VAULT_TOOL_NOTE if leads_to_notes else DEFAULT_VAULT_TOOL}
