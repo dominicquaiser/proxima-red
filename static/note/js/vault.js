@@ -39,10 +39,17 @@
     const crumbEl = document.getElementById("vault-crumb");
     const searchInput = document.getElementById("vault-search");
     const ctxMenu = document.getElementById("ctx-menu");
-    const saveBtn = document.getElementById("save-note-btn");
+    const saveButtons = document.querySelectorAll('[data-action="save"]');
     const sessionModal = document.getElementById("session-modal");
     const sessionDismissBtn = document.getElementById("session-dismiss-btn");
     const sessionReloadBtn = document.getElementById("session-reload-btn");
+
+    /** @param {boolean} disabled Whether both save controls should be disabled. */
+    function setSaveButtonsDisabled(disabled) {
+      saveButtons.forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
 
     const Index = window.NoteVaultIndex;
 
@@ -303,7 +310,7 @@
     const disableVault = (message) => {
       readOnly = true;
       if (message) permanentReadOnly = true;
-      if (saveBtn) saveBtn.disabled = true;
+      setSaveButtonsDisabled(true);
       if (message) window.Notify.show(message, "error");
     };
 
@@ -993,7 +1000,7 @@
       renderTree();
     });
 
-    saveBtn.addEventListener("click", saveNote);
+    saveButtons.forEach((button) => button.addEventListener("click", saveNote));
     document.addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -1182,7 +1189,7 @@
         onUnlock: async (key) => {
           masterKey = await window.AuthCrypto.importKeyFromBase64(key);
           readOnly = permanentReadOnly;
-          if (saveBtn) saveBtn.disabled = readOnly;
+          setSaveButtonsDisabled(readOnly);
           hideSessionExpired();
           if (!vaultLoaded && !readOnly) await loadVault();
         },

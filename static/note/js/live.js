@@ -52,6 +52,7 @@
     const rail = document.querySelector(".rail");
     const statusPill = document.getElementById("live-status");
     const countdown = document.getElementById("live-countdown");
+    const shareButton = document.getElementById("live-share-btn");
     if (!main || !textarea || !rail || !window.Y) return;
 
     const noteId = main.dataset.noteId;
@@ -77,6 +78,7 @@
       if (terminal) return;
       terminal = true;
       textarea.readOnly = true;
+      shareButton.disabled = true;
       paintStatus(kind);
       if (countdown && kind === "expired") countdown.textContent = "expired";
       if (countdownInterval) clearInterval(countdownInterval);
@@ -256,6 +258,20 @@
     checkSize(textarea.value);
     textarea.readOnly = false;
     textarea.placeholder = EDITOR_PLACEHOLDER;
+
+    const sharePopover = document.getElementById("share-pop");
+    const shareLinkInput = document.getElementById("live-share-link");
+    const shareUrl = new URL(window.location.href);
+    shareUrl.hash = fragmentKey;
+    sharePopover.addEventListener("beforetoggle", (event) => {
+      shareLinkInput.value = event.newState === "open" ? shareUrl.href : "";
+    });
+    window.ClipboardUtil.setupButton(
+      document.getElementById("live-copy-link"),
+      () => shareLinkInput.value,
+      { onError: () => window.Notify.show("Select the link to copy it manually.", "info") },
+    );
+    shareButton.disabled = false;
 
     // Presence is encrypted and WebSocket-only; polling mode silently ages out.
     if (window.NoteLivePresence) {

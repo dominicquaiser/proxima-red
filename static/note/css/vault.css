@@ -56,11 +56,6 @@
   -webkit-mask-image: url("/static/icons/phosphor/sign-out.svg");
 }
 
-.nicon--dots-three {
-  mask-image: url("/static/icons/phosphor/dots-three.svg");
-  -webkit-mask-image: url("/static/icons/phosphor/dots-three.svg");
-}
-
 .nicon--x {
   mask-image: url("/static/icons/phosphor/x.svg");
   -webkit-mask-image: url("/static/icons/phosphor/x.svg");
@@ -467,6 +462,10 @@ details:not([open]) > .tree__row .tree__icon--open {
   transition: left 0.25s cubic-bezier(0.2, 0, 0, 1);
 }
 
+.topbar__logo {
+  display: none;
+}
+
 body.note-vault.sidebar-collapsed .topbar {
   left: 0;
 }
@@ -558,4 +557,38 @@ body.note-vault.note-dirty .tool[data-action="save"] {
   line-height: 1.6;
   color: var(--color-putty);
   margin: 0 0 20px;
+}
+
+@media (max-width: 768px) {
+  .note-vault .topbar__logo {
+    display: flex;
+  }
+
+  .note-vault .topbar__sidebar-toggle {
+    position: static;
+    width: 44px;
+    height: 44px;
+  }
+
+  .note-vault .topbar__sidebar-toggle .nicon {
+    mask-image: url("/static/icons/phosphor/folder-open.svg");
+    -webkit-mask-image: url("/static/icons/phosphor/folder-open.svg");
+  }
+
+  .note-vault .topbar__crumb {
+    position: static;
+    flex: 1;
+    min-width: 0;
+    transform: none;
+  }
+
+  .note-vault .sidebar__top-actions {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .note-vault .topbar__crumb {
+    display: none;
+  }
 }
