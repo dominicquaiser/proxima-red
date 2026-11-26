@@ -13,30 +13,5 @@
     </svg>
     <span class="nicon nicon--pencil-simple-line hidden" aria-hidden="true"></span>
   </button>
-  <details class="mobile-menu" id="mobile-menu">
-    <summary class="header__menu-toggle" aria-label="Menu" title="Menu">
-      <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
-        <path d="M40 64h176M40 128h176M40 192h176" fill="none"
-          stroke="currentColor" stroke-linecap="round" stroke-width="16" />
-      </svg>
-    </summary>
-    <nav class="mobile-menu__panel" aria-label="Note options">
-      <a href="{{ note_site_url }}/" class="mobile-menu__link">Share a Note</a>
-      <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
-      {% if surface == "vault" or is_authenticated %}
-      <a href="{{ site_url }}/auth/account/" class="mobile-menu__link">Account</a>
-      {% if surface != "vault" %}
-      <a href="{{ note_site_url }}/vault/" class="mobile-menu__link">Note vault</a>
-      {% endif %}
-      {% else %}
-      <a href="{{ site_url }}/auth/signin/?tool=note" class="mobile-menu__link">Sign In</a>
-      <a href="{{ site_url }}/auth/signup/?tool=note" class="mobile-menu__link">Sign Up</a>
-      {% endif %}
-      <a href="{{ site_url }}/" class="mobile-menu__link">Home</a>
-      <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
-      <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
-      <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
-      <a href="https://github.com/dominicquaiser/proxima-red" class="mobile-menu__link">Source Code</a>
-    </nav>
-  </details>
+  {% include "partials/_mobile_menu.html" with menu_tool="note" %}
 </div>

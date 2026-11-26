@@ -391,9 +391,7 @@ main {
   flex-shrink: 0;
 }
 
-/* Mobile menu: A native <details> disclosure that replaces the footer on
-   narrow viewports. Works without JS; menu.js only adds Escape / outside-click.
-   The <details> wrapper is hidden until the media query below reveals it. */
+/* The native mobile disclosure replaces the footer on narrow viewports. */
 .mobile-menu {
   display: none;
 }
@@ -424,6 +422,23 @@ main {
   width: 22px;
   height: 22px;
 }
+.header__menu-line {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 0.2s cubic-bezier(0.2, 0, 0, 1),
+    opacity 0.2s ease;
+}
+.mobile-menu[open]:not(.mobile-menu--closing) .header__menu-line--top {
+  transform: translateY(64px) rotate(45deg);
+}
+.mobile-menu[open]:not(.mobile-menu--closing) .header__menu-line--middle {
+  opacity: 0;
+  transform: scaleX(0);
+}
+.mobile-menu[open]:not(.mobile-menu--closing) .header__menu-line--bottom {
+  transform: translateY(-64px) rotate(-45deg);
+}
 
 .mobile-menu__panel {
   position: fixed;
@@ -433,12 +448,13 @@ main {
   z-index: 99;
   display: flex;
   flex-direction: column;
-  background: var(--color-pitch-black-soft);
+  background: var(--color-pitch-black);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--color-oil-slick);
-  /* Closed/exit values. @starting-style + allow-discrete fade & slide the panel
-     in and out; browsers without support just show/hide it instantly. */
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   opacity: 0;
   transform: translateY(-8px);
   transition:
@@ -450,10 +466,19 @@ main {
   opacity: 1;
   transform: translateY(0);
 }
+.mobile-menu--animated .mobile-menu__panel {
+  transition: none;
+}
 @starting-style {
   .mobile-menu[open] .mobile-menu__panel {
     opacity: 0;
     transform: translateY(-8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-menu__panel,
+  .header__menu-line {
+    transition: none;
   }
 }
 .mobile-menu__link {

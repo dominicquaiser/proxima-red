@@ -689,6 +689,12 @@ body.note-editor {
   display: none;
 }
 
+.note-toolbar {
+  --toolbar-row-padding-block: 7px;
+  --toolbar-row-transition-duration: 0.24s;
+  --toolbar-row-transition: var(--toolbar-row-transition-duration) cubic-bezier(0.2, 0, 0, 1);
+}
+
 .nicon--dots-three {
   -webkit-mask-image: url("/static/icons/phosphor/dots-three.svg");
   mask-image: url("/static/icons/phosphor/dots-three.svg");
@@ -698,8 +704,9 @@ body.note-editor {
   body.note-editor {
     --rail-width: 0px;
     --bar-height: 56px;
-    --editor-inset: 10px;
+    --editor-inset: 16px;
     --toolbar-row-height: 50px;
+    --toolbar-row-shift: 3.5px;
   }
 
   .note-editor .header__auth,
@@ -800,7 +807,7 @@ body.note-editor {
     --keys-space: var(--toolbar-row-height);
   }
 
-  .mobile-note-editor:has(#note-extra-tools:not([hidden])) {
+  .mobile-note-editor:has(.note-toolbar--expanded) {
     --keys-space: calc(2 * var(--toolbar-row-height));
   }
 
@@ -809,20 +816,68 @@ body.note-editor {
     flex-direction: column-reverse;
     position: fixed;
     z-index: 85;
-    inset: calc(var(--visible-top) + var(--visible-height) - var(--keys-space)) 0 auto;
+    inset: auto 0 calc(100dvh - var(--visible-top, 0px) - var(--visible-height, 100dvh));
     background: var(--color-pitch-black);
   }
 
-  .note-toolbar__row:not([hidden]) {
+  .mobile-note-editor .note-toolbar::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 1px;
+    background: var(--color-oil-slick);
+    pointer-events: none;
+  }
+
+  .note-toolbar__row {
     display: grid;
-    grid-template-columns: repeat(8, minmax(0, 36px));
+    grid-template-columns: repeat(9, minmax(0, 1fr));
     align-items: center;
     justify-items: center;
     justify-content: center;
+    width: 100%;
+    max-width: 480px;
+    margin-inline: auto;
     height: var(--toolbar-row-height);
-    padding: 7px 4px;
+    padding: var(--toolbar-row-padding-block) 4px;
     gap: 7px;
-    border-top: 1px solid var(--color-oil-slick);
+    transition: padding var(--toolbar-row-transition);
+  }
+
+  /* Bias both rows toward their shared edge while keeping their heights fixed. */
+  .note-toolbar--expanded > .note-toolbar__row:first-child {
+    padding-block:
+      calc(var(--toolbar-row-padding-block) - var(--toolbar-row-shift))
+      calc(var(--toolbar-row-padding-block) + var(--toolbar-row-shift));
+  }
+
+  #note-extra-tools {
+    height: 0;
+    padding-block: 0;
+    opacity: 0;
+    visibility: hidden;
+    overflow: hidden;
+    pointer-events: none;
+    transition:
+      height var(--toolbar-row-transition),
+      padding var(--toolbar-row-transition),
+      opacity 0.16s ease,
+      visibility 0s linear var(--toolbar-row-transition-duration);
+  }
+
+  .note-toolbar--expanded #note-extra-tools {
+    height: var(--toolbar-row-height);
+    padding-block:
+      calc(var(--toolbar-row-padding-block) + var(--toolbar-row-shift))
+      calc(var(--toolbar-row-padding-block) - var(--toolbar-row-shift));
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition:
+      height var(--toolbar-row-transition),
+      padding var(--toolbar-row-transition),
+      opacity 0.16s ease 0.04s,
+      visibility 0s;
   }
 
   .note-toolbar .tool {
@@ -839,7 +894,6 @@ body.note-editor {
   }
 
   .note-toolbar .tool[data-symbol] {
-    color: var(--color-wheat);
     font: 18px monospace;
   }
 
@@ -866,9 +920,19 @@ body.note-editor {
   }
 }
 
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .note-toolbar__row,
+  #note-extra-tools {
+    transition: none;
+  }
+}
+
 @media (max-width: 359px) {
-  .note-toolbar__row:not([hidden]) {
-    grid-template-columns: repeat(8, 32px);
+  body.note-editor {
+    --toolbar-row-shift: 7px;
+  }
+
+  .note-toolbar__row {
     gap: 4px;
   }
 
@@ -878,8 +942,11 @@ body.note-editor {
 }
 
 @media (min-width: 480px) and (max-width: 768px) {
-  .note-toolbar__row:not([hidden]) {
-    grid-template-columns: repeat(8, 46px);
+  body.note-editor {
+    --toolbar-row-shift: 3px;
+  }
+
+  .note-toolbar__row {
     gap: 8px;
   }
 }

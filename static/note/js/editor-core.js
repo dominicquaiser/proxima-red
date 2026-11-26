@@ -15,6 +15,7 @@
   const CARET_VISIBLE_CLASS = "editor__caret--visible";
   const CARET_MIRROR_CLASS = "editor__text editor__caret-mirror";
   const OVER_LIMIT_CLASS = "meta--over";
+  const TOOLBAR_EXPANDED_CLASS = "note-toolbar--expanded";
   const MOBILE_EDITOR_QUERY = "(max-width: 768px)";
   // Ignore small visualViewport scale drift when deciding whether the page is zoomed.
   const MAX_UNZOOMED_SCALE_DELTA = 0.01;
@@ -249,8 +250,9 @@
    * @param {HTMLTextAreaElement} textarea Editable note source.
    * @param {HTMLElement} editor Scrolling editor container.
    * @param {function(): void} revealCaret Scroll the insertion point into view.
-   * @param {function(string|undefined): void} handleRailAction Run a toolbar action.
+   * @param {function(string|undefined): void} handleRailAction Run a shared editing action.
    * @param {function(): void} showEdit Switch to the editable source.
+   * @returns {void}
    */
   function setupMobileToolbar(textarea, editor, revealCaret, handleRailAction, showEdit) {
     const toolbar = document.getElementById("note-toolbar");
@@ -263,9 +265,20 @@
     const mobileMediaQuery = window.matchMedia(MOBILE_EDITOR_QUERY);
     const body = document.body;
 
+    /**
+     * Sync the toolbar layout and accessibility state for the animated row.
+     *
+     * @param {boolean} expanded Whether the extra tools are available.
+     * @returns {void}
+     */
     function setExpanded(expanded) {
-      extraTools.hidden = !expanded;
+      const collapsed = !expanded;
+      toolbar.classList.toggle(TOOLBAR_EXPANDED_CLASS, expanded);
+      // The row stays in the DOM for its exit animation. Disable it immediately.
+      extraTools.inert = collapsed;
+      extraTools.setAttribute("aria-hidden", String(collapsed));
       moreButton.setAttribute("aria-expanded", String(expanded));
+      if (collapsed && extraTools.contains(document.activeElement)) moreButton.focus();
       if (document.activeElement === textarea) revealCaret();
     }
 
@@ -307,9 +320,11 @@
       }
     }
 
-    moreButton.addEventListener("click", () => setExpanded(extraTools.hidden));
+    moreButton.addEventListener("click", () =>
+      setExpanded(!toolbar.classList.contains(TOOLBAR_EXPANDED_CLASS)),
+    );
     toolbar.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || extraTools.hidden) return;
+      if (event.key !== "Escape" || !toolbar.classList.contains(TOOLBAR_EXPANDED_CLASS)) return;
       setExpanded(false);
       moreButton.focus();
     });
