@@ -1,0 +1,52 @@
+{# menu_tool selects auth and vault destinations. Vault pages set surface to "vault". #}
+<details class="mobile-menu" id="mobile-menu">
+  <summary class="header__menu-toggle" aria-label="Menu" title="Menu">
+    <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
+      <path
+        class="header__menu-line header__menu-line--top"
+        d="M40 64h176"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="16"
+      />
+      <path
+        class="header__menu-line header__menu-line--middle"
+        d="M40 128h176"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="16"
+      />
+      <path
+        class="header__menu-line header__menu-line--bottom"
+        d="M40 192h176"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-width="16"
+      />
+    </svg>
+  </summary>
+  <nav class="mobile-menu__panel" aria-label="Site menu">
+    <a href="{{ note_site_url }}/" class="mobile-menu__link">Share a Note</a>
+    <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
+    {% if current_user or is_authenticated or surface == "vault" %}
+      <a href="{{ site_url }}/auth/account/" class="mobile-menu__link">Account</a>
+      {% if surface != "vault" %}
+        <a
+          href="{% if menu_tool == 'pass' %}{{ pass_site_url }}{% else %}{{ note_site_url }}{% endif %}/vault/"
+          class="mobile-menu__link"
+        >Vault</a>
+      {% endif %}
+    {% else %}
+      <a href="{{ site_url }}/auth/signin/?tool={{ menu_tool }}" class="mobile-menu__link">Sign In</a>
+      <a href="{{ site_url }}/auth/signup/?tool={{ menu_tool }}" class="mobile-menu__link">Sign Up</a>
+    {% endif %}
+    <a href="{{ site_url }}/" class="mobile-menu__link">Home</a>
+    <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
+    <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
+    <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
+    <a href="https://github.com/dominicquaiser/proxima-red" class="mobile-menu__link">Source Code</a>
+  </nav>
+</details>

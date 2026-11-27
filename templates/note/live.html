@@ -59,59 +59,6 @@
       </div>
 
       <div class="header__auth">
-        <details class="mobile-menu" id="mobile-menu">
-          <summary class="header__menu-toggle" aria-label="Menu">
-            <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
-              <line
-                x1="40"
-                y1="64"
-                x2="216"
-                y2="64"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="16"
-              />
-              <line
-                x1="40"
-                y1="128"
-                x2="216"
-                y2="128"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="16"
-              />
-              <line
-                x1="40"
-                y1="192"
-                x2="216"
-                y2="192"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="16"
-              />
-            </svg>
-          </summary>
-          <nav class="mobile-menu__panel" aria-label="Site menu">
-            <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
-            <a href="{{ note_site_url }}/" class="mobile-menu__link">Share a Note</a>
-            <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
-            <a href="https://github.com/dominicquaiser" class="mobile-menu__link">Source Code</a>
-            <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
-            <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
-            {% if is_authenticated %}
-            <a href="{{ site_url }}/vault/" class="mobile-menu__link">Vault</a>
-            {% else %}
-            <a href="{{ site_url }}/auth/signin/?tool=note" class="mobile-menu__link">Sign In</a>
-            <a href="{{ site_url }}/auth/signup/?tool=note" class="mobile-menu__link">Sign Up</a>
-            {% endif %}
-          </nav>
-        </details>
         {% if is_authenticated %}
         <a href="{{ site_url }}/vault/" class="header__btn header__btn--outline">Vault</a>
         {% else %}
@@ -119,6 +66,7 @@
         <a href="{{ site_url }}/auth/signup/?tool=note" class="header__btn header__btn--solid">Sign Up</a>
         {% endif %}
       </div>
+      {% include "note/_mobile_controls.html" with surface="live" %}
     </header>
 
     {% comment %} Http.getCsrfToken() prefers this hidden field; in production
@@ -171,6 +119,8 @@
       <span class="meta__sep" aria-hidden="true">/</span>
       <span id="note-meta" aria-hidden="true"></span>
     </div>
+
+    {% include "note/_mobile_toolbar.html" with surface="live" %}
 
     <nav class="rail" aria-label="Formatting toolbar">
       <div class="rail__group">
@@ -242,6 +192,16 @@
       </div>
     </nav>
 
+    <div id="share-pop" class="share-pop" popover>
+      <div class="share-pop__title">Share this live note</div>
+      <div class="share-pop__link-row">
+        <input class="share-pop__link" id="live-share-link" type="text" readonly aria-label="Live note link" />
+        <button class="share-pop__copy" id="live-copy-link" type="button" title="Copy link">
+          <span class="nicon nicon--clipboard" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+
     <footer class="footer">
       <div class="footer__links">
         <a href="{{ pass_site_url }}/" class="footer__nav-link">Share a Password</a>
@@ -259,6 +219,7 @@
     </footer>
 
     {% include "partials/_util_scripts.html" %}
+    <script src="{% static 'shared/js/menu.js' %}" defer></script>
     <script src="{% static 'shared/js/crypto.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/yjs.min.js' %}" defer></script>
     <script src="{% static 'note/js/vendor/marked.min.js' %}" defer></script>

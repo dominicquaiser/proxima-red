@@ -1,0 +1,55 @@
+<div class="note-toolbar" id="note-toolbar">
+  <div class="note-toolbar__row" role="group" aria-label="Markdown keys">
+    <button class="tool" type="button" data-symbol="#" aria-label="Insert hash">#</button>
+    <button class="tool" type="button" data-symbol="-" aria-label="Insert hyphen">-</button>
+    <button class="tool" type="button" data-symbol="*" aria-label="Insert asterisk">*</button>
+    <button class="tool" type="button" data-symbol="`" aria-label="Insert backtick">`</button>
+    <button class="tool" type="button" data-symbol="&gt;" aria-label="Insert greater-than sign">&gt;</button>
+    <button class="tool" type="button" data-symbol="_" aria-label="Insert underscore">_</button>
+    <button class="tool" type="button" data-symbol="&#92;" aria-label="Insert backslash">&#92;</button>
+    <button class="tool tool--accent note-toolbar__share" type="button" popovertarget="share-pop"
+      {% if surface == "live" %}id="live-share-btn" disabled{% endif %}
+      aria-label="Share note" title="Share note">
+      <span class="nicon nicon--export" aria-hidden="true"></span>
+    </button>
+    <button class="tool note-toolbar__more" type="button" id="note-more-tools"
+      aria-expanded="false" aria-controls="note-extra-tools" aria-label="More tools" title="More tools">
+      <span class="nicon nicon--dots-three" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <div
+    class="note-toolbar__row"
+    id="note-extra-tools"
+    role="group"
+    aria-label="More editing tools"
+    aria-hidden="true"
+    inert
+  >
+    <button class="tool" type="button" data-action="redo" title="Redo">
+      <span class="nicon nicon--arrow-clockwise" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-action="undo" title="Undo">
+      <span class="nicon nicon--arrow-counter-clockwise" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-action="bullets" title="List">
+      <span class="nicon nicon--list-bullets" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-action="numbers" title="Numbered list">
+      <span class="nicon nicon--list-numbers" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-action="tasks" title="Task list">
+      <span class="nicon nicon--list-checks" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-action="quote" title="Blockquote">
+      <span class="nicon nicon--quotes" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-action="code" title="Code block">
+      <span class="nicon nicon--code" aria-hidden="true"></span>
+    </button>
+    <button class="tool" type="button" data-symbol="&#124;" aria-label="Insert pipe" title="Insert pipe">|</button>
+    <button class="tool note-toolbar__download" type="button" data-action="download" title="Download .md">
+      <span class="nicon nicon--download-simple" aria-hidden="true"></span>
+    </button>
+  </div>
+</div>

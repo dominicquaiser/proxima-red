@@ -53,12 +53,12 @@ class HostToolContextProcessorTests(SimpleTestCase):
     def _host_tool(self, host):
         return host_tool(self.factory.get("/", HTTP_HOST=host))["host_tool"]
 
-    def test_note_host_lands_on_the_note_vault(self):
+    def test_note_host_and_main_site_land_on_the_note_vault(self):
         self.assertEqual(self._host_tool("note.proxima.red"), "note")
+        self.assertEqual(self._host_tool("proxima.red"), "note")
 
-    def test_other_hosts_land_on_the_default_vault(self):
+    def test_pass_host_lands_on_the_default_vault(self):
         self.assertEqual(self._host_tool("pass.proxima.red"), "pass")
-        self.assertEqual(self._host_tool("proxima.red"), "pass")
 
     def test_disallowed_host_falls_back_instead_of_raising(self):
         """The error page for a junk Host header renders the same header."""

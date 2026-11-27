@@ -1,0 +1,17 @@
+<div class="note-controls">
+  {% if surface == "vault" %}
+  <button type="button" class="tool note-control" data-action="save"
+    aria-label="Save note" title="Save note">
+    <span class="nicon nicon--floppy-disk" aria-hidden="true"></span>
+  </button>
+  {% endif %}
+  <button type="button" class="tool note-control" id="note-mode"
+    aria-label="Preview note" title="Preview note" aria-controls="note-content note-preview">
+    <svg class="note-book" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 6C9 4 5 4 2 4.5v14c3-.5 7-.5 10 1.5 3-2 7-2 10-1.5v-14C19 4 15 4 12 6Zm0 0v14" />
+    </svg>
+    <span class="nicon nicon--pencil-simple-line hidden" aria-hidden="true"></span>
+  </button>
+  {% include "partials/_mobile_menu.html" with menu_tool="note" %}
+</div>

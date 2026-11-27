@@ -15,6 +15,13 @@
   const CARET_VISIBLE_CLASS = "editor__caret--visible";
   const CARET_MIRROR_CLASS = "editor__text editor__caret-mirror";
   const OVER_LIMIT_CLASS = "meta--over";
+  const TOOLBAR_EXPANDED_CLASS = "note-toolbar--expanded";
+  const TOOL_PRESSED_CLASS = "tool--pressed";
+  const TOOL_MIN_PRESS_MS = 85;
+  const MOBILE_EDITOR_QUERY = "(max-width: 768px)";
+  // Ignore small visualViewport scale drift when deciding whether the page is zoomed.
+  const MAX_UNZOOMED_SCALE_DELTA = 0.01;
+  const CARET_BOTTOM_GAP_PX = 6;
 
   // Client-side plaintext bound. Contract with the server: the Base64
   // ciphertext of this many UTF-8 bytes (+16-byte GCM tag) stays under
@@ -117,7 +124,8 @@
    * @param {HTMLTextAreaElement} textarea
    * @param {HTMLElement|null|undefined} caret
    * @param {HTMLElement|null|undefined} editor
-   * @returns {function(): void} Schedules a caret remeasure.
+   * @returns {function(boolean=): void} Schedules a caret remeasure, optionally
+   *   scrolling the mobile editor to reveal it.
    */
   function setupCustomCaret(textarea, caret, editor) {
     if (!caret || !editor) {
@@ -137,7 +145,7 @@
       caret.classList.remove(CARET_VISIBLE_CLASS);
     }
 
-    function positionCaret() {
+    function positionCaret(reveal = false) {
       if (
         composing ||
         document.activeElement !== textarea ||
@@ -156,7 +164,19 @@
       const markerRect = marker.getBoundingClientRect();
       const editorRect = editor.getBoundingClientRect();
       const left = markerRect.left - textarea.scrollLeft;
-      const top = markerRect.top - textarea.scrollTop;
+      let top = markerRect.top - textarea.scrollTop;
+
+      if (reveal === true && document.body.classList.contains("mobile-note-editor")) {
+        const previousScrollTop = editor.scrollTop;
+        const bottomOverflow =
+          top + markerRect.height + CARET_BOTTOM_GAP_PX - editorRect.bottom;
+        if (bottomOverflow > 0) {
+          editor.scrollTop += bottomOverflow;
+        } else if (top < editorRect.top) {
+          editor.scrollTop += top - editorRect.top;
+        }
+        top -= editor.scrollTop - previousScrollTop;
+      }
 
       // Keep the fixed overlay inside the editor when the insertion point has
       // scrolled behind the editor header or footer.
@@ -197,7 +217,10 @@
     textarea.addEventListener("blur", hideCaret);
     textarea.addEventListener("keydown", resetCaretBlink);
     textarea.addEventListener("input", function () {
-      window.requestAnimationFrame(positionAndResetCaret);
+      window.requestAnimationFrame(() => {
+        positionCaret(true);
+        resetCaretBlink();
+      });
     });
     textarea.addEventListener("click", positionAndResetCaret);
     textarea.addEventListener("keyup", positionAndResetCaret);
@@ -218,9 +241,163 @@
 
     if (document.activeElement === textarea) enableCustomCaret();
 
-    return function repositionCaret() {
-      window.requestAnimationFrame(positionCaret);
+    return function repositionCaret(reveal = false) {
+      window.requestAnimationFrame(() => positionCaret(reveal));
     };
+  }
+
+  /**
+   * Arrange the mobile editor and wire its editing toolbar.
+   *
+   * @param {HTMLTextAreaElement} textarea Editable note source.
+   * @param {HTMLElement} editor Scrolling editor container.
+   * @param {function(): void} revealCaret Scroll the insertion point into view.
+   * @param {function(string|undefined): void} handleRailAction Run a shared editing action.
+   * @param {function(): void} showEdit Switch to the editable source.
+   * @returns {void}
+   */
+  function setupMobileToolbar(textarea, editor, revealCaret, handleRailAction, showEdit) {
+    const toolbar = document.getElementById("note-toolbar");
+    const header = document.querySelector(".note-editor > .header, .note-editor > .topbar");
+    const headerParent = header.parentElement;
+    const headerNextSibling = header.nextSibling;
+    const moreButton = document.getElementById("note-more-tools");
+    const extraTools = document.getElementById("note-extra-tools");
+    const visualViewport = window.visualViewport;
+    const mobileMediaQuery = window.matchMedia(MOBILE_EDITOR_QUERY);
+    const body = document.body;
+    let pressedTool = null;
+
+    /**
+     * Sync the toolbar layout and accessibility state for the animated row.
+     *
+     * @param {boolean} expanded Whether the extra tools are available.
+     * @returns {void}
+     */
+    function setExpanded(expanded) {
+      const collapsed = !expanded;
+      toolbar.classList.toggle(TOOLBAR_EXPANDED_CLASS, expanded);
+      // The row stays in the DOM for its exit animation. Disable it immediately.
+      extraTools.inert = collapsed;
+      extraTools.setAttribute("aria-hidden", String(collapsed));
+      moreButton.setAttribute("aria-expanded", String(expanded));
+      if (collapsed && extraTools.contains(document.activeElement)) moreButton.focus();
+      if (document.activeElement === textarea) revealCaret();
+    }
+
+    function clearPress() {
+      if (!pressedTool) return;
+      window.clearTimeout(pressedTool.releaseTimer);
+      pressedTool.button.classList.remove(TOOL_PRESSED_CLASS);
+      pressedTool = null;
+    }
+
+    function startPress(button, pointerId = null) {
+      clearPress();
+      pressedTool = { button, pointerId, startedAt: performance.now() };
+      button.classList.add(TOOL_PRESSED_CLASS);
+    }
+
+    function releasePress() {
+      // Let quick taps show the pressed state for a few frames.
+      const heldFor = performance.now() - pressedTool.startedAt;
+      const remaining = Math.max(0, TOOL_MIN_PRESS_MS - heldFor);
+      pressedTool.releaseTimer = window.setTimeout(clearPress, remaining);
+    }
+
+    function updateMobileLayout() {
+      const zoomed =
+        visualViewport && Math.abs(visualViewport.scale - 1) > MAX_UNZOOMED_SCALE_DELTA;
+      const active = mobileMediaQuery.matches && !zoomed;
+
+      if (mobileMediaQuery.matches && header.parentElement !== editor) {
+        editor.prepend(header);
+      }
+      if (!mobileMediaQuery.matches && header.parentElement === editor) {
+        headerParent.insertBefore(header, headerNextSibling);
+      }
+      body.classList.toggle("mobile-note-editor", active);
+      if (!active) {
+        clearPress();
+        body.style.removeProperty("--visible-height");
+        body.style.removeProperty("--visible-top");
+        return;
+      }
+
+      body.style.setProperty(
+        "--visible-height",
+        (visualViewport?.height ?? window.innerHeight) + "px",
+      );
+      body.style.setProperty("--visible-top", (visualViewport?.offsetTop ?? 0) + "px");
+      if (document.activeElement === textarea) revealCaret();
+    }
+
+    /** @param {string} symbol Markdown character to insert at the selection. */
+    function insertSymbol(symbol) {
+      showEdit();
+      textarea.focus({ preventScroll: true });
+
+      // Both paths emit input, so live sync and vault dirty tracking see the edit.
+      if (!document.execCommand?.("insertText", false, symbol)) {
+        textarea.setRangeText(symbol, textarea.selectionStart, textarea.selectionEnd, "end");
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+
+    moreButton.addEventListener("click", () =>
+      setExpanded(!toolbar.classList.contains(TOOLBAR_EXPANDED_CLASS)),
+    );
+    toolbar.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !toolbar.classList.contains(TOOLBAR_EXPANDED_CLASS)) return;
+      setExpanded(false);
+      moreButton.focus();
+    });
+
+    toolbar.addEventListener("pointerdown", (event) => {
+      const button = event.target.closest("button.tool:enabled");
+      if (!button) return;
+
+      // Editing tools leave the insertion point and IME attached. Sharing
+      // lets the browser move focus into the popover.
+      if (document.activeElement === textarea && !button.hasAttribute("popovertarget")) {
+        event.preventDefault();
+      }
+      if (event.isPrimary && event.button === 0) startPress(button, event.pointerId);
+    });
+    window.addEventListener("pointerup", (event) => {
+      if (event.pointerId === pressedTool?.pointerId) releasePress();
+    });
+    window.addEventListener("pointercancel", (event) => {
+      if (event.pointerId === pressedTool?.pointerId) clearPress();
+    });
+    window.addEventListener("blur", clearPress);
+
+    toolbar.addEventListener("click", (event) => {
+      const button = event.target.closest("button.tool:enabled");
+      if (!button) return;
+
+      // Keyboard and assistive clicks arrive without a pointer press.
+      if (event.detail === 0) {
+        startPress(button);
+        releasePress();
+      }
+
+      const { action, symbol } = button.dataset;
+      if (action) {
+        handleRailAction(action);
+        if (document.activeElement === textarea) revealCaret();
+        return;
+      }
+
+      if (!symbol || textarea.readOnly || textarea.disabled) return;
+      insertSymbol(symbol);
+    });
+
+    textarea.addEventListener("focus", updateMobileLayout);
+    window.addEventListener("resize", updateMobileLayout);
+    visualViewport?.addEventListener("resize", updateMobileLayout);
+    visualViewport?.addEventListener("scroll", updateMobileLayout);
+    updateMobileLayout();
   }
 
   /** @returns {Object.<string, function(Object): ToolbarEdit>} */
@@ -327,21 +504,48 @@
     const toolbarActions = createToolbarActions();
     const repositionCaret = setupCustomCaret(textarea, caret, editor);
 
+    const modeButton = document.getElementById("note-mode");
+    let sourceScroll = 0;
+
+    function updateModeButton(previewing) {
+      const label = previewing ? "Edit note" : "Preview note";
+      modeButton.setAttribute("aria-label", label);
+      modeButton.title = label;
+      modeButton.querySelector(".note-book").classList.toggle(HIDDEN_CLASS, previewing);
+      modeButton.querySelector(".nicon").classList.toggle(HIDDEN_CLASS, !previewing);
+    }
+
     /** Render current markdown and display the preview tab. */
     function showPreview() {
+      sourceScroll = editor.scrollTop;
+      textarea.blur();
       window.NoteMarkdown.renderInto(preview, textarea.value);
       textarea.classList.add(HIDDEN_CLASS);
       preview.classList.remove(HIDDEN_CLASS);
       activateTab(tabPreview, tabEdit);
+      updateModeButton(true);
     }
 
     /** Display the editable markdown source tab. */
     function showEdit() {
+      const wasPreviewing = !preview.classList.contains(HIDDEN_CLASS);
       preview.classList.add(HIDDEN_CLASS);
       textarea.classList.remove(HIDDEN_CLASS);
       activateTab(tabEdit, tabPreview);
-      textarea.focus();
+      updateModeButton(false);
+      if (wasPreviewing) {
+        autosize();
+        editor.scrollTop = sourceScroll;
+      }
+      textarea.focus({ preventScroll: true });
     }
+
+    modeButton.addEventListener("click", () => {
+      if (preview.classList.contains(HIDDEN_CLASS)) showPreview();
+      else showEdit();
+    });
+
+    setupMobileToolbar(textarea, editor, () => repositionCaret(true), handleRailAction, showEdit);
 
     tabEdit.addEventListener("click", showEdit);
     tabPreview.addEventListener("click", showPreview);
@@ -439,12 +643,14 @@
 
     /** @param {string|undefined} action */
     function handleRailAction(action) {
-      if (action === "undo" || action === "redo") {
-        handleHistoryAction(action);
-        return;
-      }
       if (action === "download") {
         downloadMarkdown();
+        return;
+      }
+      if (textarea.readOnly || textarea.disabled) return;
+      if (action === "undo" || action === "redo") {
+        showEdit();
+        handleHistoryAction(action);
         return;
       }
 

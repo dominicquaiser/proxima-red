@@ -42,12 +42,14 @@
         }
         .rail,
         .meta,
+        .note-control,
         .editor-tabs,
         #note-preview {
           display: none;
         }
-        .editor {
+        body.note-editor .editor {
           position: static;
+          height: auto;
           padding-left: 0;
         }
         /* No JS autosize/undo stack: give the textarea its own scroll and a
@@ -107,58 +109,10 @@
       </div>
 
       <div class="header__auth">
-        <details class="mobile-menu" id="mobile-menu">
-          <summary class="header__menu-toggle" aria-label="Menu">
-            <svg class="header__menu-icon" viewBox="0 0 256 256" aria-hidden="true">
-              <line
-                x1="40"
-                y1="64"
-                x2="216"
-                y2="64"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="16"
-              />
-              <line
-                x1="40"
-                y1="128"
-                x2="216"
-                y2="128"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="16"
-              />
-              <line
-                x1="40"
-                y1="192"
-                x2="216"
-                y2="192"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="16"
-              />
-            </svg>
-          </summary>
-          <nav class="mobile-menu__panel" aria-label="Site menu">
-            <a href="{{ pass_site_url }}/" class="mobile-menu__link">Share a Password</a>
-            <a href="{{ note_site_url }}/" class="mobile-menu__link">Share a Note</a>
-            <a href="{{ site_url }}/about/" class="mobile-menu__link">About</a>
-            <a href="https://github.com/dominicquaiser" class="mobile-menu__link">Source Code</a>
-            <a href="{{ site_url }}/imprint/" class="mobile-menu__link">Imprint</a>
-            <a href="{{ site_url }}/privacy/" class="mobile-menu__link">Privacy Policy</a>
-            <a href="{{ site_url }}/auth/signin/?tool=note" class="mobile-menu__link">Sign In</a>
-            <a href="{{ site_url }}/auth/signup/?tool=note" class="mobile-menu__link">Sign Up</a>
-          </nav>
-        </details>
         <a href="{{ site_url }}/auth/signin/?tool=note" class="header__btn header__btn--outline">Sign In</a>
         <a href="{{ site_url }}/auth/signup/?tool=note" class="header__btn header__btn--solid">Sign Up</a>
       </div>
+      {% include "note/_mobile_controls.html" with surface="public" %}
     </header>
 
     <main
@@ -259,6 +213,8 @@
     </main>
 
     <div class="meta" id="note-meta" aria-hidden="true"></div>
+
+    {% include "note/_mobile_toolbar.html" with surface="public" %}
 
     <nav class="rail" aria-label="Formatting toolbar">
       <div class="rail__group">
