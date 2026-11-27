@@ -34,6 +34,13 @@ body.note-editor .footer__links {
   flex: 1;
 }
 
+@media (max-width: 820px) {
+  body.note-editor .footer__links,
+  body.note-editor .footer__right {
+    column-gap: 12px;
+  }
+}
+
 @media (max-width: 768px) {
   body.note-editor .footer {
     display: none;
@@ -124,6 +131,27 @@ body.note-editor .footer__links {
 
 html:has(.note-view) {
   scroll-padding-top: 72px;
+}
+
+@media (max-width: 768px) {
+  body:has(> .note-view) > .header {
+    position: relative;
+    inset: auto;
+    flex-shrink: 0;
+  }
+
+  body:has(> .note-view) > .header .mobile-menu__panel {
+    position: absolute;
+    inset: 100% 0 auto;
+  }
+
+  html:has(.note-view) {
+    scroll-padding-top: 16px;
+  }
+
+  .note-view {
+    padding-top: 40px;
+  }
 }
 
 .note-view__banner {

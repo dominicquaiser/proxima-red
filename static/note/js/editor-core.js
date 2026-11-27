@@ -16,6 +16,8 @@
   const CARET_MIRROR_CLASS = "editor__text editor__caret-mirror";
   const OVER_LIMIT_CLASS = "meta--over";
   const TOOLBAR_EXPANDED_CLASS = "note-toolbar--expanded";
+  const TOOL_PRESSED_CLASS = "tool--pressed";
+  const TOOL_MIN_PRESS_MS = 85;
   const MOBILE_EDITOR_QUERY = "(max-width: 768px)";
   // Ignore small visualViewport scale drift when deciding whether the page is zoomed.
   const MAX_UNZOOMED_SCALE_DELTA = 0.01;
@@ -264,6 +266,7 @@
     const visualViewport = window.visualViewport;
     const mobileMediaQuery = window.matchMedia(MOBILE_EDITOR_QUERY);
     const body = document.body;
+    let pressedTool = null;
 
     /**
      * Sync the toolbar layout and accessibility state for the animated row.
@@ -282,6 +285,26 @@
       if (document.activeElement === textarea) revealCaret();
     }
 
+    function clearPress() {
+      if (!pressedTool) return;
+      window.clearTimeout(pressedTool.releaseTimer);
+      pressedTool.button.classList.remove(TOOL_PRESSED_CLASS);
+      pressedTool = null;
+    }
+
+    function startPress(button, pointerId = null) {
+      clearPress();
+      pressedTool = { button, pointerId, startedAt: performance.now() };
+      button.classList.add(TOOL_PRESSED_CLASS);
+    }
+
+    function releasePress() {
+      // Let quick taps show the pressed state for a few frames.
+      const heldFor = performance.now() - pressedTool.startedAt;
+      const remaining = Math.max(0, TOOL_MIN_PRESS_MS - heldFor);
+      pressedTool.releaseTimer = window.setTimeout(clearPress, remaining);
+    }
+
     function updateMobileLayout() {
       const zoomed =
         visualViewport && Math.abs(visualViewport.scale - 1) > MAX_UNZOOMED_SCALE_DELTA;
@@ -295,6 +318,7 @@
       }
       body.classList.toggle("mobile-note-editor", active);
       if (!active) {
+        clearPress();
         body.style.removeProperty("--visible-height");
         body.style.removeProperty("--visible-top");
         return;
@@ -330,26 +354,43 @@
     });
 
     toolbar.addEventListener("pointerdown", (event) => {
+      const button = event.target.closest("button.tool:enabled");
+      if (!button) return;
+
       // Editing tools leave the insertion point and IME attached. Sharing
       // lets the browser move focus into the popover.
-      if (
-        document.activeElement === textarea &&
-        event.target.closest("button:not([popovertarget])")
-      ) {
+      if (document.activeElement === textarea && !button.hasAttribute("popovertarget")) {
         event.preventDefault();
       }
+      if (event.isPrimary && event.button === 0) startPress(button, event.pointerId);
     });
+    window.addEventListener("pointerup", (event) => {
+      if (event.pointerId === pressedTool?.pointerId) releasePress();
+    });
+    window.addEventListener("pointercancel", (event) => {
+      if (event.pointerId === pressedTool?.pointerId) clearPress();
+    });
+    window.addEventListener("blur", clearPress);
+
     toolbar.addEventListener("click", (event) => {
-      const action = event.target.closest("[data-action]")?.dataset.action;
+      const button = event.target.closest("button.tool:enabled");
+      if (!button) return;
+
+      // Keyboard and assistive clicks arrive without a pointer press.
+      if (event.detail === 0) {
+        startPress(button);
+        releasePress();
+      }
+
+      const { action, symbol } = button.dataset;
       if (action) {
         handleRailAction(action);
         if (document.activeElement === textarea) revealCaret();
         return;
       }
 
-      const key = event.target.closest("[data-symbol]");
-      if (!key || textarea.readOnly || textarea.disabled) return;
-      insertSymbol(key.dataset.symbol);
+      if (!symbol || textarea.readOnly || textarea.disabled) return;
+      insertSymbol(symbol);
     });
 
     textarea.addEventListener("focus", updateMobileLayout);
