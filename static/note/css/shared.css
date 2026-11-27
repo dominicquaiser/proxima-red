@@ -928,15 +928,6 @@ body.note-editor {
   .note-toolbar__download {
     grid-column: -2 / -1;
   }
-
-  .note-editor .meta-stack {
-    left: 10px;
-    right: auto;
-    top: var(--visible-top, 0px);
-    bottom: auto;
-    height: var(--bar-height);
-    z-index: 101;
-  }
 }
 
 @media (max-width: 768px) and (prefers-reduced-motion: reduce) {

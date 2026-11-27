@@ -338,6 +338,18 @@ html:has(.note-view) {
 
 /* Live note page: sync status and expiry countdown. */
 
+@media (max-width: 768px) {
+  .note-live > .header ~ .editor {
+    inset: var(--bar-height) 0 0;
+    height: auto;
+  }
+
+  .note-live .meta-stack {
+    position: static;
+    padding: 6px var(--editor-inset) 0;
+  }
+}
+
 .header__live {
   display: flex;
   align-items: center;

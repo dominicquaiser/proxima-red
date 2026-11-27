@@ -377,6 +377,7 @@ class VaultDataViewTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["success"])
         self.assertNotIn("encrypted_data", payload)
+        self.assertEqual(payload["revision"], "")
 
     def test_returns_encrypted_blob(self):
         """Stored ServiceData is returned with a Base64-encoded IV."""
@@ -441,10 +442,70 @@ class UpdateEncryptedDataViewTests(TestCase):
         """A second POST updates rather than duplicates ServiceData."""
         ServiceData.objects.create(user=self.user, encrypted_data="b2xk", iv=b"\x01" * 12)
         self._authenticate()
-        response = self._post({"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA"})
+        revision = self.client.get(reverse("passwd:vault_data")).json()["revision"]
+        response = self._post(
+            {"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA", "expected_revision": revision}
+        )
         self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(response.json()["revision"], revision)
         self.assertEqual(ServiceData.objects.filter(user=self.user).count(), 1)
         self.assertEqual(ServiceData.objects.get(user=self.user).encrypted_data, "bmV3")
+
+    def test_stale_reset_cannot_overwrite_a_completed_password_migration(self):
+        self._authenticate()
+        ServiceData.objects.create(user=self.user, encrypted_data="b2xk", iv=b"\x01" * 12)
+        stale_blob = self.client.get(reverse("passwd:vault_data")).json()
+
+        # The account page finishes re-encrypting the vault after the vault tab
+        # loaded the original ciphertext.
+        migration = self._post({"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA"})
+        self.assertEqual(migration.status_code, 200)
+
+        reset = self._post(
+            {
+                "encrypted_data": "ZW1wdHk=",
+                "iv": "AgICAgICAgICAgIC",
+                "expected_revision": stale_blob["revision"],
+            }
+        )
+        self.assertEqual(reset.status_code, 409)
+        self.assertEqual(reset.json()["code"], "vault_data_changed")
+        self.assertEqual(ServiceData.objects.get(user=self.user).encrypted_data, "bmV3")
+
+    def test_late_first_save_cannot_replace_a_write_from_the_same_empty_vault(self):
+        self._authenticate()
+        accepted = self._post(
+            {"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA", "expected_revision": ""}
+        )
+        self.assertEqual(accepted.status_code, 200)
+
+        late = self._post(
+            {"encrypted_data": "b2xk", "iv": "AQEBAQEBAQEBAQEB", "expected_revision": ""}
+        )
+        self.assertEqual(late.status_code, 409)
+        stored = self.client.get(reverse("passwd:vault_data")).json()
+        self.assertEqual(stored["encrypted_data"], "bmV3")
+        self.assertEqual(stored["revision"], accepted.json()["revision"])
+
+    def test_retry_of_an_already_committed_save_is_idempotent(self):
+        self._authenticate()
+        payload = {"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA", "expected_revision": ""}
+        accepted = self._post(payload)
+        self.assertEqual(accepted.status_code, 200)
+        first_saved_at = ServiceData.objects.get(user=self.user).updated_at
+
+        retried = self._post(payload)
+        self.assertEqual(retried.status_code, 200)
+        self.assertEqual(ServiceData.objects.get(user=self.user).updated_at, first_saved_at)
+        self.assertEqual(retried.json()["revision"], accepted.json()["revision"])
+
+    def test_invalid_revision_is_rejected(self):
+        self._authenticate()
+        response = self._post(
+            {"encrypted_data": "bmV3", "iv": "AAAAAAAAAAAAAAAA", "expected_revision": None}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(ServiceData.objects.filter(user=self.user).exists())
 
     def test_missing_fields_rejected(self):
         """A POST missing required fields is rejected."""

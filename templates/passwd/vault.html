@@ -116,6 +116,26 @@
             <p>You haven't shared anything yet.</p>
           </div>
 
+          <!-- Shown by vault.js when the stored list doesn't decrypt under this
+               session's key. The reset button's labels live in vault.js. -->
+          <div id="vault-unreadable" class="vault-unreadable hidden" role="alert">
+            <p class="vault-unreadable__title">Your saved links can't be decrypted</p>
+            <p>
+              This can happen when a password change hasn't finished re-securing your links.
+            </p>
+            <p>
+              If you downloaded a recovery copy on the account page, your links are in it. The
+              links themselves keep working until they expire.
+            </p>
+            <p>
+              To use the vault again, start a new list. This permanently erases the list that
+              can't be decrypted.
+            </p>
+            <button type="button" id="reset-vault-btn" class="vault-unreadable__reset">
+              Start a new list
+            </button>
+          </div>
+
           <div class="listing__status">
             <span id="listing-count">Showing 0 shares</span>
             <span class="dot"></span>

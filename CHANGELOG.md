@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Vault changes could be lost.** `[pass·]` skipped a change made while another save was still running, so it was gone after a reload. `[note·]` could run two saves at once and keep the older one. Both vaults now save one change at a time and send changes made in the meantime right after.
-- A failed vault save now restores what is actually stored instead of overwriting newer changes. A new `[pass·]` share whose vault save fails is revoked rather than left live without a vault entry.
+- A failed vault save restores the last confirmed state. If a `[pass·]` save response is lost, the vault checks the stored data and retries any unconfirmed save on reload before accepting further changes. A definite rejection still revokes a newly created share.
+- A `[pass·]` vault whose saved links can't be decrypted, for example after an interrupted password change, now offers to start a new list. The reset applies only to the version that couldn't be decrypted.
 - Changes made while a vault is still loading are refused instead of replacing everything stored.
 - Restoring a `[note·]` vault note during a pending save no longer leaves it scheduled for automatic deletion. Trash operations, including folder deletions, now finish in order.
+- Opening or starting another note while a new `[note·]` vault note is still saving no longer mixes the two up. The new note keeps its own name, and the next save goes to the note that is open.
 - `[note·]` preserves line breaks in previews and shared notes instead of collapsing them into spaces.
 - The `[note·]` editor cursor stays visible while typing or moving it; blinking resumes when editing pauses.
 - Opening a password share removes the key from the address bar straight away, not only once the secret is revealed or copied.

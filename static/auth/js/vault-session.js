@@ -255,7 +255,13 @@
       activity(); // Opening a visible note vault is an explicit visit.
       return resolved;
     };
-    return { start, refresh };
+    return {
+      start,
+      refresh,
+      get identity() {
+        return expectedIdentity;
+      },
+    };
   }
 
   window.VaultSession = { create };

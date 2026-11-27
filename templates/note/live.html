@@ -88,6 +88,12 @@
       data-ws-path="{{ ws_path }}"
       data-expires-at="{{ expires_at }}"
     >
+      <div class="meta meta-stack">
+        <span class="live-status live-status--loading" id="live-status" role="status">loading</span>
+        <span class="meta__sep" aria-hidden="true">/</span>
+        <span id="note-meta" aria-hidden="true"></span>
+      </div>
+
       <div class="editor__doc">
         <textarea
           id="note-content"
@@ -113,12 +119,6 @@
         </div>
       </div>
     </main>
-
-    <div class="meta meta-stack">
-      <span class="live-status live-status--loading" id="live-status" role="status">loading</span>
-      <span class="meta__sep" aria-hidden="true">/</span>
-      <span id="note-meta" aria-hidden="true"></span>
-    </div>
 
     {% include "note/_mobile_toolbar.html" with surface="live" %}
 

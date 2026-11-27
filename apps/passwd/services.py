@@ -8,8 +8,10 @@ database (zero-knowledge architecture).
 """
 
 import logging
+from hashlib import sha256
 from typing import Any
 
+from django.db import transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 
@@ -20,6 +22,15 @@ from .constants import DEFAULT_EXPIRY, EXPIRY_MAP
 from .models import ServiceData, SharedPassword
 
 logger = logging.getLogger(__name__)
+
+
+class VaultDataConflict(Exception):
+    """The vault changed after the client read the ciphertext it is replacing."""
+
+
+def vault_revision(service_data: ServiceData) -> str:
+    """Identify a stored ciphertext and IV."""
+    return sha256(bytes(service_data.iv) + service_data.encrypted_data.encode()).hexdigest()
 
 
 def serialize_service_data(
@@ -169,18 +180,20 @@ def get_user_vault_data(user: User) -> dict[str, Any] | None:
         user: The owning user.
 
     Returns:
-        A dict with ``encrypted_data`` and a Base64-encoded ``iv``, or ``None``
-        when the user has no stored vault data yet.
+        The ciphertext, Base64 IV, and revision, or ``None`` for a new vault.
     """
     try:
         service_data = ServiceData.objects.get(user=user)
     except ServiceData.DoesNotExist:
         return None
 
-    return serialize_service_data(service_data)
+    return {**serialize_service_data(service_data), "revision": vault_revision(service_data)}
 
 
-def save_user_vault_data(user: User, encrypted_data: str, iv: bytes) -> ServiceData:
+@transaction.atomic
+def save_user_vault_data(
+    user: User, encrypted_data: str, iv: bytes, *, expected_revision: str | None = None
+) -> ServiceData:
     """
     Create or update the user's encrypted vault data.
 
@@ -188,16 +201,32 @@ def save_user_vault_data(user: User, encrypted_data: str, iv: bytes) -> ServiceD
         user: The owning user.
         encrypted_data: Client-encrypted vault blob (Base64 ciphertext).
         iv: Raw initialization vector bytes for the blob.
+        expected_revision: Revision the save replaces, or an empty string if the
+            vault was empty. Legacy callers may omit the revision.
 
     Returns:
         The created or updated ``ServiceData`` instance.
+
+    Raises:
+        VaultDataConflict: A different ciphertext already replaced the expected revision.
+        ValidationError: The new ciphertext or IV fails validation.
     """
-    try:
-        service_data = ServiceData.objects.get(user=user)
+    # Lock the owner so even two first saves (with no vault row yet) are ordered.
+    User.objects.select_for_update().only("pk").get(pk=user.pk)
+    service_data = ServiceData.objects.filter(user=user).first()
+    if expected_revision is not None:
+        if service_data and service_data.encrypted_data == encrypted_data and service_data.iv == iv:
+            # A retry reuses the exact ciphertext and IV of the original save.
+            return service_data
+        current_revision = vault_revision(service_data) if service_data else ""
+        if expected_revision != current_revision:
+            raise VaultDataConflict
+
+    if service_data is None:
+        service_data = ServiceData(user=user, encrypted_data=encrypted_data, iv=iv)
+    else:
         service_data.encrypted_data = encrypted_data
         service_data.iv = iv
-    except ServiceData.DoesNotExist:
-        service_data = ServiceData(user=user, encrypted_data=encrypted_data, iv=iv)
     service_data.full_clean()
     service_data.save()
     return service_data

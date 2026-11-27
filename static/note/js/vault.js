@@ -60,12 +60,18 @@
     let vaultLoaded = false;
     let currentNoteId = null; // null means the buffer has no server row yet.
     let currentName = DEFAULT_NOTE_NAME;
+    // Bumped whenever the editor switches to another document. Every unsaved
+    // buffer has a null currentNoteId, so a save compares this instead to know
+    // whether the buffer it started from is still the one open.
+    let bufferGeneration = 0;
     let lastSavedValue = "";
     let isDirty = false;
     let isSaving = false;
     let searchTerm = "";
     let trashChanges = Promise.resolve();
     let pendingTrashChanges = 0;
+    const pendingTrashNotes = new Set();
+    const pendingTrashFolders = new Set();
 
     // Rows that cannot decrypt stay outside the index and can only be deleted.
     const unreadableIds = new Set();
@@ -435,15 +441,24 @@
       return saves.commit(mutate);
     };
 
-    /** Reset to an empty buffer with an unused default name and no server row. */
-    const startNewBuffer = () => {
+    /** Start a buffer with an unused default name and no server row. */
+    const startNewBuffer = (draft = "") => {
+      bufferGeneration += 1;
       currentNoteId = null;
       currentName = Index.defaultName(index);
-      core.setValue("");
+      core.setValue(draft);
       lastSavedValue = "";
-      setDirty(false);
+      setDirty(draft !== lastSavedValue);
       core.showEdit();
       renderTree();
+    };
+
+    const findNote = (id) => index.notes.find((note) => note.id === id);
+    const isMovingToTrash = (note) =>
+      pendingTrashNotes.has(note.id) || pendingTrashFolders.has(note.folderId);
+    const isInOrMovingToTrash = (id) => {
+      const note = findNote(id);
+      return !!note && (note.trashed || isMovingToTrash(note));
     };
 
     /**
@@ -456,6 +471,12 @@
      */
     const openNote = async (id) => {
       if (id === currentNoteId) return;
+      const entry = findNote(id);
+      if (!entry || entry.trashed) return;
+      if (isMovingToTrash(entry)) {
+        window.Notify.show("This note is being moved to Trash.", "info");
+        return;
+      }
       if (!confirmDiscard()) return;
 
       let body;
@@ -485,9 +506,12 @@
         return;
       }
 
-      const entry = index.notes.find((note) => note.id === id);
+      // The note can move to Trash while its contents are being fetched or decrypted.
+      const openEntry = findNote(id);
+      if (!openEntry || openEntry.trashed || isMovingToTrash(openEntry)) return;
+      bufferGeneration += 1;
       currentNoteId = id;
-      currentName = entry ? entry.name : DEFAULT_NOTE_NAME;
+      currentName = openEntry.name;
       core.setValue(text);
       lastSavedValue = text;
       setDirty(false);
@@ -496,16 +520,18 @@
     };
 
     /**
-     * Write the encrypted row before committing its index entry.
+     * Write the encrypted row before committing its index entry. Leaves the
+     * open buffer alone: saveNote binds a new row to the buffer it came from.
      *
      * @param {{encryptedData: string, iv: string}} payload Encrypted buffer.
+     * @param {?string} noteId Existing note ID, or null to create a note.
      * @returns {Promise<?{isNew: boolean, result: Object}>} Saved row metadata,
      *   or null when session access expired.
      * @throws {Error} If the request fails or the server rejects the row.
      */
-    const persistNoteRow = async (payload) => {
-      const isNew = currentNoteId === null;
-      const url = isNew ? notesUrl : noteUrl(currentNoteId);
+    const persistNoteRow = async (payload, noteId) => {
+      const isNew = noteId === null;
+      const url = isNew ? notesUrl : noteUrl(noteId);
       const { response, result } = await window.Http.postForm(url, {
         content: payload.encryptedData,
         iv: payload.iv,
@@ -514,7 +540,6 @@
       if (!response.ok || !result.success) {
         throw new Error(result.error || `HTTP ${response.status}`);
       }
-      if (isNew) currentNoteId = result.note_id;
       return { isNew, result };
     };
 
@@ -522,18 +547,22 @@
      * Add a saved row to the index or update its modification timestamp.
      *
      * @param {{isNew: boolean, result: Object}} savedRow Metadata from persistNoteRow.
+     * @param {string} noteId ID of the saved row.
+     * @param {string} name Buffer name when the save started; used for a new note.
      * @returns {Promise<boolean>} Whether the index was persisted.
      */
-    const indexSavedNote = ({ isNew, result }) =>
+    const indexSavedNote = ({ isNew, result }, noteId, name) =>
       commitIndexChange((idx) =>
         isNew
           ? Index.addNote(idx, {
-              id: result.note_id,
-              name: currentName,
+              id: noteId,
+              // A buffer started while another was saving got the same default
+              // name; whichever is indexed second takes the next free one.
+              name: idx.notes.some((note) => note.name === name) ? Index.defaultName(idx) : name,
               createdAt: result.created_at,
               updatedAt: result.updated_at,
             })
-          : Index.touchNote(idx, currentNoteId, result.updated_at),
+          : Index.touchNote(idx, noteId, result.updated_at),
       );
 
     /**
@@ -541,7 +570,9 @@
      *
      * A successful content write marks the buffer clean even if indexing fails.
      * Orphan recovery re-adopts unindexed rows on load; the success toast requires
-     * both writes to succeed.
+     * both writes to succeed. Once the row write starts, the save finishes with
+     * the text and name it started with. If the editor has switched to another
+     * document by then, that document keeps its own row and saved state.
      *
      * @returns {Promise<void>} Resolves after saving or reporting a failure.
      */
@@ -557,6 +588,13 @@
       }
       if (isSaving) return;
 
+      const generation = bufferGeneration;
+      const noteId = currentNoteId;
+      const name = currentName;
+      if (isInOrMovingToTrash(noteId)) {
+        window.Notify.show("This note is in Trash or is being moved there.", "info");
+        return;
+      }
       const text = core.getValue();
       if (!text.trim()) {
         window.Notify.show("Nothing to save yet - the note is empty.", "error");
@@ -567,12 +605,20 @@
       isSaving = true;
       try {
         const payload = await window.CryptoCore.encryptWithKey(text, masterKey);
-        const savedRow = await persistNoteRow(payload);
+        // A Trash action or a switch to another document can replace this
+        // buffer while it is being encrypted.
+        if (bufferGeneration !== generation || isInOrMovingToTrash(noteId)) return;
+        const savedRow = await persistNoteRow(payload, noteId);
         if (!savedRow) return;
-        const indexed = await indexSavedNote(savedRow);
+        const savedNoteId = savedRow.isNew ? savedRow.result.note_id : noteId;
+        // Bind a new row only to the buffer it was written from.
+        if (bufferGeneration === generation) currentNoteId = savedNoteId;
+        const indexed = await indexSavedNote(savedRow, savedNoteId, name);
 
-        lastSavedValue = text;
-        setDirty(false);
+        if (bufferGeneration === generation) {
+          lastSavedValue = text;
+          setDirty(core.getValue() !== lastSavedValue);
+        }
         if (!indexed) return;
         window.Notify.show("Note saved to your vault.", "success");
       } catch (error) {
@@ -631,6 +677,14 @@
           pendingTrashChanges -= 1;
         });
       return operation;
+    };
+
+    // Mark a note or folder as soon as its Trash operation is queued. Release it
+    // even after a failed write so the active note can be opened and retried.
+    const queueMoveToTrash = (pending, id, change) => {
+      if (pending.has(id)) return Promise.resolve();
+      pending.add(id);
+      return queueTrashChange(change).finally(() => pending.delete(id));
     };
 
     /**
@@ -829,11 +883,8 @@
      * @returns {Promise<void>} Resolves after index and server Trash updates are attempted.
      */
     const moveNoteToTrash = (id) => {
-      if (id === currentNoteId) {
-        setDirty(false);
-        startNewBuffer();
-      }
-      return queueTrashChange(async () => {
+      if (id === currentNoteId) startNewBuffer();
+      return queueMoveToTrash(pendingTrashNotes, id, async () => {
         // Index first, then the flag. The reverse order could leave a note the
         // user still sees as active carrying a deletion flag.
         if (await commitIndexChange((idx) => Index.trashNote(idx, id))) {
@@ -860,12 +911,15 @@
      * @returns {Promise<void>} Resolves after attempting deletion or reporting a failure.
      */
     const deleteFolderToTrash = (id) =>
-      queueTrashChange(async () => {
+      queueMoveToTrash(pendingTrashFolders, id, async () => {
         // Collect active IDs when this operation starts, after earlier changes.
         const noteIdsToTrash = index.notes
           .filter((note) => note.folderId === id && !note.trashed)
           .map((note) => note.id);
         if (await commitIndexChange((idx) => Index.deleteFolder(idx, id))) {
+          if (noteIdsToTrash.includes(currentNoteId)) {
+            startNewBuffer(isDirty ? core.getValue() : "");
+          }
           await setTrashed(noteIdsToTrash, true);
         }
       });
@@ -972,12 +1026,7 @@
       }
 
       const fileRow = event.target.closest(".tree__file");
-      if (fileRow) {
-        if (fileRow.dataset.unreadable) return;
-        const entry = index.notes.find((note) => note.id === fileRow.dataset.noteId);
-        if (entry && entry.trashed) return;
-        openNote(fileRow.dataset.noteId);
-      }
+      if (fileRow && !fileRow.dataset.unreadable) openNote(fileRow.dataset.noteId);
     });
 
     document.getElementById("new-note-btn").addEventListener("click", () => {

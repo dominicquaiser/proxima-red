@@ -58,6 +58,23 @@
 
   // Shown when a change is attempted before the stored links have loaded.
   const VAULT_LOADING_MESSAGE = "Your saved links are still loading. Try again in a moment.";
+  const VAULT_SAVE_UNCONFIRMED_MESSAGE =
+    "Could not confirm the vault save. Reload your vault to finish saving.";
+  const VAULT_CHANGED_MESSAGE = "Your saved links changed. Reload your vault and try again.";
+  const PENDING_SAVE_KEY = "passwdVaultPendingSave";
+  // Shown when a change is attempted while the stored list can't be decrypted.
+  const VAULT_UNREADABLE_MESSAGE =
+    "Your saved links can't be decrypted. Start a new list to keep using the vault.";
+
+  // Reset control for a stored list that can't be decrypted. Like row removal,
+  // it needs a second click within the window.
+  const RESET_VAULT_LABEL = "Start a new list";
+  const RESET_VAULT_CONFIRM_LABEL = "Click again to erase the old list";
+  const RESET_VAULT_CONFIRM_MS = 3000;
+
+  // These responses reject the request before the vault is written, so the
+  // save failed and there is nothing to read back.
+  const VAULT_SAVE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 409, 413, 423, 429]);
 
   // Tag constraints. Tags live inside the encrypted vault blob (one normalized,
   // lower-cased string each); these bound their length and per-share count.
@@ -96,6 +113,17 @@
     const time = value ? new Date(value).getTime() : NaN;
     return Number.isNaN(time) ? 0 : time;
   };
+
+  const isStoredTimestamp = (value) =>
+    value == null || typeof value === "string" || typeof value === "number";
+
+  // Whether a decrypted vault entry has the shape this page shows and saves.
+  const isUsableShare = (entry) =>
+    typeof entry?.id === "string" &&
+    typeof entry.key === "string" &&
+    (entry.title == null || typeof entry.title === "string") &&
+    isStoredTimestamp(entry.created_at) &&
+    isStoredTimestamp(entry.expires_at);
 
   const getInitials = (title) => {
     const clean = (title || "").trim();
@@ -161,6 +189,8 @@
       expired: document.querySelector('[data-count="expired"]'),
     };
     const rowTemplate = document.getElementById("share-row-template");
+    const unreadablePanel = document.getElementById("vault-unreadable");
+    const resetVaultBtn = document.getElementById("reset-vault-btn");
     const mainContent = document.getElementById("main-content");
     const vaultDataEndpoint = mainContent?.dataset.vaultDataUrl || VAULT_DATA_ENDPOINT;
     const saveEndpoint = mainContent?.dataset.updateUrl || SAVE_ENDPOINT;
@@ -171,6 +201,18 @@
     // Persistence) assigns it, so what is on screen is what gets saved.
     let userShares = [];
     let masterKey = null;
+    let vaultSession = null;
+    let vaultRevision = "";
+    let saveInFlight = null;
+    let writeBlockMessage = "";
+    let unconfirmedSaveIds = null;
+    // The loaded revision doesn't decrypt under this key. The reset control
+    // can replace that revision only.
+    let vaultUnreadable = false;
+    let resetArmTimer = null;
+    // Decrypted entries this page can't show, for example ones written by a
+    // newer version. Every save writes them back unchanged.
+    let keptEntries = [];
     let isCopyingLink = false;
     let armedRemoveBtn = null;
     let armedRemoveTimer = null;
@@ -184,6 +226,7 @@
     // --- Vault availability + create modal ---
 
     const disableVault = (message) => {
+      writeBlockMessage = message;
       if (inlineForm) {
         inlineForm.querySelectorAll("input, button").forEach((el) => {
           el.disabled = true;
@@ -193,6 +236,30 @@
         createNewBtn.disabled = true;
       }
       window.Notify.show(message, "error");
+    };
+
+    // Return the reset button to its first-click state.
+    const disarmResetBtn = () => {
+      clearTimeout(resetArmTimer);
+      resetArmTimer = null;
+      if (!resetVaultBtn) return;
+      resetVaultBtn.textContent = RESET_VAULT_LABEL;
+      resetVaultBtn.classList.remove("vault-unreadable__reset--armed");
+    };
+
+    const armResetBtn = () => {
+      resetVaultBtn.textContent = RESET_VAULT_CONFIRM_LABEL;
+      resetVaultBtn.classList.add("vault-unreadable__reset--armed");
+      resetArmTimer = setTimeout(disarmResetBtn, RESET_VAULT_CONFIRM_MS);
+    };
+
+    // Show or hide the notice that takes the listing's place while the stored
+    // list can't be decrypted.
+    const setVaultUnreadable = (unreadable) => {
+      vaultUnreadable = unreadable;
+      unreadablePanel?.classList.toggle("hidden", !unreadable);
+      disarmResetBtn();
+      renderShares();
     };
 
     const openModal = () => {
@@ -400,7 +467,8 @@
 
       if (!visibleShares.length) {
         if (noSharesPlaceholder) {
-          noSharesPlaceholder.classList.remove("hidden");
+          // "Nothing shared yet" would contradict the unreadable-list notice.
+          noSharesPlaceholder.classList.toggle("hidden", vaultUnreadable);
           const placeholderText = noSharesPlaceholder.querySelector("p");
           if (placeholderText) {
             placeholderText.textContent = userShares.length
@@ -427,101 +495,228 @@
 
     // --- Persistence ---
 
-    // Fetch the encrypted vault blob from the server (it is no longer embedded in
-    // the page), decrypt it under the session key, and hand it to `saves`. No
-    // save is accepted before that: one sent from the empty pre-load list would
-    // replace every stored link. A failed fetch disables the vault rather than
-    // rendering an empty one, so a transient error can't lead to a later save
-    // overwriting the stored blob with nothing; an empty payload (no blob stored
-    // yet) loads an empty vault normally.
+    const hasCiphertext = (blob) =>
+      typeof blob?.encrypted_data === "string" && typeof blob.iv === "string";
+
+    const sameCiphertext = (stored, payload) =>
+      stored?.encrypted_data === payload.encrypted_data && stored.iv === payload.iv;
+
+    const sessionUnavailable = ({ response: { status }, result }) =>
+      status === 401 || status === 423 || result.code === "vault_identity_changed";
+
+    const fetchStoredVault = async () => {
+      const reply = await window.Http.getJson(vaultDataEndpoint);
+      if (sessionUnavailable(reply)) return null;
+      const { response, result } = reply;
+      if (!response.ok || response.redirected || result.success !== true) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+      const { revision, encrypted_data, iv } = result;
+      if (revision === "" && encrypted_data === undefined && iv === undefined) return result;
+      if (typeof revision === "string" && revision && hasCiphertext(result)) return result;
+      throw new Error("Invalid saved link response.");
+    };
+
+    const postVaultSave = async (payload) => {
+      try {
+        return await window.Http.postForm(saveEndpoint, payload);
+      } catch (error) {
+        console.error("Could not read the vault save response:", error);
+        return null;
+      }
+    };
+
+    const acceptedRevision = (reply) => {
+      if (reply?.response.ok && !reply.response.redirected && reply.result.success === true) {
+        return typeof reply.result.revision === "string" ? reply.result.revision : "";
+      }
+      return "";
+    };
+
+    // Keep the exact encrypted payload across a reload, scoped to the account
+    // and key that encrypted it. Revision checks still protect storage if the
+    // browser denies access to sessionStorage.
+    const rememberPendingSave = (payload) => {
+      const identity = vaultSession.identity;
+      if (!identity) return;
+      try {
+        if (payload) {
+          sessionStorage.setItem(PENDING_SAVE_KEY, JSON.stringify({ identity, payload }));
+        } else {
+          sessionStorage.removeItem(PENDING_SAVE_KEY);
+        }
+      } catch (error) {
+        console.error("Could not keep the pending vault save across reload:", error);
+      }
+    };
+
+    const readPendingSave = () => {
+      const identity = vaultSession.identity;
+      if (!identity) return null;
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(PENDING_SAVE_KEY));
+        if (
+          saved?.identity === identity &&
+          hasCiphertext(saved.payload) &&
+          typeof saved.payload.expected_revision === "string"
+        ) {
+          return saved.payload;
+        }
+        if (saved) rememberPendingSave(null);
+      } catch (error) {
+        console.error("Could not read the pending vault save:", error);
+      }
+      return null;
+    };
+
+    // A fetched revision equal to the original base leaves the first request
+    // free to commit. Replaying its ciphertext settles the race: the server
+    // accepts either copy and acknowledges an exact retry without rewriting.
+    const recoverPendingSave = async (stored, loadKey) => {
+      const pending = readPendingSave();
+      if (!pending) return stored;
+      if (stored.revision === pending.expected_revision) {
+        const reply = await postVaultSave(pending);
+        if (loadKey !== masterKey || (reply && sessionUnavailable(reply))) return null;
+        const revision = acceptedRevision(reply);
+        if (revision) {
+          stored = { ...pending, revision };
+        } else {
+          stored = await fetchStoredVault();
+          if (!stored || loadKey !== masterKey) return null;
+          const invalid =
+            reply && !reply.response.redirected && [400, 413].includes(reply.response.status);
+          if (stored.revision === pending.expected_revision && !invalid) {
+            disableVault(VAULT_SAVE_UNCONFIRMED_MESSAGE);
+            return null;
+          }
+        }
+      }
+      rememberPendingSave(null);
+      if (!sameCiphertext(stored, pending)) {
+        window.Notify.show("Review your saved links before retrying the interrupted save.", "info");
+      }
+      return stored;
+    };
+
+    // Load a confirmed revision before handing the decrypted list to the queue.
     const loadSavedShares = async () => {
       const loadKey = masterKey;
-      if (!masterKey) {
-        renderShares();
-        return;
-      }
+      await saveInFlight;
+      if (!loadKey || loadKey !== masterKey || writeBlockMessage) return;
 
       let blob;
       try {
-        const { response, result } = await window.Http.getJson(vaultDataEndpoint);
-        if (loadKey !== masterKey || response.status === 401 || response.status === 423) return;
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        // An unreadable reply has to disable the vault, not fall through to
-        // the empty-vault render below: showing someone "no saved links" when
-        // the load actually failed invites them to conclude their data is
-        // gone. (Http used to enforce this by rejecting the JSON parse.)
-        if (!result.success) {
-          throw new Error(result.error || `HTTP ${response.status}`);
-        }
-        blob = result;
+        const stored = await fetchStoredVault();
+        if (!stored || loadKey !== masterKey) return;
+        blob = await recoverPendingSave(stored, loadKey);
+        if (!blob || loadKey !== masterKey) return;
       } catch (error) {
+        if (loadKey !== masterKey) return;
         console.error("Failed to load saved vault data:", error);
         disableVault("Could not load your saved links. Please reload the page.");
         return;
       }
 
-      // success is guaranteed by the check above; only the data fields are
-      // still in question, and their absence just means an empty vault.
-      if (!blob.encrypted_data || !blob.iv) {
-        saves.load([]);
-        return;
+      vaultRevision = blob.revision;
+      let storedEntries = [];
+      if (hasCiphertext(blob)) {
+        try {
+          const decrypted = await window.AuthCrypto.decryptAccountData(
+            blob.encrypted_data,
+            blob.iv,
+            loadKey,
+          );
+          if (!Array.isArray(decrypted?.shares)) throw new Error("Invalid saved link list.");
+          storedEntries = decrypted.shares;
+        } catch (error) {
+          if (loadKey !== masterKey) return;
+          console.error("Failed to decrypt saved vault data:", error);
+          setVaultUnreadable(true);
+          return;
+        }
+        if (loadKey !== masterKey) return;
       }
 
-      let shares;
-      try {
-        const decrypted = await window.AuthCrypto.decryptAccountData(
-          blob.encrypted_data,
-          blob.iv,
-          loadKey,
-        );
-        shares = Array.isArray(decrypted?.shares) ? decrypted.shares : [];
-      } catch (error) {
-        if (loadKey !== masterKey) return;
-        console.error("Failed to decrypt saved vault data:", error);
-        shares = [];
+      // One odd entry shouldn't cost the rest of the list, and dropping it on
+      // the next save would destroy data this version doesn't understand.
+      const shares = [];
+      keptEntries = [];
+      storedEntries.forEach((entry) => {
+        if (isUsableShare(entry)) shares.push({ ...entry, tags: normalizeTagList(entry.tags) });
+        else keptEntries.push(entry);
+      });
+      if (keptEntries.length) {
         window.Notify.show(
-          "Could not decrypt your saved links. You may need to resave them.",
+          "Some saved links could not be read and are hidden. They stay stored unchanged.",
           "error",
         );
       }
-      if (loadKey !== masterKey) return;
-
-      shares.forEach((share) => {
-        share.tags = normalizeTagList(share.tags);
-      });
       saves.load(shares);
     };
 
     // Encrypt and save one whole share list. Only `saves` calls this, one save
     // at a time; it reports failures itself and resolves to whether the server
-    // accepted the list.
+    // stored the list. When a lost reply leaves that unknown, it pauses writes
+    // until a reload instead of guessing.
     const persistUserShares = async (shares) => {
-      if (!masterKey) {
-        return false;
-      }
+      const saveKey = masterKey;
+      const expectedRevision = vaultRevision;
+      if (!saveKey || writeBlockMessage) return false;
 
       try {
-        const encryptedPayload = await window.AuthCrypto.encryptAccountData({ shares }, masterKey);
+        const encryptedPayload = await window.AuthCrypto.encryptAccountData(
+          { shares: [...shares, ...keptEntries] },
+          saveKey,
+        );
+        if (saveKey !== masterKey) return false;
 
         if (!window.Http.getCsrfToken()) {
           throw new Error("Missing CSRF token");
         }
 
-        const { response, result } = await window.Http.postForm(saveEndpoint, {
+        const payload = {
           encrypted_data: encryptedPayload.encryptedData,
           iv: encryptedPayload.iv,
-        });
+          expected_revision: expectedRevision,
+        };
+        rememberPendingSave(payload);
+        const reply = await postVaultSave(payload);
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        if (!result.success) {
-          throw new Error(result.error || "Unknown error");
+        let revision = acceptedRevision(reply);
+        if (!revision) {
+          if (
+            reply &&
+            !reply.response.redirected &&
+            VAULT_SAVE_REJECTION_STATUSES.has(reply.response.status)
+          ) {
+            rememberPendingSave(null);
+            if (reply.result.code === "vault_data_changed") {
+              disableVault(VAULT_CHANGED_MESSAGE);
+              return false;
+            }
+            throw new Error(reply.result.error || `HTTP ${reply.response.status}`);
+          }
+
+          // Other ciphertext on a read-back can't settle a lost reply. The
+          // write may still be running, or a later revision may include it.
+          if (saveKey === masterKey) {
+            const stored = await fetchStoredVault().catch((error) => {
+              console.error("Failed to check the stored vault after a save:", error);
+              return null;
+            });
+            if (sameCiphertext(stored, payload)) revision = stored.revision;
+          }
         }
 
-        return true;
+        if (revision) {
+          rememberPendingSave(null);
+          if (saveKey === masterKey) vaultRevision = revision;
+          return true;
+        }
+        unconfirmedSaveIds = new Set(shares.map((share) => share.id));
+        disableVault(VAULT_SAVE_UNCONFIRMED_MESSAGE);
+        return false;
       } catch (error) {
         console.error("Failed to persist vault data:", error);
         if (error.message === "Missing CSRF token") {
@@ -541,7 +736,12 @@
     // during a save is sent right after it, and a failed save restores the
     // last list the server accepted. The lock clears it via saves.reset().
     const saves = window.SaveQueue.create({
-      persist: persistUserShares,
+      persist: (shares) => {
+        saveInFlight = persistUserShares(shares);
+        return saveInFlight.finally(() => {
+          saveInFlight = null;
+        });
+      },
       show: (shares) => {
         userShares = shares;
         renderShares();
@@ -552,7 +752,64 @@
     // and must leave its input unchanged; resolves to whether the server
     // accepted a vault that includes the change (false also before the vault
     // has loaded, which callers check up front where it matters).
-    const commitShareChange = (mutate) => saves.commit(mutate);
+    const commitShareChange = (mutate) =>
+      writeBlockMessage ? Promise.resolve(false) : saves.commit(mutate);
+
+    const canChangeShares = () => {
+      if (writeBlockMessage) {
+        window.Notify.show(writeBlockMessage, "error");
+        return false;
+      }
+      if (vaultUnreadable) {
+        window.Notify.show(VAULT_UNREADABLE_MESSAGE, "error");
+        return false;
+      }
+      if (!saves.ready) {
+        window.Notify.show(VAULT_LOADING_MESSAGE, "info");
+        return false;
+      }
+      return true;
+    };
+
+    // Replace a stored list that can't be decrypted with an empty one. Without
+    // its key nobody can read the old list, but it may still be the only copy
+    // of those links, so this runs only on a confirmed request. The links
+    // themselves stay live until they expire either way.
+    const resetUnreadableVault = async () => {
+      const resetKey = masterKey;
+      resetVaultBtn.disabled = true;
+      try {
+        // Through the queue like every save: the empty list becomes the
+        // restore point, then is saved over the unreadable one.
+        keptEntries = [];
+        saves.load([]);
+        const replaced = await saves.commit((shares) => shares);
+        if (resetKey !== masterKey) return;
+        if (!replaced) {
+          saves.reset();
+          return;
+        }
+        setVaultUnreadable(false);
+        window.Notify.show("Started a new, empty list of saved links.", "success");
+      } finally {
+        resetVaultBtn.disabled = Boolean(writeBlockMessage);
+      }
+    };
+
+    // First click arms the reset, a second click within the window runs it.
+    const handleResetClick = async () => {
+      if (!vaultUnreadable || !masterKey) return;
+      if (writeBlockMessage) {
+        window.Notify.show(writeBlockMessage, "error");
+        return;
+      }
+      if (resetArmTimer === null) {
+        armResetBtn();
+        return;
+      }
+      disarmResetBtn();
+      await resetUnreadableVault();
+    };
 
     // --- Event handlers ---
 
@@ -565,12 +822,7 @@
         window.Notify.show("Secure session missing. Please sign in again.", "error");
         return;
       }
-      // Checked before the share exists server-side: once created, a share the
-      // vault can't save has to be revoked again (see below).
-      if (!saves.ready) {
-        window.Notify.show(VAULT_LOADING_MESSAGE, "info");
-        return;
-      }
+      if (!canChangeShares()) return;
       if (!shareFormController) {
         window.Notify.show("Form is incomplete. Please try again.", "error");
         return;
@@ -611,10 +863,8 @@
         // Optimistically add the share, rolling back if the vault blob won't persist.
         const persisted = await commitShareChange((shares) => [newShare, ...shares]);
         if (!persisted) {
-          // The vault entry was the only place this share's key was kept, so
-          // revoke the share rather than leave a live link nobody can see,
-          // copy, or revoke.
-          if (!(await revokeShare(newShare.id))) {
+          // Clean up the share only when its vault entry could not have committed.
+          if (!unconfirmedSaveIds?.has(newShare.id) && !(await revokeShare(newShare.id))) {
             console.error("Could not revoke a share that was not saved to the vault:", newShare.id);
           }
           return;
@@ -802,7 +1052,18 @@
         disarmRemoveBtn();
       }
 
+      const copyBtn = event.target.closest(".copy-link-btn");
+      if (copyBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        await handleCopyLinkClick(row, copyBtn);
+        return;
+      }
+
       const tagRemoveBtn = event.target.closest(".tag__remove");
+      const tagAddBtn = event.target.closest(".tag-add");
+      if (!(tagRemoveBtn || tagAddBtn || clickedRemoveBtn) || !canChangeShares()) return;
+
       if (tagRemoveBtn) {
         event.preventDefault();
         const tag = tagRemoveBtn.closest(".tag")?.dataset.tag;
@@ -812,18 +1073,9 @@
         return;
       }
 
-      const tagAddBtn = event.target.closest(".tag-add");
       if (tagAddBtn) {
         event.preventDefault();
         startTagInput(tagAddBtn, row.dataset.shareId);
-        return;
-      }
-
-      const copyBtn = event.target.closest(".copy-link-btn");
-      if (copyBtn) {
-        event.preventDefault();
-        event.stopPropagation();
-        await handleCopyLinkClick(row, copyBtn);
         return;
       }
 
@@ -844,10 +1096,7 @@
             );
             return;
           }
-          if (!saves.ready) {
-            window.Notify.show(VAULT_LOADING_MESSAGE, "info");
-            return;
-          }
+          if (!canChangeShares()) return;
           openModal();
         });
       }
@@ -941,6 +1190,10 @@
       if (shareList) {
         shareList.addEventListener("click", handleShareListClick);
       }
+
+      if (resetVaultBtn) {
+        resetVaultBtn.addEventListener("click", handleResetClick);
+      }
     };
 
     const initialize = async () => {
@@ -949,7 +1202,7 @@
         return;
       }
 
-      const session = window.VaultSession.create({
+      vaultSession = window.VaultSession.create({
         tool: "pass",
         userId: document.getElementById("unlock-modal").dataset.userId,
         onLock: () => {
@@ -960,8 +1213,11 @@
           document.getElementById("main-content").inert = true;
           masterKey = null;
           userShares = [];
+          keptEntries = [];
           closeModal();
-          renderShares();
+          // Unlocking decides afresh whether the stored list decrypts. This
+          // also re-renders the now-empty listing.
+          setVaultUnreadable(false);
         },
         onUnlock: async (key) => {
           masterKey = await window.AuthCrypto.importKeyFromBase64(key);
@@ -977,7 +1233,7 @@
       });
       let storedKeyBase64;
       try {
-        storedKeyBase64 = await session.start();
+        storedKeyBase64 = await vaultSession.start();
       } catch {
         disableVault("Unable to check your session. Check your connection and reload.");
         return;

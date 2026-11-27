@@ -9,6 +9,7 @@ encrypted data storage and retrieval.
 
 import json
 import logging
+import re
 import uuid
 
 from django.contrib import messages
@@ -43,10 +44,12 @@ from .constants import (
     ERROR_INVALID_IV,
     ERROR_INVALID_JSON,
     ERROR_INVALID_SHARE_ID,
+    ERROR_INVALID_VAULT_REVISION,
     ERROR_MISSING_FIELDS,
     ERROR_MISSING_REQUIRED,
     ERROR_UNEXPECTED,
     ERROR_USER_NOT_FOUND,
+    ERROR_VAULT_DATA_CHANGED,
     LOG_CREATE_FAILED,
     LOG_DELETE_SHARE_ERROR,
     LOG_EXPIRED_DELETED,
@@ -160,17 +163,23 @@ def _session_user_or_error(
     return user, None
 
 
-def _save_vault_payload(user: User, encrypted_data: str, iv_binary: bytes) -> JsonResponse:
+def _save_vault_payload(
+    user: User, encrypted_data: str, iv_binary: bytes, expected_revision: str | None
+) -> JsonResponse:
     """Persist a decoded vault payload and map validation/storage errors."""
     try:
-        services.save_user_vault_data(user, encrypted_data, iv_binary)
+        saved = services.save_user_vault_data(
+            user, encrypted_data, iv_binary, expected_revision=expected_revision
+        )
+    except services.VaultDataConflict:
+        return json_error(ERROR_VAULT_DATA_CHANGED, status=409, code="vault_data_changed")
     except ValidationError as e:
         return json_error(_validation_error_message(e))
     except Exception as e:
         logger.error(LOG_UPDATE_DATA_ERROR, exception_type(e))
         return json_error(ERROR_UNEXPECTED, status=500)
     logger.info(LOG_UPDATE_DATA, user.user_id)
-    return json_ok(SUCCESS_DATA_SAVED)
+    return json_ok(SUCCESS_DATA_SAVED, revision=services.vault_revision(saved))
 
 
 @method_decorator(
@@ -305,6 +314,7 @@ class UpdateEncryptedDataView(View):
 
     This view handles AJAX requests to save the user's encrypted vault data.
     The data is encrypted client-side before being sent to the server.
+    An ``expected_revision`` precondition binds the write to the loaded blob.
 
     Unlike the redirect-style views (which use ``SessionAuthRequiredMixin``),
     this JSON API gate uses ``require_tool_auth_api("pass")`` so unauthenticated
@@ -326,11 +336,18 @@ class UpdateEncryptedDataView(View):
         if error_response:
             return error_response
 
+        expected_revision = data.get("expected_revision")
+        if "expected_revision" in data and not (
+            isinstance(expected_revision, str)
+            and (expected_revision == "" or re.fullmatch(r"[0-9a-f]{64}", expected_revision))
+        ):
+            return json_error(ERROR_INVALID_VAULT_REVISION)
+
         user, error_response = _session_user_or_error(request)
         if error_response:
             return error_response
 
-        return _save_vault_payload(user, encrypted_data, iv_binary)
+        return _save_vault_payload(user, encrypted_data, iv_binary, expected_revision)
 
 
 class VaultDataView(View):
@@ -345,8 +362,8 @@ class VaultDataView(View):
     the new key, and saved again (see ``static/auth/js/account.js``).
     Like ``UpdateEncryptedDataView`` this is a JSON API, so it gates with
     ``require_tool_auth_api("pass")`` (JSON 401) rather than the redirect mixin. The
-    returned ``encrypted_data``/``iv`` are ciphertext the server cannot read; an
-    empty payload (just ``success``) means the user has no stored vault yet.
+    returned ``encrypted_data``/``iv`` are opaque to the server. The revision is
+    empty when the user has no stored vault yet.
     """
 
     @method_decorator(
@@ -359,7 +376,7 @@ class VaultDataView(View):
         if error_response:
             return error_response
 
-        return json_ok(**(services.get_user_vault_data(user) or {}))
+        return json_ok(**(services.get_user_vault_data(user) or {"revision": ""}))
 
 
 class DeleteShareView(View):
