@@ -15,6 +15,7 @@
   // Preserve blocked URLs for placeholder metadata and host labels.
   const BLOCKED_SRC_ATTR = "data-blocked-src";
   const BLOCKED_IMAGE_SELECTOR = "img[" + BLOCKED_SRC_ATTR + "]";
+  const TITLE_SLUG_MAX_LENGTH = 60;
 
   // Tags marked can emit for the supported GFM syntax.
   const ALLOWED_TAGS = [
@@ -348,8 +349,11 @@
   /**
    * Derive a filename-friendly title from the first heading or non-empty line.
    *
+   * Names vault notes and downloads. Letters and digits of any script are kept
+   * ("für", not "f-r"); every other run of characters becomes one hyphen.
+   *
    * @param {string} source
-   * @param {string} [fallback="note"]
+   * @param {string} [fallback="note"] Returned when the title has no letters or digits.
    * @returns {string}
    */
   function titleSlug(source, fallback = "note") {
@@ -362,11 +366,15 @@
       break;
     }
     const slug = title
+      .normalize("NFC")
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 60);
-    return slug || fallback;
+      .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "");
+    const capped = Array.from(slug)
+      .slice(0, TITLE_SLUG_MAX_LENGTH)
+      .join("")
+      .replace(/-+$/, "");
+    return capped || fallback;
   }
 
   // isHighlightLanguageClass, slugifyHeading and isBlockedImageSrc are exposed

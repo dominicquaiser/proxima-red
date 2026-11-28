@@ -565,10 +565,12 @@
       });
     }
 
-    /** Grow the textarea to fit its content; the outer editor owns scrolling. */
     function autosize() {
+      const doc = textarea.parentElement;
+      doc.style.minHeight = doc.getBoundingClientRect().height + "px";
       textarea.style.height = "auto";
       textarea.style.height = textarea.scrollHeight + "px";
+      doc.style.minHeight = "";
     }
 
     /**

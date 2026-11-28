@@ -15,7 +15,9 @@
   const SELECTION_CLASS = "presence-selection";
   const CARET_CLASS = "presence-caret";
   const FLAG_ROW_CLASS = "presence-flags";
+  const FLAG_ROW_BESIDE_CLASS = "presence-flags--beside";
   const FLAG_CLASS = "presence-flag";
+  const FLAG_GAP_PX = 4;
   const DEFAULT_PEER_NAME = "Peer";
   const MIN_SELECTION_WIDTH = 3;
   const ZERO_WIDTH_SPACE = "\u200b";
@@ -136,6 +138,30 @@
         return a.left - b.left;
       });
     });
+  }
+
+  /**
+   * Viewport x for a line's flag row placed beside its carets.
+   *
+   * The row goes right of the line's last caret while it fits there, otherwise
+   * left of the first caret. With room on neither side it is pinned inside the
+   * bounds on the roomier side, covering text rather than leaving the screen.
+   *
+   * @param {number} firstLeft Left edge of the line's leftmost caret.
+   * @param {number} lastRight Right edge of the line's rightmost caret.
+   * @param {number} width Rendered width of the flag row.
+   * @param {number} minLeft Leftmost viewport x the row may reach.
+   * @param {number} maxRight Rightmost viewport x the row may reach.
+   * @returns {number}
+   */
+  function besideCaretsLeft(firstLeft, lastRight, width, minLeft, maxRight) {
+    const right = lastRight + FLAG_GAP_PX;
+    if (right + width <= maxRight) return right;
+    const left = firstLeft - FLAG_GAP_PX - width;
+    if (left >= minLeft) return left;
+    const roomRight = maxRight - right;
+    const roomLeft = firstLeft - FLAG_GAP_PX - minLeft;
+    return roomRight >= roomLeft ? Math.max(minLeft, maxRight - width) : minLeft;
   }
 
   /**
@@ -329,19 +355,20 @@
      * Paint peer names as flags in the gutter left of the text column.
      *
      * Flags whose carets share a visual line form one row, in caret order and as
-     * tall as the caret. A row the gutter cannot hold, as on narrow layouts, is
-     * dropped and its carets carry their names above them instead.
+     * tall as the caret. A row the gutter cannot hold, as on narrow layouts,
+     * moves beside its carets instead, within the text column (see
+     * besideCaretsLeft).
      *
      * @param {Array<{el: HTMLElement, name: string, colorVar: string, top: number,
      *   left: number, height: number}>} carets Carets painted this frame.
-     * @param {number} textLeft Viewport x of the text column's left edge.
-     * @param {number} minLeft Leftmost viewport x a row may reach.
+     * @param {{left: number, right: number}} column Viewport edges of the text column.
+     * @param {number} minLeft Leftmost viewport x a gutter row may reach.
      */
-    function renderFlags(carets, textLeft, minLeft) {
+    function renderFlags(carets, column, minLeft) {
       const rows = groupByLine(carets).map(function (line) {
         const row = document.createElement("div");
         row.className = FLAG_ROW_CLASS;
-        row.style.left = textLeft + "px";
+        row.style.left = column.left + "px";
         row.style.top = line[0].top + "px";
         row.style.height = line[0].height + "px";
         for (const caret of line) {
@@ -356,12 +383,19 @@
       });
 
       // Measure every row before changing any so layout runs once.
-      const clipped = rows.filter(function (row) {
-        return row.el.getBoundingClientRect().left < minLeft;
+      const measured = rows.map(function (row) {
+        return {
+          row: row,
+          box: row.el.getBoundingClientRect(),
+          lastRight: row.line[row.line.length - 1].el.getBoundingClientRect().right,
+        };
       });
-      for (const row of clipped) {
-        row.el.remove();
-        for (const caret of row.line) caret.el.dataset.name = caret.name;
+      for (const { row, box, lastRight } of measured) {
+        if (box.left >= minLeft) continue;
+        row.el.classList.add(FLAG_ROW_BESIDE_CLASS);
+        row.el.style.left =
+          besideCaretsLeft(row.line[0].left, lastRight, box.width, column.left, column.right) +
+          "px";
       }
     }
 
@@ -374,8 +408,8 @@
       if (destroyed) return;
       layer.replaceChildren();
       const editorRect = editor.getBoundingClientRect();
-      // The mirror spans the text column, so its left edge anchors the gutter.
-      const textLeft = mirror.getBoundingClientRect().left;
+      // The mirror spans the text column: its left edge anchors the gutter.
+      const column = mirror.getBoundingClientRect();
       const states = awareness.getStates();
       const carets = [];
 
@@ -429,7 +463,7 @@
       });
 
       mirror.replaceChildren();
-      renderFlags(carets, textLeft, editorRect.left);
+      renderFlags(carets, column, editorRect.left);
     }
 
     /**
@@ -512,6 +546,7 @@
     encodeCursorState,
     resolveCursorState,
     groupByLine,
+    besideCaretsLeft,
     GREEK_NAMES,
     PALETTE_SIZE,
     CURSOR_ANNOUNCE_MS,

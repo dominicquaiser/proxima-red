@@ -9,7 +9,11 @@
 
   const INDEX_VERSION = 1;
   const DEFAULT_FOLDER_NAME = "folder";
-  const DEFAULT_NOTE_NAME = "untitled.md";
+  const NOTE_EXTENSION = ".md";
+  const DEFAULT_NOTE_STEM = "untitled";
+  const DEFAULT_NOTE_NAME = DEFAULT_NOTE_STEM + NOTE_EXTENSION;
+  // The placeholders defaultName hands out, which no user chose.
+  const DEFAULT_NAME_PATTERN = /^untitled(-\d+)?\.md$/;
 
   /**
    * @typedef {Object} FolderEntry
@@ -22,6 +26,9 @@
    * @typedef {Object} NoteEntry
    * @property {string} id Matches the server row's UUID.
    * @property {string} name Exists only inside the index ciphertext.
+   * @property {boolean} [autoName] True while the name follows the note's title,
+   *   false once the user renames it. Entries indexed before names followed
+   *   titles have none; see followsTitle.
    * @property {?string} folderId null for a note at the root.
    * @property {boolean} trashed
    * @property {?string} deletedAt ISO stamp, set while trashed.
@@ -162,22 +169,34 @@
    * `trashed`/`deletedAt` default to active; orphan recovery passes the server
    * row's trash state so a re-adopted note keeps it rather than silently
    * climbing back out of Trash. A folderId that no longer exists falls back to
-   * the root.
+   * the root. `autoName` defaults to true only when the name is blank, since
+   * the placeholder it gets then is one no user chose.
    *
    * @param {VaultIndexData} index
-   * @param {{id: string, name: ?string, folderId?: ?string, createdAt?: string,
-   *   updatedAt?: string, trashed?: boolean, deletedAt?: ?string}} entry
+   * @param {{id: string, name?: ?string, folderId?: ?string, createdAt?: string,
+   *   updatedAt?: string, trashed?: boolean, deletedAt?: ?string,
+   *   autoName?: boolean}} entry
    * @returns {VaultIndexData}
    */
   function addNote(
     index,
-    { id, name, folderId = null, createdAt, updatedAt, trashed = false, deletedAt = null },
+    {
+      id,
+      name,
+      folderId = null,
+      createdAt,
+      updatedAt,
+      trashed = false,
+      deletedAt = null,
+      autoName = !cleanName(name),
+    },
   ) {
     const next = clone(index);
     const stamp = nowIso();
     next.notes.push({
       id,
       name: cleanName(name) || defaultName(index),
+      autoName: !!autoName,
       folderId: folderExists(next, folderId) ? folderId : null,
       trashed: !!trashed,
       deletedAt: trashed ? deletedAt || stamp : null,
@@ -190,6 +209,9 @@
   /**
    * Rename a note. A blank name or an unknown id is a no-op.
    *
+   * The name is the user's from now on: saves stop renaming the note after
+   * its title.
+   *
    * @param {VaultIndexData} index
    * @param {string} id
    * @param {?string} name
@@ -199,7 +221,48 @@
     const cleaned = cleanName(name);
     const next = clone(index);
     const note = next.notes.find((item) => item.id === id);
-    if (note && cleaned) note.name = cleaned;
+    if (note && cleaned) {
+      note.name = cleaned;
+      note.autoName = false;
+    }
+    return next;
+  }
+
+  /**
+   * Whether a note's name follows its title.
+   *
+   * Entries indexed before names followed titles have no autoName. Only the
+   * untitled placeholders the vault gave them are safe to replace; any other
+   * name may be one the user typed.
+   *
+   * @param {NoteEntry} note
+   * @returns {boolean}
+   */
+  function followsTitle(note) {
+    if (typeof note.autoName === "boolean") return note.autoName;
+    return DEFAULT_NAME_PATTERN.test(note.name);
+  }
+
+  /**
+   * Name a note after its title, unless the user has renamed it.
+   *
+   * vault.js calls this on every save, so the name follows title edits. A
+   * title another note already uses gets the next free number, as untitled
+   * notes do.
+   *
+   * @param {VaultIndexData} index
+   * @param {string} id
+   * @param {string} slug The title as NoteMarkdown.titleSlug derives it, or ""
+   *   when the note has no usable title.
+   * @returns {VaultIndexData}
+   */
+  function nameFromTitle(index, id, slug) {
+    const next = clone(index);
+    const note = next.notes.find((item) => item.id === id);
+    if (note && followsTitle(note)) {
+      note.name = uniqueName(next, (slug || DEFAULT_NOTE_STEM) + NOTE_EXTENSION, id);
+      note.autoName = true;
+    }
     return next;
   }
 
@@ -290,17 +353,32 @@
   // --- Queries ---
 
   /**
+   * First variant of a name no other note uses: "x.md", then "x-2.md", ...
+   *
+   * @param {VaultIndexData} index
+   * @param {string} name Wanted name, ending in NOTE_EXTENSION.
+   * @param {?string} [exceptId] Note whose own name does not count as taken.
+   * @returns {string}
+   */
+  function uniqueName(index, name, exceptId = null) {
+    const taken = new Set(
+      index.notes.filter((note) => note.id !== exceptId).map((note) => note.name),
+    );
+    if (!taken.has(name)) return name;
+    const stem = name.slice(0, -NOTE_EXTENSION.length);
+    let counter = 2;
+    while (taken.has(stem + "-" + counter + NOTE_EXTENSION)) counter++;
+    return stem + "-" + counter + NOTE_EXTENSION;
+  }
+
+  /**
    * First unused default note name: "untitled.md", then "untitled-2.md", ...
    *
    * @param {VaultIndexData} index
    * @returns {string}
    */
   function defaultName(index) {
-    const taken = new Set(index.notes.map((note) => note.name));
-    if (!taken.has(DEFAULT_NOTE_NAME)) return DEFAULT_NOTE_NAME;
-    let counter = 2;
-    while (taken.has("untitled-" + counter + ".md")) counter++;
-    return "untitled-" + counter + ".md";
+    return uniqueName(index, DEFAULT_NOTE_NAME);
   }
 
   /**
@@ -423,6 +501,7 @@
     deleteFolder,
     addNote,
     renameNote,
+    nameFromTitle,
     moveNote,
     trashNote,
     restoreNote,

@@ -424,12 +424,18 @@ html:has(.note-view) {
   z-index: 2;
   display: flex;
   gap: 4px;
+  width: max-content;
   transform: translateX(calc(-100% - 28px));
   pointer-events: none;
 }
 
-.presence-flag,
-.presence-caret[data-name]::after {
+.presence-flags--beside {
+  transform: none;
+}
+
+.presence-flag {
+  display: flex;
+  align-items: center;
   padding: 0 6px;
   background: var(--cc);
   color: var(--color-pitch-black);
@@ -438,22 +444,7 @@ html:has(.note-view) {
   font-family: var(--font-primary);
   font-size: 10px;
   font-weight: 400;
-}
-
-.presence-flag {
-  display: flex;
-  align-items: center;
   line-height: 1;
-}
-
-.presence-caret[data-name]::after {
-  content: attr(data-name);
-  position: absolute;
-  bottom: 100%;
-  left: -1px;
-  margin-bottom: 2px;
-  border-bottom-left-radius: 0;
-  line-height: 1.6;
 }
 
 .presence-selection {

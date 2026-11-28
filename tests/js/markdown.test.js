@@ -34,7 +34,8 @@ const source = fs.readFileSync(
 );
 vm.runInThisContext(source, { filename: "markdown.js" });
 
-const { isHighlightLanguageClass, slugifyHeading, isBlockedImageSrc } = window.NoteMarkdown;
+const { isHighlightLanguageClass, slugifyHeading, isBlockedImageSrc, titleSlug } =
+  window.NoteMarkdown;
 
 describe("isHighlightLanguageClass", () => {
   test("accepts bare language tokens marked emits", () => {
@@ -163,5 +164,40 @@ describe("isBlockedImageSrc", () => {
   test("an absent src is not a blocked image", () => {
     assert.equal(isBlockedImageSrc("", ORIGIN), false);
     assert.equal(isBlockedImageSrc(null, ORIGIN), false);
+  });
+});
+
+describe("titleSlug", () => {
+  test("slugs the first heading, or the first non-empty line without one", () => {
+    assert.equal(titleSlug("# Weekly Plan\n\nbody"), "weekly-plan");
+    assert.equal(titleSlug("\n   \n  Plain first line  \n# Later heading"), "plain-first-line");
+  });
+
+  test("keeps letters and digits of any script", () => {
+    assert.equal(titleSlug("# Einkaufsliste für Straße 12"), "einkaufsliste-für-straße-12");
+    assert.equal(titleSlug("## Заметки о встрече"), "заметки-о-встрече");
+    assert.equal(titleSlug("# 会議メモ"), "会議メモ");
+    // A decomposed "é" (e + combining accent) comes out as the composed letter.
+    assert.equal(titleSlug("# Cafe\u0301 notes"), "caf\u00e9-notes");
+  });
+
+  test("turns every other run of characters into one hyphen, trimmed at the ends", () => {
+    assert.equal(titleSlug("# **Bold** — title! (draft)"), "bold-title-draft");
+    assert.equal(titleSlug("- [ ] buy_milk"), "buy-milk");
+  });
+
+  test("falls back when the title has no letters or digits", () => {
+    assert.equal(titleSlug(""), "note");
+    assert.equal(titleSlug("# !!! 🎉", "untitled"), "untitled");
+    assert.equal(titleSlug("# !!!", ""), "");
+  });
+
+  test("caps the length by character without leaving a dangling hyphen or half a letter", () => {
+    assert.equal(titleSlug("# " + "a".repeat(59) + " b"), "a".repeat(59));
+
+    // U+20000 is a CJK letter outside the BMP: two UTF-16 units per character.
+    const slug = titleSlug("# " + "\u{20000}".repeat(70));
+    assert.equal(Array.from(slug).length, 60);
+    assert.ok(slug.isWellFormed());
   });
 });

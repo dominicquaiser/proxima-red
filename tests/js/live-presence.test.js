@@ -126,6 +126,31 @@ describe("groupByLine", () => {
   });
 });
 
+describe("besideCaretsLeft", () => {
+  // A 390px phone editor with a 2px caret; the row is 50px wide, 4px off the caret.
+  const MIN_LEFT = 0;
+  const MAX_RIGHT = 390;
+
+  test("puts the row right of the line's last caret while it fits", () => {
+    assert.equal(Presence.besideCaretsLeft(100, 102, 50, MIN_LEFT, MAX_RIGHT), 106);
+    // Exactly touching the right bound still fits.
+    assert.equal(Presence.besideCaretsLeft(334, 336, 50, MIN_LEFT, MAX_RIGHT), 340);
+  });
+
+  test("falls back to the left of the line's first caret", () => {
+    assert.equal(Presence.besideCaretsLeft(350, 352, 50, MIN_LEFT, MAX_RIGHT), 296);
+    // Carets sharing a line: right of the last, else left of the first.
+    assert.equal(Presence.besideCaretsLeft(200, 352, 50, MIN_LEFT, MAX_RIGHT), 146);
+  });
+
+  test("with room on neither side, pins the row inside on the roomier side", () => {
+    // 120px row; carets span 40..330: 56px free on the right, 36px on the left.
+    assert.equal(Presence.besideCaretsLeft(40, 330, 120, MIN_LEFT, MAX_RIGHT), 270);
+    // Carets span 70..370: 16px free on the right, 66px on the left.
+    assert.equal(Presence.besideCaretsLeft(70, 370, 120, MIN_LEFT, MAX_RIGHT), 0);
+  });
+});
+
 describe("awareness round trip with presence-shaped state", () => {
   test("cursor + identity survive encode -> encrypt -> decrypt -> apply", async () => {
     const key = await CryptoCore.generateEncryptionKey();

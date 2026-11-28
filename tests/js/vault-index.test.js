@@ -70,6 +70,7 @@ describe("immutability", () => {
     Index.deleteFolder(index, "folder-1");
     Index.addNote(index, { id: "x", name: "x.md" });
     Index.renameNote(index, "note-ml", "renamed.md");
+    Index.nameFromTitle(index, "note-root", "groceries");
     Index.moveNote(index, "note-ml", "folder-2");
     Index.trashNote(index, "note-ml");
     Index.restoreNote(index, "note-diary");
@@ -203,6 +204,67 @@ describe("notes", () => {
   test("touchNote bumps updatedAt", () => {
     const next = Index.touchNote(sampleIndex(), "note-ml", "2026-07-12T00:00:00Z");
     assert.equal(next.notes.find((n) => n.id === "note-ml").updatedAt, "2026-07-12T00:00:00Z");
+  });
+});
+
+describe("names that follow the title", () => {
+  const find = (index, id) => index.notes.find((note) => note.id === id);
+
+  test("addNote lets only a generated name follow the title", () => {
+    let index = Index.addNote(Index.createEmpty(), { id: "blank" });
+    index = Index.addNote(index, { id: "given", name: "given.md" });
+    index = Index.addNote(index, { id: "titled", name: "titled.md", autoName: true });
+    assert.equal(find(index, "blank").name, "untitled.md");
+    assert.equal(find(index, "blank").autoName, true);
+    assert.equal(find(index, "given").autoName, false);
+    assert.equal(find(index, "titled").autoName, true);
+  });
+
+  test("nameFromTitle names the note after its title", () => {
+    const index = Index.addNote(Index.createEmpty(), { id: "a" });
+    const next = Index.nameFromTitle(index, "a", "groceries");
+    assert.equal(find(next, "a").name, "groceries.md");
+    assert.equal(find(next, "a").autoName, true);
+  });
+
+  test("nameFromTitle numbers a title another note uses, but never the note's own", () => {
+    let index = Index.addNote(Index.addNote(Index.createEmpty(), { id: "a" }), { id: "b" });
+    index = Index.nameFromTitle(index, "a", "meeting");
+    index = Index.nameFromTitle(index, "b", "meeting");
+    assert.equal(find(index, "a").name, "meeting.md");
+    assert.equal(find(index, "b").name, "meeting-2.md");
+
+    // Saving either note again leaves both names where they are.
+    index = Index.nameFromTitle(Index.nameFromTitle(index, "b", "meeting"), "a", "meeting");
+    assert.equal(find(index, "a").name, "meeting.md");
+    assert.equal(find(index, "b").name, "meeting-2.md");
+  });
+
+  test("nameFromTitle falls back to an untitled name when there is no title", () => {
+    let index = Index.addNote(Index.createEmpty(), { id: "other", name: "untitled.md" });
+    index = Index.addNote(index, { id: "a", name: "groceries.md", autoName: true });
+    assert.equal(find(Index.nameFromTitle(index, "a", ""), "a").name, "untitled-2.md");
+  });
+
+  test("a renamed note keeps its name through later title changes", () => {
+    let index = Index.addNote(Index.createEmpty(), { id: "a" });
+    index = Index.renameNote(index, "a", "shopping.md");
+    assert.equal(find(index, "a").autoName, false);
+    assert.equal(find(Index.nameFromTitle(index, "a", "groceries"), "a").name, "shopping.md");
+  });
+
+  test("an entry from before names followed titles follows only an untitled placeholder", () => {
+    // sampleIndex entries all get explicit flags; strip them to mimic old entries.
+    const legacy = (id, name) => ({ ...find(sampleIndex(), "note-root"), id, name });
+    let index = Index.createEmpty();
+    index.notes = [legacy("placeholder", "untitled-3.md"), legacy("chosen", "plans.md")];
+    index.notes.forEach((note) => delete note.autoName);
+
+    index = Index.nameFromTitle(index, "placeholder", "groceries");
+    index = Index.nameFromTitle(index, "chosen", "groceries");
+    assert.equal(find(index, "placeholder").name, "groceries.md");
+    assert.equal(find(index, "placeholder").autoName, true);
+    assert.equal(find(index, "chosen").name, "plans.md");
   });
 });
 

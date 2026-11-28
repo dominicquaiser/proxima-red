@@ -544,25 +544,27 @@
     };
 
     /**
-     * Add a saved row to the index or update its modification timestamp.
+     * Add a saved row to the index or update its modification timestamp, and
+     * name it after its title unless the user has renamed it.
      *
      * @param {{isNew: boolean, result: Object}} savedRow Metadata from persistNoteRow.
      * @param {string} noteId ID of the saved row.
-     * @param {string} name Buffer name when the save started; used for a new note.
+     * @param {string} slug Title slug of the saved text; "" when it has no title.
      * @returns {Promise<boolean>} Whether the index was persisted.
      */
-    const indexSavedNote = ({ isNew, result }, noteId, name) =>
+    const indexSavedNote = ({ isNew, result }, noteId, slug) =>
       commitIndexChange((idx) =>
-        isNew
-          ? Index.addNote(idx, {
-              id: noteId,
-              // A buffer started while another was saving got the same default
-              // name; whichever is indexed second takes the next free one.
-              name: idx.notes.some((note) => note.name === name) ? Index.defaultName(idx) : name,
-              createdAt: result.created_at,
-              updatedAt: result.updated_at,
-            })
-          : Index.touchNote(idx, noteId, result.updated_at),
+        Index.nameFromTitle(
+          isNew
+            ? Index.addNote(idx, {
+                id: noteId,
+                createdAt: result.created_at,
+                updatedAt: result.updated_at,
+              })
+            : Index.touchNote(idx, noteId, result.updated_at),
+          noteId,
+          slug,
+        ),
       );
 
     /**
@@ -571,8 +573,9 @@
      * A successful content write marks the buffer clean even if indexing fails.
      * Orphan recovery re-adopts unindexed rows on load; the success toast requires
      * both writes to succeed. Once the row write starts, the save finishes with
-     * the text and name it started with. If the editor has switched to another
-     * document by then, that document keeps its own row and saved state.
+     * the text it started with, which also names the note. If the editor has
+     * switched to another document by then, that document keeps its own row and
+     * saved state.
      *
      * @returns {Promise<void>} Resolves after saving or reporting a failure.
      */
@@ -590,7 +593,6 @@
 
       const generation = bufferGeneration;
       const noteId = currentNoteId;
-      const name = currentName;
       if (isInOrMovingToTrash(noteId)) {
         window.Notify.show("This note is in Trash or is being moved there.", "info");
         return;
@@ -601,6 +603,7 @@
         return;
       }
       if (core.noteTooLarge()) return;
+      const slug = window.NoteMarkdown.titleSlug(text, "");
 
       isSaving = true;
       try {
@@ -613,7 +616,7 @@
         const savedNoteId = savedRow.isNew ? savedRow.result.note_id : noteId;
         // Bind a new row only to the buffer it was written from.
         if (bufferGeneration === generation) currentNoteId = savedNoteId;
-        const indexed = await indexSavedNote(savedRow, savedNoteId, name);
+        const indexed = await indexSavedNote(savedRow, savedNoteId, slug);
 
         if (bufferGeneration === generation) {
           lastSavedValue = text;
@@ -1166,6 +1169,7 @@
           index = Index.addNote(index, {
             id,
             name: window.NoteMarkdown.titleSlug(text, "recovered-note") + ".md",
+            autoName: true,
             createdAt: result.created_at,
             updatedAt: result.updated_at,
             trashed: !!result.trashed_at,

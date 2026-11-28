@@ -53,7 +53,7 @@ function descendants(node) {
   return [node, ...(node.children || []).flatMap(descendants)];
 }
 
-async function setup({ trashed = false, flagged = trashed } = {}) {
+async function setup({ trashed = false, flagged = trashed, extraNotes = [] } = {}) {
   const nodes = new Map();
   const getNode = (id) => {
     if (!nodes.has(id)) nodes.set(id, element());
@@ -85,7 +85,7 @@ async function setup({ trashed = false, flagged = trashed } = {}) {
   let stored = {
     version: 1,
     folders: [{ id: "folder", name: "folder", order: 0 }],
-    notes: [note("root"), note("one", "folder"), note("two", "folder")],
+    notes: [note("root"), note("one", "folder"), note("two", "folder"), ...extraNotes],
   };
   const flags = new Map(stored.notes.map(({ id }) => [id, flagged]));
   const requests = [];
@@ -115,6 +115,8 @@ async function setup({ trashed = false, flagged = trashed } = {}) {
       }),
     },
     NoteShare: { init() {} },
+    marked: { use() {} },
+    DOMPurify: { addHook() {} },
     Notify: { show() {} },
     CryptoCore: { encryptWithKey: async (text) => ({ encryptedData: text, iv: "iv" }) },
     PasswordCrypto: { decryptPassword: async (content) => content },
@@ -182,7 +184,12 @@ async function setup({ trashed = false, flagged = trashed } = {}) {
   };
   context.window = context;
   vm.createContext(context);
-  for (const file of ["shared/js/save-queue.js", "note/js/vault-index.js", "note/js/vault.js"]) {
+  for (const file of [
+    "shared/js/save-queue.js",
+    "note/js/markdown.js",
+    "note/js/vault-index.js",
+    "note/js/vault.js",
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "../../static", file), "utf8"), context, {
       filename: file,
     });
@@ -423,7 +430,7 @@ test("a new note's first save that lands after opening another note leaves that 
   await page.finish("/index/");
 
   const names = new Map(page.stored().notes.map(({ id, name }) => [id, name]));
-  assert.equal(names.get("new-note"), "untitled.md", "index the new note under its own name");
+  assert.equal(names.get("new-note"), "draft-text.md", "index the new note under its own name");
   assert.equal(names.get("root"), "root.md");
   assert.equal(page.editorName(), "/root.md");
   assert.equal(page.editorValue(), "Saved note text");
@@ -456,9 +463,60 @@ test("starting a new note while another new note saves keeps the two buffers apa
   assert.deepEqual(
     created.map(({ id, name }) => [id, name]),
     [
-      ["new-note", "untitled.md"],
-      ["new-note-2", "untitled-2.md"],
+      ["new-note", "first-draft.md"],
+      ["new-note-2", "second-draft.md"],
     ],
   );
-  assert.equal(page.editorName(), "/untitled-2.md");
+  assert.equal(page.editorName(), "/second-draft.md");
+});
+
+test("a saved note is named after its title and follows later title edits", async () => {
+  const page = await setup();
+  const savedName = () => page.stored().notes.find(({ id }) => id === "new-note").name;
+  page.edit("# Groceries\n\n- milk");
+  assert.equal(page.editorName(), "/untitled.md", "an unsaved buffer keeps its placeholder");
+  await page.saveNote();
+  await page.finish("/notes/");
+  await page.finish("/index/");
+  assert.equal(savedName(), "groceries.md");
+  assert.equal(page.editorName(), "/groceries.md");
+
+  page.edit("# Weekly groceries\n\n- milk");
+  await page.saveNote();
+  await page.finish("/notes/new-note/");
+  await page.finish("/index/");
+  assert.equal(savedName(), "weekly-groceries.md");
+  assert.equal(page.editorName(), "/weekly-groceries.md");
+});
+
+test("saving keeps a name the user chose but replaces an untitled placeholder", async () => {
+  const entry = (id, name, extra = {}) => ({
+    id,
+    name,
+    folderId: null,
+    trashed: false,
+    deletedAt: null,
+    ...extra,
+  });
+  const page = await setup({
+    extraNotes: [
+      entry("renamed", "shopping.md", { autoName: false }),
+      // Indexed before names followed titles: no autoName at all.
+      entry("placeholder", "untitled-2.md"),
+    ],
+  });
+  for (const id of ["renamed", "root", "placeholder"]) {
+    await page.openNote(id);
+    await page.finish(`/notes/${id}/`);
+    page.edit("# Weekly plan");
+    await page.saveNote();
+    await page.finish(`/notes/${id}/`);
+    await page.finish("/index/");
+  }
+
+  const names = new Map(page.stored().notes.map(({ id, name }) => [id, name]));
+  assert.equal(names.get("renamed"), "shopping.md", "a renamed note keeps its name");
+  assert.equal(names.get("root"), "root.md", "an older name may be the user's, so it stays");
+  assert.equal(names.get("placeholder"), "weekly-plan.md");
+  assert.equal(page.editorName(), "/weekly-plan.md");
 });

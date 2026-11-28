@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `delete_note` management command for takedown requests: deletes one shared note or live note by the UUID in its link, as `delete_share` does for password shares (see *Takedown requests* in `docs/deployment.md`).
+- `[note·]` vault notes are named after their title (the first heading or line) when saved, and the name follows later title changes. A note you rename keeps your name. Existing notes still called `untitled.md` take their title the next time they are saved.
+
+### Changed
+
+- On phones and other narrow screens, `[note·]` live notes show each collaborator's name beside their cursor in the same style as on desktop: to the right, or to the left when the line has no room. It used to sit in a small tab above the cursor. Collaborators on the same line share one row of names.
 
 ### Fixed
 
@@ -21,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opening or starting another note while a new `[note·]` vault note is still saving no longer mixes the two up. The new note keeps its own name, and the next save goes to the note that is open.
 - `[note·]` preserves line breaks in previews and shared notes instead of collapsing them into spaces.
 - The `[note·]` editor cursor stays visible while typing or moving it; blinking resumes when editing pauses.
+- Deleting or typing in the middle of a long `[note·]` note no longer scrolls the line you are editing to the bottom of the window. In a live note, a collaborator's edit no longer scrolls other readers back to the top.
+- Downloaded `[note·]` files keep letters such as ä, ö, ü and ß in their names instead of dropping them.
 - Opening a password share removes the key from the address bar straight away, not only once the secret is revealed or copied.
 
 ## [2.0.0] — 2026-10-26
